@@ -37,7 +37,7 @@ export default function ProfileScreen() {
   };
 
   const handleCreateBusiness = () => {
-    Alert.alert('Coming Soon', 'Business onboarding flow will be available soon');
+    router.push('/business/onboarding' as any);
   };
 
   const toggleMode = () => {
@@ -88,19 +88,28 @@ export default function ProfileScreen() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Account</Text>
-        <TouchableOpacity style={styles.menuItem}>
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => router.push('/saved-events' as any)}
+        >
           <View style={styles.menuItemLeft}>
             <Text style={styles.menuItemText}>Saved Events</Text>
           </View>
           <ChevronRight size={20} color={Colors.text.tertiary} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.menuItem}>
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => Alert.alert('Coming Soon', 'Following list will be available soon')}
+        >
           <View style={styles.menuItemLeft}>
             <Text style={styles.menuItemText}>Following</Text>
           </View>
           <ChevronRight size={20} color={Colors.text.tertiary} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.menuItem}>
+        <TouchableOpacity
+          style={styles.menuItem}
+          onPress={() => Alert.alert('Coming Soon', 'Settings will be available soon')}
+        >
           <View style={styles.menuItemLeft}>
             <Text style={styles.menuItemText}>Settings</Text>
           </View>
