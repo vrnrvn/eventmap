@@ -5,17 +5,13 @@ export const authService = {
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: { name },
+      },
     });
 
     if (authError) throw authError;
     if (!authData.user) throw new Error('No user data returned');
-
-    const { error: profileError } = await supabase.from('profiles').insert({
-      id: authData.user.id,
-      name,
-    });
-
-    if (profileError) throw profileError;
 
     return authData;
   },

@@ -10,7 +10,7 @@ type AuthContextType = {
   profile: Profile | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, name: string) => Promise<void>;
+  signUp: (email: string, password: string, name: string) => Promise<{ user: User } | null>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 };
@@ -75,7 +75,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(data.user);
     if (data.user) {
       await loadProfile(data.user.id);
+      return { user: data.user };
     }
+    return null;
   };
 
   const signOut = async () => {
