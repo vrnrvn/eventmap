@@ -43,6 +43,8 @@ export const eventsService = {
     lng: number;
     address: string;
     coverImageUrl?: string | null;
+    isRecurring?: boolean;
+    recurrencePattern?: { frequency: 'daily' | 'weekly' | 'monthly'; interval: number; endDate?: string } | null;
   }): Promise<string> {
     const { data, error } = await supabase.rpc('create_event_with_limit_check', {
       p_business_id: eventData.businessId,
@@ -55,6 +57,8 @@ export const eventsService = {
       p_lng: eventData.lng,
       p_address: eventData.address,
       p_cover_image_url: eventData.coverImageUrl || null,
+      p_is_recurring: eventData.isRecurring ?? false,
+      p_recurrence_pattern: eventData.recurrencePattern ?? null,
     });
 
     if (error) throw error;
@@ -76,15 +80,34 @@ export const eventsService = {
     if (error) throw error;
   },
 
-  async getBusinessEvents(businessId: string): Promise<Event[]> {
-    const { data, error } = await supabase
+  async getBusinessEvents(
+    businessId: string,
+    opts?: { limit?: number; offset?: number }
+  ): Promise<Event[]> {
+    const limit = opts?.limit ?? 50;
+    const offset = opts?.offset ?? 0;
+
+    let query = supabase
       .from('events')
       .select('*')
       .eq('business_id', businessId)
-      .order('start_datetime', { ascending: true });
+      .order('start_datetime', { ascending: true })
+      .range(offset, offset + limit - 1);
+
+    const { data, error } = await query;
 
     if (error) throw error;
     return data || [];
+  },
+
+  async getBusinessEventsCount(businessId: string): Promise<number> {
+    const { count, error } = await supabase
+      .from('events')
+      .select('*', { count: 'exact', head: true })
+      .eq('business_id', businessId);
+
+    if (error) throw error;
+    return count ?? 0;
   },
 
   async addEventLink(

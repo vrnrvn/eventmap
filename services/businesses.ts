@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { profilesService } from './profiles';
 import { Business } from '@/types/database';
 
 export const businessesService = {
@@ -33,6 +34,8 @@ export const businessesService = {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) throw new Error('Not authenticated');
+
+    await profilesService.ensureProfileExists(user.id, user.user_metadata?.name ?? user.email ?? '');
 
     const { data, error } = await supabase
       .from('businesses')

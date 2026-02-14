@@ -12,8 +12,11 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { businessesService } from '@/services/businesses';
+import { geocodingService } from '@/services/geocoding';
 import { useApp } from '@/contexts/AppContext';
 import { Input } from '@/components/Input';
+import { AddressSearchInput } from '@/components/AddressSearchInput';
+import { GoogleMapView } from '@/components/GoogleMapView';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { ArrowLeft } from 'lucide-react-native';
 
@@ -121,21 +124,26 @@ export default function BusinessOnboarding() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => (step === 1 ? router.back() : setStep(1))}
-        >
-          <ArrowLeft size={24} color={Colors.text.primary} />
-        </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.backButton}
+        onPress={() => (step === 1 ? router.back() : setStep(1))}
+      >
+        <ArrowLeft size={24} color={Colors.text.primary} />
+      </TouchableOpacity>
 
-        <View style={styles.content}>
-          <Text style={styles.title}>Create Business Profile</Text>
-          <Text style={styles.subtitle}>
-            Step {step} of 2 - {step === 1 ? 'Basic Info' : 'Details'}
-          </Text>
+      <View style={styles.content}>
+        <Text style={styles.title}>Create Business Profile</Text>
+        <Text style={styles.subtitle}>
+          Step {step} of 2 - {step === 1 ? 'Basic Info' : 'Details'}
+        </Text>
 
-          {step === 1 && (
+        {step === 1 && (
+            <ScrollView
+              style={styles.step1Scroll}
+              contentContainerStyle={styles.step1ScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
             <View style={styles.form}>
               <Input
                 label="Business Name"
@@ -177,63 +185,112 @@ export default function BusinessOnboarding() {
                 <Text style={styles.errorText}>{errors.category}</Text>
               )}
 
-              <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={handleNext}
-              >
-                <Text style={styles.primaryButtonText}>Next</Text>
-              </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={handleNext}
+            >
+              <Text style={styles.primaryButtonText}>Next</Text>
+            </TouchableOpacity>
+          </View>
+            </ScrollView>
+        )}
+
+        {step === 2 && (
+          <>
+            <Text style={styles.tapHint}>Tap on the map to set exact location</Text>
+            <View style={styles.mapPreview}>
+              <GoogleMapView
+                center={{ lat: formData.lat, lng: formData.lng }}
+                zoom={15}
+                markers={[
+                  {
+                    id: 'business',
+                    lat: formData.lat,
+                    lng: formData.lng,
+                    title: formData.name || 'Business location',
+                  },
+                ]}
+                style={styles.mapPreviewInner}
+                onMapPress={async (lat, lng) => {
+                  const result = await geocodingService.reverseGeocode(lat, lng, {
+                    preferAddress: true,
+                  });
+                  if (result) {
+                    setFormData((f) => ({
+                      ...f,
+                      address: result.formattedAddress,
+                      lat: result.lat,
+                      lng: result.lng,
+                    }));
+                  }
+                }}
+              />
             </View>
+          </>
+        )}
+      </View>
+
+      {step === 2 && (
+        <ScrollView
+          style={styles.formScroll}
+          contentContainerStyle={styles.formScrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Input
+            label="Description"
+            value={formData.description}
+            onChangeText={(text) =>
+              setFormData({ ...formData, description: text })
+            }
+            placeholder="Tell people about your business"
+            multiline
+            numberOfLines={4}
+            style={styles.textArea}
+            error={errors.description}
+          />
+
+          <AddressSearchInput
+            label="Business address"
+            value={formData.address}
+            onChangeText={(text) =>
+              setFormData((f) => ({ ...f, address: text }))
+            }
+            onSelect={(result) =>
+              setFormData((f) => ({
+                ...f,
+                address: result.formattedAddress,
+                lat: result.lat,
+                lng: result.lng,
+              }))
+            }
+            placeholder="Building, street address, business or condo name"
+            error={errors.address}
+            approximate={false}
+            addressPrecision="full"
+            showSetButton
+          />
+          {formData.address && (
+            <Text style={styles.locationHint}>
+              Pin at {formData.lat.toFixed(4)}, {formData.lng.toFixed(4)}
+            </Text>
           )}
 
-          {step === 2 && (
-            <View style={styles.form}>
-              <Input
-                label="Description"
-                value={formData.description}
-                onChangeText={(text) =>
-                  setFormData({ ...formData, description: text })
-                }
-                placeholder="Tell people about your business"
-                multiline
-                numberOfLines={4}
-                style={styles.textArea}
-                error={errors.description}
-              />
-
-              <Input
-                label="Address"
-                value={formData.address}
-                onChangeText={(text) =>
-                  setFormData({ ...formData, address: text })
-                }
-                placeholder="Business address"
-                error={errors.address}
-              />
-
-              <View style={styles.infoBox}>
-                <Text style={styles.infoText}>
-                  📍 Location will be set to San Francisco (default). You can update this later.
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={handleSubmit}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color={Colors.text.inverse} />
-                ) : (
-                  <Text style={styles.primaryButtonText}>
-                    Create Business Profile
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-      </ScrollView>
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={handleSubmit}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color={Colors.text.inverse} />
+            ) : (
+              <Text style={styles.primaryButtonText}>
+                Create Business Profile
+              </Text>
+            )}
+          </TouchableOpacity>
+        </ScrollView>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -245,6 +302,19 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
+  },
+  formScroll: {
+    flex: 1,
+  },
+  formScrollContent: {
+    paddingHorizontal: Spacing.xl,
+    paddingBottom: Spacing.xxl,
+  },
+  step1Scroll: {
+    flex: 1,
+  },
+  step1ScrollContent: {
+    paddingBottom: Spacing.xxl,
   },
   backButton: {
     padding: Spacing.md,
@@ -306,15 +376,26 @@ const styles = StyleSheet.create({
     height: 100,
     textAlignVertical: 'top',
   },
-  infoBox: {
-    backgroundColor: Colors.background.secondary,
-    padding: Spacing.md,
-    borderRadius: BorderRadius.md,
-    marginBottom: Spacing.lg,
+  locationHint: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.text.tertiary,
+    marginTop: Spacing.xs,
+    marginBottom: Spacing.md,
   },
-  infoText: {
+  tapHint: {
     fontSize: Typography.sizes.sm,
     color: Colors.text.secondary,
+    marginBottom: Spacing.sm,
+  },
+  mapPreview: {
+    height: 320,
+    borderRadius: BorderRadius.lg,
+    overflow: 'hidden',
+    marginBottom: Spacing.lg,
+  },
+  mapPreviewInner: {
+    flex: 1,
+    minHeight: 320,
   },
   primaryButton: {
     backgroundColor: Colors.primary,

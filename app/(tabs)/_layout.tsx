@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router';
 import { Colors } from '@/constants/theme';
-import { Map, Compass, PlusCircle, Bell, User } from 'lucide-react-native';
+import { Compass, PlusCircle, Bell, User } from 'lucide-react-native';
 
 export default function TabsLayout() {
   return (
@@ -16,13 +16,6 @@ export default function TabsLayout() {
         },
       }}
     >
-      <Tabs.Screen
-        name="map"
-        options={{
-          title: 'Map',
-          tabBarIcon: ({ size, color }) => <Map size={size} color={color} />,
-        }}
-      />
       <Tabs.Screen
         name="discover"
         options={{

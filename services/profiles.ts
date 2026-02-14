@@ -2,6 +2,14 @@ import { supabase } from './supabase';
 import { Profile } from '@/types/database';
 
 export const profilesService = {
+  async ensureProfileExists(userId: string, name?: string): Promise<void> {
+    const { error } = await supabase.rpc('ensure_profile_exists', {
+      p_user_id: userId,
+      p_name: name ?? '',
+    });
+    if (error) throw error;
+  },
+
   async getProfile(userId: string): Promise<Profile | null> {
     const { data, error } = await supabase
       .from('profiles')
