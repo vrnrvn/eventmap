@@ -13,14 +13,19 @@ import {
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/Input';
+import { AddressSearchInput } from '@/components/AddressSearchInput';
+import { profilesService } from '@/services/profiles';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { ArrowLeft } from 'lucide-react-native';
 
 export default function SignupScreen() {
-  const { signUp } = useAuth();
+  const { signUp, refreshProfile } = useAuth();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [city, setCity] = useState('');
+  const [cityLat, setCityLat] = useState<number | null>(null);
+  const [cityLng, setCityLng] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{
     name?: string;
@@ -56,8 +61,16 @@ export default function SignupScreen() {
 
     setLoading(true);
     try {
-      await signUp(email, password, name);
-      router.replace('/(tabs)/map');
+      const data = await signUp(email, password, name);
+      if (data?.user && city.trim() && cityLat != null && cityLng != null) {
+        await profilesService.updateProfile(data.user.id, {
+          city,
+          lat: cityLat,
+          lng: cityLng,
+        });
+        await refreshProfile();
+      }
+      router.replace('/(tabs)/discover');
     } catch (error: any) {
       Alert.alert('Sign Up Failed', error.message || 'Please try again');
     } finally {
@@ -70,7 +83,10 @@ export default function SignupScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => router.back()}
@@ -108,6 +124,25 @@ export default function SignupScreen() {
               placeholder="At least 6 characters"
               secureTextEntry
               error={errors.password}
+            />
+
+            <AddressSearchInput
+              label="City or area (optional)"
+              value={city}
+              onChangeText={(text) => {
+                setCity(text);
+                if (!text.trim()) {
+                  setCityLat(null);
+                  setCityLng(null);
+                }
+              }}
+              onSelect={(result) => {
+                setCity(result.formattedAddress);
+                setCityLat(result.lat);
+                setCityLng(result.lng);
+              }}
+              placeholder="e.g. San Francisco, Bay Area"
+              approximate
             />
 
             <TouchableOpacity

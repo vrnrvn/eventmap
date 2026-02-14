@@ -2,6 +2,10 @@ export type Profile = {
   id: string;
   name: string;
   avatar_url: string | null;
+  city: string | null;
+  lat: number | null;
+  lng: number | null;
+  hobbies: string | null;
   created_at: string;
 };
 
@@ -17,6 +21,7 @@ export type Business = {
   lat: number;
   lng: number;
   logo_url: string | null;
+  contact_email: string | null;
   verified: boolean;
   subscription_tier: SubscriptionTier;
   subscription_expires_at: string | null;
@@ -34,6 +39,12 @@ export type Category = {
   created_at: string;
 };
 
+export type RecurrencePattern = {
+  frequency: 'daily' | 'weekly' | 'monthly';
+  interval: number;
+  endDate?: string;
+};
+
 export type Event = {
   id: string;
   business_id: string;
@@ -46,6 +57,8 @@ export type Event = {
   lng: number;
   address: string;
   cover_image_url: string | null;
+  is_recurring?: boolean;
+  recurrence_pattern?: RecurrencePattern | null;
   created_at: string;
   updated_at: string;
 };

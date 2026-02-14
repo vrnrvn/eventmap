@@ -48,7 +48,7 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await signIn(email, password);
-      router.replace('/(tabs)/map');
+      router.replace('/(tabs)/discover');
     } catch (error: any) {
       Alert.alert('Sign In Failed', error.message || 'Please try again');
     } finally {
@@ -92,6 +92,13 @@ export default function LoginScreen() {
               secureTextEntry
               error={errors.password}
             />
+
+            <TouchableOpacity
+              style={styles.forgotLink}
+              onPress={() => router.push('/(auth)/forgot-password')}
+            >
+              <Text style={styles.forgotLinkText}>Forgot password?</Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.primaryButton}
@@ -148,6 +155,15 @@ const styles = StyleSheet.create({
   },
   form: {
     marginTop: Spacing.lg,
+  },
+  forgotLink: {
+    alignSelf: 'flex-end',
+    marginBottom: Spacing.sm,
+  },
+  forgotLinkText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.primary,
+    fontWeight: Typography.weights.medium,
   },
   primaryButton: {
     backgroundColor: Colors.primary,
