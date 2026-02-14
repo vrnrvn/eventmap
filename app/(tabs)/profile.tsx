@@ -16,6 +16,7 @@ import {
   LogOut,
   ChevronRight,
   Briefcase,
+  Calendar,
 } from 'lucide-react-native';
 
 export default function ProfileScreen() {
@@ -88,6 +89,18 @@ export default function ProfileScreen() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Account</Text>
+        {hasBusiness && (
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => router.push('/my-events' as any)}
+          >
+            <View style={styles.menuItemLeft}>
+              <Calendar size={24} color={Colors.text.primary} />
+              <Text style={styles.menuItemText}>My Events</Text>
+            </View>
+            <ChevronRight size={20} color={Colors.text.tertiary} />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={styles.menuItem}
           onPress={() => router.push('/saved-events' as any)}
@@ -108,7 +121,7 @@ export default function ProfileScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.menuItem}
-          onPress={() => Alert.alert('Coming Soon', 'Settings will be available soon')}
+          onPress={() => router.push('/settings' as any)}
         >
           <View style={styles.menuItemLeft}>
             <Text style={styles.menuItemText}>Settings</Text>
