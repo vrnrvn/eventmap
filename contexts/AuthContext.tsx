@@ -9,6 +9,7 @@ type AuthContextType = {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
+  hasCompletedOnboarding: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, name: string) => Promise<{ user: User } | null>;
   signOut: () => Promise<void>;
@@ -93,6 +94,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const hasCompletedOnboarding = profile?.has_completed_onboarding === true;
+
   return (
     <AuthContext.Provider
       value={{
@@ -100,6 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         profile,
         loading,
+        hasCompletedOnboarding,
         signIn,
         signUp,
         signOut,

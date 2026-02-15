@@ -10,13 +10,16 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { businessesService } from '@/services/businesses';
+import { eventsService } from '@/services/events';
 import { geocodingService } from '@/services/geocoding';
 import { useApp } from '@/contexts/AppContext';
 import { Input } from '@/components/Input';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
 import { GoogleMapView } from '@/components/GoogleMapView';
+import { Avatar } from '@/components/Avatar';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { ArrowLeft } from 'lucide-react-native';
 
@@ -45,6 +48,7 @@ export default function BusinessOnboarding() {
     address: '',
     lat: 37.7749,
     lng: -122.4194,
+    logoUri: null as string | null,
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -85,11 +89,35 @@ export default function BusinessOnboarding() {
     }
   };
 
+  const handleLogoPick = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    setFormData((f) => ({ ...f, logoUri: result.assets[0].uri }));
+  };
+
   const handleSubmit = async () => {
     if (!validateStep2()) return;
 
     setLoading(true);
     try {
+      let logoUrl: string | null = null;
+      if (formData.logoUri) {
+        const ext = formData.logoUri.split('.').pop() || 'jpg';
+        logoUrl = await eventsService.uploadEventImage(
+          {
+            uri: formData.logoUri,
+            name: `logo-${Date.now()}.${ext}`,
+            type: `image/${ext}`,
+          },
+          'logos'
+        );
+      }
+
       await businessesService.createBusiness({
         name: formData.name,
         description: formData.description,
@@ -97,6 +125,7 @@ export default function BusinessOnboarding() {
         address: formData.address,
         lat: formData.lat,
         lng: formData.lng,
+        logoUrl,
       });
 
       await refreshBusiness();
@@ -145,6 +174,17 @@ export default function BusinessOnboarding() {
               showsVerticalScrollIndicator={false}
             >
             <View style={styles.form}>
+              <View style={styles.logoRow}>
+                <Avatar
+                  imageUrl={formData.logoUri}
+                  name={formData.name || 'Business'}
+                  size={80}
+                  editable
+                  onPress={handleLogoPick}
+                />
+                <Text style={styles.logoHint}>Add a logo (optional)</Text>
+              </View>
+
               <Input
                 label="Business Name"
                 value={formData.name}
@@ -339,6 +379,16 @@ const styles = StyleSheet.create({
   },
   form: {
     marginTop: Spacing.lg,
+  },
+  logoRow: {
+    alignItems: 'center',
+    marginBottom: Spacing.lg,
+    gap: Spacing.sm,
+  },
+  logoHint: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
   },
   label: {
     fontSize: Typography.sizes.sm,

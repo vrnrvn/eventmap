@@ -6,6 +6,8 @@ export type Profile = {
   lat: number | null;
   lng: number | null;
   hobbies: string | null;
+  has_completed_onboarding?: boolean;
+  preferred_categories?: string[];
   created_at: string;
 };
 
@@ -72,6 +74,23 @@ export type EventLink = {
   created_at: string;
 };
 
+export type BusinessLink = {
+  id: string;
+  business_id: string;
+  label: string | null;
+  url: string;
+  sort_order: number;
+  created_at: string;
+};
+
+export type BusinessPhoto = {
+  id: string;
+  business_id: string;
+  image_url: string;
+  sort_order: number;
+  created_at: string;
+};
+
 export type EventPhoto = {
   id: string;
   event_id: string;
@@ -101,6 +120,29 @@ export type Follow = {
   id: string;
   user_id: string;
   business_id: string;
+  created_at: string;
+};
+
+export type Review = {
+  id: string;
+  user_id: string;
+  business_id: string;
+  rating: number;
+  text: string | null;
+  business_response: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Notification = {
+  id: string;
+  user_id: string;
+  type: string;
+  title: string;
+  body: string | null;
+  event_id: string | null;
+  business_id: string | null;
+  read: boolean;
   created_at: string;
 };
 

@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
-import { RsvpStatus, Rsvp, Save, Follow } from '@/types/database';
+import { RsvpStatus, Rsvp, Save, Follow, RankedEvent } from '@/types/database';
+import { eventsService } from './events';
 
 export const socialService = {
   async createOrUpdateRsvp(
@@ -133,6 +134,30 @@ export const socialService = {
 
     if (error) throw error;
     return data || [];
+  },
+
+  async getUserSavedEventsWithDetails(): Promise<RankedEvent[]> {
+    const saves = await this.getUserSavedEvents();
+    if (saves.length === 0) return [];
+
+    const events: RankedEvent[] = [];
+    for (const save of saves) {
+      const details = await eventsService.getEventDetails(save.event_id);
+      if (!details) continue;
+      const { event, business, category, rsvp_count, save_count } = details;
+      events.push({
+        ...event,
+        distance_km: 0,
+        is_premium: false,
+        rsvp_count,
+        save_count,
+        business_name: business.name,
+        business_logo_url: business.logo_url,
+        category_label: category.label,
+        category_slug: category.slug,
+      });
+    }
+    return events;
   },
 
   async followBusiness(businessId: string): Promise<void> {

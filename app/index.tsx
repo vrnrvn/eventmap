@@ -4,7 +4,7 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { Colors } from '@/constants/theme';
 
 export default function Index() {
-  const { session, loading } = useAuth();
+  const { session, loading, hasCompletedOnboarding } = useAuth();
 
   if (loading) {
     return (
@@ -14,11 +14,15 @@ export default function Index() {
     );
   }
 
-  if (session) {
-    return <Redirect href="/(tabs)/discover" />;
+  if (!session) {
+    return <Redirect href="/(auth)/welcome" />;
   }
 
-  return <Redirect href="/(auth)/welcome" />;
+  if (!hasCompletedOnboarding) {
+    return <Redirect href="/(onboarding)" />;
+  }
+
+  return <Redirect href="/(tabs)/discover" />;
 }
 
 const styles = StyleSheet.create({

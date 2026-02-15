@@ -70,7 +70,7 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await signIn(email, password);
-      router.replace('/(tabs)/discover');
+      router.replace('/');
     } catch (error: any) {
       Alert.alert('Sign In Failed', error.message || 'Please try again');
     } finally {

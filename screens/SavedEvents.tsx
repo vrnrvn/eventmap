@@ -48,8 +48,8 @@ export default function SavedEvents() {
 
   const loadSavedEvents = async () => {
     try {
-      const saves = await socialService.getUserSavedEvents();
-      setEvents([]);
+      const list = await socialService.getUserSavedEventsWithDetails();
+      setEvents(list);
     } catch (error) {
       console.error('Failed to load saved events:', error);
     } finally {
@@ -185,16 +185,18 @@ export default function SavedEvents() {
                       </Text>
                     </View>
 
-                    <View style={styles.metaRow}>
-                      <View style={styles.metaIconWrap}>
-                        <Navigation size={13} color={Palette.gradientStart} />
+                    {event.distance_km > 0 && (
+                      <View style={styles.metaRow}>
+                        <View style={styles.metaIconWrap}>
+                          <Navigation size={13} color={Palette.gradientStart} />
+                        </View>
+                        <Text style={styles.metaText}>
+                          {event.distance_km < 1
+                            ? `${(event.distance_km * 1000).toFixed(0)} m away`
+                            : `${event.distance_km.toFixed(1)} km away`}
+                        </Text>
                       </View>
-                      <Text style={styles.metaText}>
-                        {event.distance_km < 1
-                          ? `${(event.distance_km * 1000).toFixed(0)} m away`
-                          : `${event.distance_km.toFixed(1)} km away`}
-                      </Text>
-                    </View>
+                    )}
 
                     {event.rsvp_count > 0 && (
                       <View style={styles.metaRow}>

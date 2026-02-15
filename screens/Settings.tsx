@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,8 +17,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import { profilesService } from '@/services/profiles';
 import { businessesService } from '@/services/businesses';
+import { eventsService } from '@/services/events';
 import { Input } from '@/components/Input';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
+import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import {
   ArrowLeft,
@@ -33,6 +35,7 @@ import {
   Navigation,
   Save,
   Check,
+  Image as ImageIcon,
 } from 'lucide-react-native';
 
 const Palette = {
@@ -66,9 +69,16 @@ const BUSINESS_CATEGORIES = [
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { user, profile, refreshProfile } = useAuth();
-  const { userBusiness, refreshBusiness } = useApp();
+  const { userBusiness, refreshBusiness, userMode, hasBusiness } = useApp();
   const [saving, setSaving] = useState<'user' | 'business' | null>(null);
   const [savedSection, setSavedSection] = useState<'user' | 'business' | null>(null);
+
+  const isBizMode = hasBusiness && userMode === 'business';
+  const accentColor = isBizMode ? '#0F766E' : Palette.gradientStart;
+  const accentGradient: [string, string] = isBizMode
+    ? ['#0F766E', '#14B8A6']
+    : [Palette.gradientStart, Palette.gradientEnd];
+  const accentSoft = isBizMode ? 'rgba(15,118,110,0.08)' : Palette.accentSoft;
 
   const [userForm, setUserForm] = useState({
     name: '',
@@ -85,7 +95,9 @@ export default function SettingsScreen() {
     address: '',
     lat: 0,
     lng: 0,
+    venuePhotos: [] as ImageAsset[],
   });
+  const originalVenuePhotoIds = useRef<string[]>([]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -103,14 +115,33 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     if (userBusiness) {
-      setBusinessForm({
-        name: userBusiness.name ?? '',
-        category: userBusiness.category ?? '',
-        contactEmail: userBusiness.contact_email ?? '',
-        address: userBusiness.address ?? '',
-        lat: userBusiness.lat ?? 0,
-        lng: userBusiness.lng ?? 0,
-      });
+      const load = async () => {
+        const photos = await businessesService
+          .getBusinessPhotos(userBusiness.id)
+          .catch(() => []);
+        const venuePhotos: ImageAsset[] = photos
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((p) => ({
+            uri: p.image_url,
+            name: `venue-${p.id}`,
+            type: 'image/jpeg',
+            remoteUrl: p.image_url,
+            photoId: p.id,
+          }));
+        originalVenuePhotoIds.current = venuePhotos
+          .map((img) => img.photoId)
+          .filter(Boolean) as string[];
+        setBusinessForm({
+          name: userBusiness.name ?? '',
+          category: userBusiness.category ?? '',
+          contactEmail: userBusiness.contact_email ?? '',
+          address: userBusiness.address ?? '',
+          lat: userBusiness.lat ?? 0,
+          lng: userBusiness.lng ?? 0,
+          venuePhotos,
+        });
+      };
+      load();
     }
   }, [userBusiness]);
 
@@ -166,6 +197,45 @@ export default function SettingsScreen() {
         lat: businessForm.lat,
         lng: businessForm.lng,
       });
+
+      const { venuePhotos } = businessForm;
+      const currentPhotoIds = venuePhotos.map((img) => img.photoId).filter(Boolean) as string[];
+      const removedIds = originalVenuePhotoIds.current.filter((pid) => !currentPhotoIds.includes(pid));
+      for (const pid of removedIds) {
+        await businessesService.deleteBusinessPhoto(pid);
+      }
+
+      const uploadedUrls: string[] = [];
+      for (const img of venuePhotos) {
+        if (!img.photoId) {
+          const url = await eventsService.uploadEventImage(
+            { uri: img.uri, name: img.name, type: img.type },
+            'venues'
+          );
+          uploadedUrls.push(url);
+        }
+      }
+
+      const existingCount = venuePhotos.filter((i) => i.photoId).length;
+      for (let i = 0; i < uploadedUrls.length; i++) {
+        await businessesService.addBusinessPhoto(userBusiness.id, uploadedUrls[i], existingCount + i);
+      }
+
+      const updatedPhotos = await businessesService.getBusinessPhotos(userBusiness.id);
+      const updatedVenuePhotos: ImageAsset[] = updatedPhotos
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .map((p) => ({
+          uri: p.image_url,
+          name: `venue-${p.id}`,
+          type: 'image/jpeg',
+          remoteUrl: p.image_url,
+          photoId: p.id,
+        }));
+      originalVenuePhotoIds.current = updatedVenuePhotos
+        .map((img) => img.photoId)
+        .filter(Boolean) as string[];
+      setBusinessForm((prev) => ({ ...prev, venuePhotos: updatedVenuePhotos }));
+
       await refreshBusiness();
       showSavedFeedback('business');
     } catch (e) {
@@ -187,10 +257,16 @@ export default function SettingsScreen() {
           <ArrowLeft size={22} color={Colors.text.primary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
-          <View style={styles.headerIconWrap}>
-            <Settings size={18} color={Palette.gradientStart} />
+          <View style={[styles.headerIconWrap, { backgroundColor: accentSoft }]}>
+            {isBizMode ? (
+              <Building2 size={18} color={accentColor} />
+            ) : (
+              <Settings size={18} color={accentColor} />
+            )}
           </View>
-          <Text style={styles.headerTitle}>Settings</Text>
+          <Text style={styles.headerTitle}>
+            {isBizMode ? 'Business Settings' : 'Settings'}
+          </Text>
         </View>
         <View style={styles.headerSpacer} />
       </View>
@@ -208,132 +284,10 @@ export default function SettingsScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* ── User Profile Section ── */}
-          <View style={styles.sectionLabelRow}>
-            <Text style={styles.sectionLabel}>Personal Profile</Text>
-            {savedSection === 'user' && (
-              <View style={styles.savedBadge}>
-                <Check size={12} color={Palette.successDot} />
-                <Text style={styles.savedBadgeText}>Saved</Text>
-              </View>
-            )}
-          </View>
-
-          <View style={styles.card}>
-            {/* Name */}
-            <View style={styles.fieldRow}>
-              <View style={styles.fieldIcon}>
-                <User size={16} color={Palette.gradientStart} />
-              </View>
-              <View style={styles.fieldContent}>
-                <Input
-                  label="Name"
-                  value={userForm.name}
-                  onChangeText={(t) => setUserForm((p) => ({ ...p, name: t }))}
-                  placeholder="Your name"
-                  error={errors.name}
-                />
-              </View>
-            </View>
-
-            <View style={styles.fieldSeparator} />
-
-            {/* Hobbies */}
-            <View style={styles.fieldRow}>
-              <View style={styles.fieldIcon}>
-                <Heart size={16} color={Palette.gradientStart} />
-              </View>
-              <View style={styles.fieldContent}>
-                <Input
-                  label="Hobbies"
-                  value={userForm.hobbies}
-                  onChangeText={(t) =>
-                    setUserForm((p) => ({ ...p, hobbies: t }))
-                  }
-                  placeholder="e.g. hiking, music, cooking"
-                  error={errors.hobbies}
-                />
-              </View>
-            </View>
-
-            <View style={styles.fieldSeparator} />
-
-            {/* Email (read-only) */}
-            <View style={styles.fieldRow}>
-              <View style={[styles.fieldIcon, styles.fieldIconMuted]}>
-                <Mail size={16} color={Colors.text.tertiary} />
-              </View>
-              <View style={styles.fieldContent}>
-                <Input
-                  label="Email"
-                  value={user?.email ?? ''}
-                  editable={false}
-                  placeholder="Email"
-                />
-              </View>
-            </View>
-
-            <View style={styles.fieldSeparator} />
-
-            {/* Location */}
-            <View style={styles.fieldRow}>
-              <View style={styles.fieldIcon}>
-                <MapPin size={16} color={Palette.gradientStart} />
-              </View>
-              <View style={styles.fieldContent}>
-                <AddressSearchInput
-                  label="Location"
-                  value={userForm.city}
-                  onChangeText={(t) =>
-                    setUserForm((p) => ({ ...p, city: t }))
-                  }
-                  onSelect={(r) =>
-                    setUserForm((p) => ({
-                      ...p,
-                      city: r.formattedAddress,
-                      lat: r.lat,
-                      lng: r.lng,
-                    }))
-                  }
-                  placeholder="City or area for event discovery"
-                  approximate
-                />
-              </View>
-            </View>
-          </View>
-
-          {/* Save user */}
-          <TouchableOpacity
-            style={styles.saveWrap}
-            onPress={handleSaveUser}
-            disabled={saving !== null}
-            activeOpacity={0.85}
-          >
-            <LinearGradient
-              colors={
-                saving === 'user'
-                  ? ['#A5B4FC', '#C4B5FD']
-                  : [Palette.gradientStart, Palette.gradientEnd]
-              }
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.saveGradient}
-            >
-              {saving === 'user' ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <>
-                  <Save size={16} color="#FFFFFF" />
-                  <Text style={styles.saveText}>Save Profile</Text>
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
-
-          {/* ── Business Profile Section ── */}
-          {userBusiness && (
+          {isBizMode && userBusiness ? (
             <>
-              <View style={[styles.sectionLabelRow, { marginTop: 32 }]}>
+              {/* ── Business Profile Section ── */}
+              <View style={styles.sectionLabelRow}>
                 <Text style={styles.sectionLabel}>Business Profile</Text>
                 {savedSection === 'business' && (
                   <View style={styles.savedBadge}>
@@ -346,8 +300,8 @@ export default function SettingsScreen() {
               <View style={styles.card}>
                 {/* Business Name */}
                 <View style={styles.fieldRow}>
-                  <View style={styles.fieldIcon}>
-                    <Building2 size={16} color={Palette.gradientStart} />
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Building2 size={16} color={accentColor} />
                   </View>
                   <View style={styles.fieldContent}>
                     <Input
@@ -366,8 +320,8 @@ export default function SettingsScreen() {
 
                 {/* Category */}
                 <View style={styles.fieldRowNoPad}>
-                  <View style={[styles.fieldIcon, { marginTop: 14 }]}>
-                    <Tag size={16} color={Palette.gradientStart} />
+                  <View style={[styles.fieldIcon, { marginTop: 14, backgroundColor: accentSoft }]}>
+                    <Tag size={16} color={accentColor} />
                   </View>
                   <View style={styles.catContainer}>
                     <Text style={styles.catLabel}>Category</Text>
@@ -383,7 +337,7 @@ export default function SettingsScreen() {
                             key={cat}
                             style={[
                               styles.catChip,
-                              selected && styles.catChipSelected,
+                              selected && { backgroundColor: accentColor, borderColor: accentColor },
                             ]}
                             onPress={() =>
                               setBusinessForm((p) => ({ ...p, category: cat }))
@@ -412,8 +366,8 @@ export default function SettingsScreen() {
 
                 {/* Contact Email */}
                 <View style={styles.fieldRow}>
-                  <View style={styles.fieldIcon}>
-                    <AtSign size={16} color={Palette.gradientStart} />
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <AtSign size={16} color={accentColor} />
                   </View>
                   <View style={styles.fieldContent}>
                     <Input
@@ -433,8 +387,8 @@ export default function SettingsScreen() {
 
                 {/* Business Address */}
                 <View style={styles.fieldRow}>
-                  <View style={styles.fieldIcon}>
-                    <Navigation size={16} color={Palette.gradientStart} />
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Navigation size={16} color={accentColor} />
                   </View>
                   <View style={styles.fieldContent}>
                     <AddressSearchInput
@@ -456,6 +410,28 @@ export default function SettingsScreen() {
                     />
                   </View>
                 </View>
+
+                <View style={styles.fieldSeparator} />
+
+                {/* Venue Photos */}
+                <View style={styles.fieldRowNoPad}>
+                  <View style={[styles.fieldIcon, { marginTop: 14, backgroundColor: accentSoft }]}>
+                    <ImageIcon size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Text style={styles.venuePhotosLabel}>Venue Photos</Text>
+                    <Text style={styles.venuePhotosHint}>
+                      Add photos of your venue, gym, or place. Shown on your business page.
+                    </Text>
+                    <ImagePickerButton
+                      images={businessForm.venuePhotos}
+                      onChange={(imgs) =>
+                        setBusinessForm((p) => ({ ...p, venuePhotos: imgs }))
+                      }
+                      maxImages={10}
+                    />
+                  </View>
+                </View>
               </View>
 
               {/* Save business */}
@@ -468,8 +444,8 @@ export default function SettingsScreen() {
                 <LinearGradient
                   colors={
                     saving === 'business'
-                      ? ['#A5B4FC', '#C4B5FD']
-                      : [Palette.gradientStart, Palette.gradientEnd]
+                      ? ['#5EEAD4', '#99F6E4']
+                      : accentGradient
                   }
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
@@ -481,6 +457,130 @@ export default function SettingsScreen() {
                     <>
                       <Save size={16} color="#FFFFFF" />
                       <Text style={styles.saveText}>Save Business</Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              {/* ── User Profile Section ── */}
+              <View style={styles.sectionLabelRow}>
+                <Text style={styles.sectionLabel}>Personal Profile</Text>
+                {savedSection === 'user' && (
+                  <View style={styles.savedBadge}>
+                    <Check size={12} color={Palette.successDot} />
+                    <Text style={styles.savedBadgeText}>Saved</Text>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.card}>
+                {/* Name */}
+                <View style={styles.fieldRow}>
+                  <View style={styles.fieldIcon}>
+                    <User size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Input
+                      label="Name"
+                      value={userForm.name}
+                      onChangeText={(t) => setUserForm((p) => ({ ...p, name: t }))}
+                      placeholder="Your name"
+                      error={errors.name}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.fieldSeparator} />
+
+                {/* Hobbies */}
+                <View style={styles.fieldRow}>
+                  <View style={styles.fieldIcon}>
+                    <Heart size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Input
+                      label="Hobbies"
+                      value={userForm.hobbies}
+                      onChangeText={(t) =>
+                        setUserForm((p) => ({ ...p, hobbies: t }))
+                      }
+                      placeholder="e.g. hiking, music, cooking"
+                      error={errors.hobbies}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.fieldSeparator} />
+
+                {/* Email (read-only) */}
+                <View style={styles.fieldRow}>
+                  <View style={[styles.fieldIcon, styles.fieldIconMuted]}>
+                    <Mail size={16} color={Colors.text.tertiary} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Input
+                      label="Email"
+                      value={user?.email ?? ''}
+                      editable={false}
+                      placeholder="Email"
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.fieldSeparator} />
+
+                {/* Location */}
+                <View style={styles.fieldRow}>
+                  <View style={styles.fieldIcon}>
+                    <MapPin size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <AddressSearchInput
+                      label="Location"
+                      value={userForm.city}
+                      onChangeText={(t) =>
+                        setUserForm((p) => ({ ...p, city: t }))
+                      }
+                      onSelect={(r) =>
+                        setUserForm((p) => ({
+                          ...p,
+                          city: r.formattedAddress,
+                          lat: r.lat,
+                          lng: r.lng,
+                        }))
+                      }
+                      placeholder="City or area for event discovery"
+                      approximate
+                    />
+                  </View>
+                </View>
+              </View>
+
+              {/* Save user */}
+              <TouchableOpacity
+                style={styles.saveWrap}
+                onPress={handleSaveUser}
+                disabled={saving !== null}
+                activeOpacity={0.85}
+              >
+                <LinearGradient
+                  colors={
+                    saving === 'user'
+                      ? ['#A5B4FC', '#C4B5FD']
+                      : accentGradient
+                  }
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.saveGradient}
+                >
+                  {saving === 'user' ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Save size={16} color="#FFFFFF" />
+                      <Text style={styles.saveText}>Save Profile</Text>
                     </>
                   )}
                 </LinearGradient>
@@ -639,6 +739,20 @@ const styles = StyleSheet.create({
   catContainer: {
     flex: 1,
     paddingVertical: 10,
+  },
+  venuePhotosLabel: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.text.secondary,
+    marginBottom: 4,
+  },
+  venuePhotosHint: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+    marginBottom: Spacing.sm,
+    lineHeight: 18,
   },
   catLabel: {
     fontSize: Typography.sizes.xs,

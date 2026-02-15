@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -18,10 +18,11 @@ import { useApp } from '@/contexts/AppContext';
 import { Input } from '@/components/Input';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
 import { GoogleMapView } from '@/components/GoogleMapView';
+import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import { geocodingService } from '@/services/geocoding';
 import { eventsService } from '@/services/events';
 import { categoriesService } from '@/services/categories';
-import { Category } from '@/types/database';
+import { Category, EventPhoto } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
@@ -50,7 +51,10 @@ export default function EditEvent() {
     address: '',
     lat: DEFAULT_LOCATION.lat,
     lng: DEFAULT_LOCATION.lng,
+    images: [] as ImageAsset[],
   });
+  /** Track the original photos loaded from DB to detect removals */
+  const originalPhotoIds = useRef<string[]>([]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -70,6 +74,19 @@ export default function EditEvent() {
           return;
         }
         const e = details.event;
+        const existingImages: ImageAsset[] = (details.photos || [])
+          .sort((a: EventPhoto, b: EventPhoto) => a.sort_order - b.sort_order)
+          .map((p: EventPhoto) => ({
+            uri: p.image_url,
+            name: `existing-${p.id}`,
+            type: 'image/jpeg',
+            remoteUrl: p.image_url,
+            photoId: p.id,
+          }));
+        originalPhotoIds.current = existingImages
+          .map((img) => img.photoId)
+          .filter(Boolean) as string[];
+
         setFormData({
           title: e.title,
           description: e.description,
@@ -79,6 +96,7 @@ export default function EditEvent() {
           address: e.address,
           lat: e.lat,
           lng: e.lng,
+          images: existingImages,
         });
       } catch {
         Alert.alert('Error', 'Failed to load event', [
@@ -141,6 +159,44 @@ export default function EditEvent() {
 
     setSaving(true);
     try {
+      // Detect removed photos and delete them
+      const currentPhotoIds = formData.images
+        .map((img) => img.photoId)
+        .filter(Boolean) as string[];
+      const removedIds = originalPhotoIds.current.filter(
+        (pid) => !currentPhotoIds.includes(pid)
+      );
+      for (const pid of removedIds) {
+        await eventsService.deleteEventPhoto(pid);
+      }
+
+      // Upload new images (no photoId means it's new)
+      const uploadedUrls: string[] = [];
+      for (const img of formData.images) {
+        if (!img.photoId) {
+          const url = await eventsService.uploadEventImage({
+            uri: img.uri,
+            name: img.name,
+            type: img.type,
+          });
+          uploadedUrls.push(url);
+        }
+      }
+
+      // Add new photos to DB
+      const existingCount = formData.images.filter((i) => i.photoId).length;
+      for (let i = 0; i < uploadedUrls.length; i++) {
+        await eventsService.addEventPhoto(id, uploadedUrls[i], existingCount + i);
+      }
+
+      // Determine cover image: first image in the list
+      const firstImage = formData.images[0];
+      const coverImageUrl = firstImage
+        ? firstImage.remoteUrl ||
+          uploadedUrls[formData.images.filter((i) => !i.photoId).indexOf(firstImage)] ||
+          null
+        : null;
+
       await eventsService.updateEvent(id, {
         title: formData.title.trim(),
         description: formData.description.trim(),
@@ -150,6 +206,7 @@ export default function EditEvent() {
         address,
         lat,
         lng,
+        cover_image_url: coverImageUrl,
       });
       Alert.alert('Saved', 'Event updated.', [
         { text: 'OK', onPress: () => router.back() },
@@ -316,6 +373,14 @@ export default function EditEvent() {
         {errors.endDatetime && (
           <Text style={styles.errorText}>{errors.endDatetime}</Text>
         )}
+
+        <Text style={styles.label}>Photos</Text>
+        <Text style={styles.tapHint}>First image becomes the cover photo</Text>
+        <ImagePickerButton
+          images={formData.images}
+          onChange={(imgs) => setFormData((f) => ({ ...f, images: imgs }))}
+          maxImages={5}
+        />
 
         <Text style={styles.label}>Location (optional – defaults to business address)</Text>
         <AddressSearchInput
