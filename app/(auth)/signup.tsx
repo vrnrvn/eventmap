@@ -8,7 +8,8 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
-  Alert,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -56,6 +57,8 @@ export default function SignupScreen() {
     email?: string;
     password?: string;
   }>({});
+  const [showEmailPopup, setShowEmailPopup] = useState(false);
+  const [emailPopupVariant, setEmailPopupVariant] = useState<'new' | 'existing'>('new');
 
   const validateForm = () => {
     const newErrors: { name?: string; email?: string; password?: string } = {};
@@ -94,16 +97,66 @@ export default function SignupScreen() {
         });
         await refreshProfile();
       }
-      router.replace('/(tabs)/discover');
-    } catch (error: any) {
-      Alert.alert('Sign Up Failed', error.message || 'Please try again');
+      setEmailPopupVariant('new');
+      setShowEmailPopup(true);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      const isExistingUser =
+        /already registered|user already exists|email already|already been registered/i.test(msg);
+      if (isExistingUser) {
+        setEmailPopupVariant('existing');
+        setShowEmailPopup(true);
+      } else {
+        setErrors({ email: msg || 'Please try again' });
+      }
     } finally {
       setLoading(false);
     }
   };
 
+  const handleEmailPopupDismiss = () => {
+    setShowEmailPopup(false);
+    router.replace('/');
+  };
+
   return (
     <View style={styles.root}>
+      <Modal
+        visible={showEmailPopup}
+        transparent
+        animationType="fade"
+        onRequestClose={handleEmailPopupDismiss}
+      >
+        <Pressable style={styles.popupOverlay} onPress={handleEmailPopupDismiss}>
+          <Pressable style={styles.popupCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.popupIconWrap}>
+              <Mail size={40} color={Palette.gradientStart} />
+            </View>
+            <Text style={styles.popupTitle}>
+              {emailPopupVariant === 'existing' ? 'Email Already Registered' : 'Check Your Email'}
+            </Text>
+            <Text style={styles.popupMessage}>
+              {emailPopupVariant === 'existing'
+                ? 'This email is already registered. Please check your inbox to verify your account, then sign in to continue with onboarding.'
+                : 'Please check your email to verify your account. Once verified, sign in to continue with onboarding.'}
+            </Text>
+            <TouchableOpacity
+              style={styles.popupButton}
+              onPress={handleEmailPopupDismiss}
+              activeOpacity={0.85}
+            >
+              <LinearGradient
+                colors={[Palette.gradientStart, Palette.gradientEnd]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.popupButtonGradient}
+              >
+                <Text style={styles.popupButtonText}>OK</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -500,5 +553,72 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Palette.gradientStart,
+  },
+
+  /* ── Email popup ── */
+  popupOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  popupCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: Palette.cardBg,
+    borderRadius: 24,
+    padding: 28,
+    alignItems: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.2,
+        shadowRadius: 24,
+      },
+      android: { elevation: 16 },
+    }),
+  },
+  popupIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Palette.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  popupTitle: {
+    fontSize: 20,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: Colors.text.primary,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  popupMessage: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  popupButton: {
+    width: '100%',
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  popupButtonGradient: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  popupButtonText: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: '#FFFFFF',
   },
 });

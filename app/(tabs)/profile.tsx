@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,13 +7,20 @@ import {
   ScrollView,
   Alert,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
+import { profilesService } from '@/services/profiles';
+import { businessesService } from '@/services/businesses';
+import { eventsService } from '@/services/events';
+import { socialService } from '@/services/social';
 import { router } from 'expo-router';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { Avatar } from '@/components/Avatar';
 import {
   User,
   Building2,
@@ -24,6 +32,8 @@ import {
   Heart,
   Settings,
   ArrowLeftRight,
+  Users,
+  BarChart3,
 } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -44,8 +54,63 @@ const Palette = {
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const { profile, signOut } = useAuth();
-  const { hasBusiness, userMode, setUserMode, userBusiness } = useApp();
+  const { profile, signOut, refreshProfile, user } = useAuth();
+  const { hasBusiness, userMode, setUserMode, userBusiness, refreshBusiness } = useApp();
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [stats, setStats] = useState<{
+    events: string;
+    followers: string;
+    following: string;
+    saved: string;
+    views: string;
+  }>({ events: '—', followers: '—', following: '—', saved: '—', views: '—' });
+
+  const isBizMode = hasBusiness && userMode === 'business';
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadStats = async () => {
+      try {
+        if (isBizMode && userBusiness) {
+          const [eventCount, followerCount] = await Promise.all([
+            eventsService.getBusinessEventsCount(userBusiness.id),
+            businessesService.getFollowerCount(userBusiness.id),
+          ]);
+          if (!cancelled) {
+            setStats({
+              events: String(eventCount),
+              followers: String(followerCount),
+              following: '—',
+              saved: '—',
+              views: '—',
+            });
+          }
+        } else {
+          const [follows, saves] = await Promise.all([
+            socialService.getUserFollows(),
+            socialService.getUserSavedEvents(),
+          ]);
+          if (!cancelled) {
+            setStats({
+              events: '—',
+              followers: '—',
+              following: String(follows.length),
+              saved: String(saves.length),
+              views: '—',
+            });
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setStats({ events: '—', followers: '—', following: '—', saved: '—', views: '—' });
+        }
+      }
+    };
+    loadStats();
+    return () => {
+      cancelled = true;
+    };
+  }, [isBizMode, userBusiness?.id]);
 
   const handleSignOut = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -73,12 +138,56 @@ export default function ProfileScreen() {
     setUserMode(userMode === 'user' ? 'business' : 'user');
   };
 
-  const initials = (profile?.name || 'U')
-    .split(' ')
-    .map((w: string) => w[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
+  const handleAvatarPick = async () => {
+    if (!user) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+    const ext = asset.uri.split('.').pop() || 'jpg';
+    setUploadingAvatar(true);
+    try {
+      if (isBizMode && userBusiness) {
+        // Upload business logo
+        const publicUrl = await eventsService.uploadEventImage(
+          {
+            uri: asset.uri,
+            name: `logo-${Date.now()}.${ext}`,
+            type: asset.mimeType || `image/${ext}`,
+          },
+          'logos'
+        );
+        await businessesService.updateBusiness(userBusiness.id, { logo_url: publicUrl });
+        await refreshBusiness();
+      } else {
+        // Upload personal avatar
+        const publicUrl = await profilesService.uploadAvatar({
+          uri: asset.uri,
+          name: `avatar.${ext}`,
+          type: asset.mimeType || `image/${ext}`,
+        });
+        await profilesService.updateProfile(user.id, { avatar_url: publicUrl });
+        await refreshProfile();
+      }
+    } catch {
+      Alert.alert('Error', `Failed to upload ${isBizMode ? 'logo' : 'avatar'}`);
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  // ── Derive header values based on mode ──
+  const headerAvatarUrl = isBizMode ? userBusiness?.logo_url : profile?.avatar_url;
+  const headerName = isBizMode ? (userBusiness?.name || 'Business') : (profile?.name || 'User');
+  const headerSubtitle = isBizMode
+    ? (userBusiness?.category || 'Business')
+    : hasBusiness && userBusiness
+      ? userBusiness.name
+      : 'Event Explorer';
 
   return (
     <View style={styles.root}>
@@ -89,20 +198,39 @@ export default function ProfileScreen() {
       >
         {/* ── Header with gradient ── */}
         <LinearGradient
-          colors={[Palette.gradientStart, Palette.gradientEnd]}
+          colors={
+            isBizMode
+              ? ['#0F766E', '#14B8A6']
+              : [Palette.gradientStart, Palette.gradientEnd]
+          }
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={[styles.headerGradient, { paddingTop: insets.top + Spacing.xl }]}
         >
           <View style={styles.avatarRing}>
-            <View style={styles.avatarInner}>
-              <Text style={styles.avatarInitials}>{initials}</Text>
-            </View>
+            {uploadingAvatar ? (
+              <View style={styles.avatarInner}>
+                <ActivityIndicator color={Palette.textOnGradient} />
+              </View>
+            ) : (
+              <Avatar
+                imageUrl={headerAvatarUrl}
+                name={headerName}
+                size={80}
+                editable
+                onPress={handleAvatarPick}
+              />
+            )}
           </View>
 
-          <Text style={styles.headerName}>{profile?.name || 'User'}</Text>
+          <Text style={styles.headerName}>{headerName}</Text>
 
-          {hasBusiness && userBusiness ? (
+          {isBizMode ? (
+            <View style={styles.businessBadge}>
+              <Building2 size={13} color={Palette.textOnGradient} />
+              <Text style={styles.businessBadgeText}>{userBusiness?.category || 'Business'}</Text>
+            </View>
+          ) : hasBusiness && userBusiness ? (
             <View style={styles.businessBadge}>
               <Building2 size={13} color={Palette.textOnGradient} />
               <Text style={styles.businessBadgeText}>{userBusiness.name}</Text>
@@ -117,8 +245,8 @@ export default function ProfileScreen() {
             onPress={toggleMode}
             activeOpacity={0.8}
           >
-            <ArrowLeftRight size={14} color={Palette.gradientStart} />
-            <Text style={styles.modePillText}>
+            <ArrowLeftRight size={14} color={isBizMode ? '#0F766E' : Palette.gradientStart} />
+            <Text style={[styles.modePillText, isBizMode && { color: '#0F766E' }]}>
               {hasBusiness
                 ? userMode === 'user'
                   ? 'Switch to Business'
@@ -130,15 +258,27 @@ export default function ProfileScreen() {
 
         {/* ── Quick stats row ── */}
         <View style={styles.statsRow}>
-          <StatItem label="Events" value="—" />
-          <View style={styles.statDivider} />
-          <StatItem label="Saved" value="—" />
-          <View style={styles.statDivider} />
-          <StatItem label="Following" value="—" />
+          {isBizMode ? (
+            <>
+              <StatItem label="Events" value={stats.events} />
+              <View style={styles.statDivider} />
+              <StatItem label="Followers" value={stats.followers} />
+              <View style={styles.statDivider} />
+              <StatItem label="Views" value={stats.views} />
+            </>
+          ) : (
+            <>
+              <StatItem label="Events" value={stats.events} />
+              <View style={styles.statDivider} />
+              <StatItem label="Saved" value={stats.saved} />
+              <View style={styles.statDivider} />
+              <StatItem label="Following" value={stats.following} />
+            </>
+          )}
         </View>
 
-        {/* ── Create Business CTA (non-business users) ── */}
-        {!hasBusiness && (
+        {/* ── Create Business CTA (non-business users in user mode) ── */}
+        {!hasBusiness && !isBizMode && (
           <View style={styles.sectionPadding}>
             <TouchableOpacity
               style={styles.createBusinessCard}
@@ -169,51 +309,83 @@ export default function ProfileScreen() {
         )}
 
         {/* ── Menu sections ── */}
-        <View style={styles.sectionPadding}>
-          <Text style={styles.sectionLabel}>Your Activity</Text>
-          <View style={styles.card}>
-            {hasBusiness && (
-              <MenuItem
-                icon={<Calendar size={20} color={Palette.gradientStart} />}
-                label="My Events"
-                sublabel="Manage your posted events"
-                onPress={() => router.push('/my-events' as any)}
-              />
-            )}
-            <MenuItem
-              icon={<Bookmark size={20} color={Palette.gradientStart} />}
-              label="Saved Events"
-              sublabel="Events you've bookmarked"
-              onPress={() => router.push('/saved-events' as any)}
-              showSeparator
-            />
-            <MenuItem
-              icon={<Heart size={20} color={Palette.gradientStart} />}
-              label="Following"
-              sublabel="Businesses you follow"
-              onPress={() =>
-                Alert.alert(
-                  'Coming Soon',
-                  'Following list will be available soon'
-                )
-              }
-              isLast
-            />
-          </View>
-        </View>
+        {isBizMode ? (
+          <>
+            <View style={styles.sectionPadding}>
+              <Text style={styles.sectionLabel}>Business</Text>
+              <View style={styles.card}>
+                <MenuItem
+                  icon={<Calendar size={20} color="#0F766E" />}
+                  label="My Events"
+                  sublabel="Manage your posted events"
+                  onPress={() => router.push('/my-events' as any)}
+                />
+                <MenuItem
+                  icon={<Users size={20} color="#0F766E" />}
+                  label="Followers"
+                  sublabel="People following your business"
+                  onPress={() => router.push('/followers' as any)}
+                />
+                <MenuItem
+                  icon={<BarChart3 size={20} color="#0F766E" />}
+                  label="Analytics"
+                  sublabel="Views, saves & engagement"
+                  onPress={() =>
+                    Alert.alert('Coming Soon', 'Analytics will be available soon')
+                  }
+                  isLast
+                />
+              </View>
+            </View>
 
-        <View style={styles.sectionPadding}>
-          <Text style={styles.sectionLabel}>Preferences</Text>
-          <View style={styles.card}>
-            <MenuItem
-              icon={<Settings size={20} color={Palette.gradientStart} />}
-              label="Settings"
-              sublabel="Notifications, privacy & more"
-              onPress={() => router.push('/settings' as any)}
-              isLast
-            />
-          </View>
-        </View>
+            <View style={styles.sectionPadding}>
+              <Text style={styles.sectionLabel}>Preferences</Text>
+              <View style={styles.card}>
+                <MenuItem
+                  icon={<Settings size={20} color="#0F766E" />}
+                  label="Business Settings"
+                  sublabel="Edit business details"
+                  onPress={() => router.push('/settings' as any)}
+                  isLast
+                />
+              </View>
+            </View>
+          </>
+        ) : (
+          <>
+            <View style={styles.sectionPadding}>
+              <Text style={styles.sectionLabel}>Your Activity</Text>
+              <View style={styles.card}>
+                <MenuItem
+                  icon={<Bookmark size={20} color={Palette.gradientStart} />}
+                  label="Saved Events"
+                  sublabel="Events you've bookmarked"
+                  onPress={() => router.push('/saved-events' as any)}
+                />
+                <MenuItem
+                  icon={<Heart size={20} color={Palette.gradientStart} />}
+                  label="Following"
+                  sublabel="Businesses you follow"
+                  onPress={() => router.push('/following' as any)}
+                  isLast
+                />
+              </View>
+            </View>
+
+            <View style={styles.sectionPadding}>
+              <Text style={styles.sectionLabel}>Preferences</Text>
+              <View style={styles.card}>
+                <MenuItem
+                  icon={<Settings size={20} color={Palette.gradientStart} />}
+                  label="Settings"
+                  sublabel="Notifications, privacy & more"
+                  onPress={() => router.push('/settings' as any)}
+                  isLast
+                />
+              </View>
+            </View>
+          </>
+        )}
 
         {/* ── Sign out ── */}
         <View style={styles.sectionPadding}>
