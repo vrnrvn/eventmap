@@ -158,15 +158,13 @@ export const eventsService = {
     if (error) throw error;
   },
 
-  async uploadEventImage(file: {
-    uri: string;
-    name: string;
-    type: string;
-  }): Promise<string> {
+  async uploadEventImage(
+    file: { uri: string; name: string; type: string },
+    folder: 'events' | 'logos' | 'venues' = 'events'
+  ): Promise<string> {
     const fileExt = file.name.split('.').pop();
-    const filePath = `${Date.now()}-${Math.random()
-      .toString(36)
-      .substring(7)}.${fileExt}`;
+    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const filePath = `${folder}/${fileName}`;
 
     const formData = new FormData();
     formData.append('file', {

@@ -27,12 +27,14 @@ import {
   Briefcase,
   Sparkles,
   Navigation,
+  ImageIcon,
 } from 'lucide-react-native';
 import { useApp } from '@/contexts/AppContext';
 import { router } from 'expo-router';
 import { Input } from '@/components/Input';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
 import { GoogleMapView } from '@/components/GoogleMapView';
+import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import {
   RecurrencePicker,
   getRecurrenceLabel,
@@ -83,6 +85,7 @@ export default function CreateScreen() {
     address: '',
     lat: DEFAULT_LOCATION.lat,
     lng: DEFAULT_LOCATION.lng,
+    images: [] as ImageAsset[],
   });
   const recurrencePickerRef = useRef<RecurrencePickerHandle>(null);
 
@@ -157,7 +160,22 @@ export default function CreateScreen() {
 
     setLoading(true);
     try {
-      await eventsService.createEvent({
+      // Upload images first
+      let coverImageUrl: string | null = null;
+      const uploadedUrls: string[] = [];
+      for (const img of formData.images) {
+        const url = await eventsService.uploadEventImage({
+          uri: img.uri,
+          name: img.name,
+          type: img.type,
+        });
+        uploadedUrls.push(url);
+      }
+      if (uploadedUrls.length > 0) {
+        coverImageUrl = uploadedUrls[0];
+      }
+
+      const eventId = await eventsService.createEvent({
         businessId: userBusiness.id,
         title: formData.title.trim(),
         description: formData.description.trim(),
@@ -167,9 +185,16 @@ export default function CreateScreen() {
         address,
         lat,
         lng,
+        coverImageUrl,
         isRecurring: formData.recurrence != null,
         recurrencePattern: formData.recurrence ?? undefined,
       });
+
+      // Add all photos as event_photos
+      for (let i = 0; i < uploadedUrls.length; i++) {
+        await eventsService.addEventPhoto(eventId, uploadedUrls[i], i);
+      }
+
       Alert.alert('Success', 'Event created!', [
         {
           text: 'OK',
@@ -479,6 +504,26 @@ export default function CreateScreen() {
                 📍 {formData.lat.toFixed(4)}, {formData.lng.toFixed(4)}
               </Text>
             ) : null}
+          </View>
+        </View>
+
+        {/* ── Section: Photos ── */}
+        <Text style={styles.sectionLabel}>Photos</Text>
+        <View style={styles.card}>
+          <View style={styles.fieldRow}>
+            <View style={styles.fieldIcon}>
+              <ImageIcon size={16} color={Palette.gradientStart} />
+            </View>
+            <View style={styles.fieldContent}>
+              <Text style={styles.locationNote}>
+                First image becomes the cover photo
+              </Text>
+              <ImagePickerButton
+                images={formData.images}
+                onChange={(imgs) => setFormData((f) => ({ ...f, images: imgs }))}
+                maxImages={5}
+              />
+            </View>
           </View>
         </View>
 

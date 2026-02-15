@@ -10,13 +10,14 @@ import { Colors } from '@/constants/theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 32;
-const IMAGE_HEIGHT = 180;
+const DEFAULT_IMAGE_HEIGHT = 180;
 
 type EventCardCarouselProps = {
   imageUrls: string[];
+  imageHeight?: number;
 };
 
-export function EventCardCarousel({ imageUrls }: EventCardCarouselProps) {
+export function EventCardCarousel({ imageUrls, imageHeight = DEFAULT_IMAGE_HEIGHT }: EventCardCarouselProps) {
   const scrollX = useSharedValue(0);
 
   const scrollHandler = useAnimatedScrollHandler({
@@ -29,7 +30,7 @@ export function EventCardCarousel({ imageUrls }: EventCardCarouselProps) {
   const isPlaceholder = images.length === 1 && !images[0];
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { height: imageHeight }]}>
       <Animated.FlatList
         data={images}
         horizontal
@@ -47,6 +48,7 @@ export function EventCardCarousel({ imageUrls }: EventCardCarouselProps) {
             index={index}
             scrollX={scrollX}
             isPlaceholder={isPlaceholder}
+            imageHeight={imageHeight}
           />
         )}
       />
@@ -59,11 +61,13 @@ function CarouselImage({
   index,
   scrollX,
   isPlaceholder,
+  imageHeight = DEFAULT_IMAGE_HEIGHT,
 }: {
   uri: string;
   index: number;
   scrollX: ReturnType<typeof useSharedValue<number>>;
   isPlaceholder: boolean;
+  imageHeight?: number;
 }) {
   const animatedStyle = useAnimatedStyle(() => {
     const inputRange = [
@@ -81,7 +85,7 @@ function CarouselImage({
   });
 
   return (
-    <Animated.View style={[styles.imageWrapper, animatedStyle]}>
+    <Animated.View style={[styles.imageWrapper, { width: CARD_WIDTH, height: imageHeight }, animatedStyle]}>
       {uri && !isPlaceholder ? (
         <Image source={{ uri }} style={styles.image} resizeMode="cover" />
       ) : (
@@ -96,11 +100,9 @@ function CarouselImage({
 const styles = StyleSheet.create({
   container: {
     width: CARD_WIDTH,
-    height: IMAGE_HEIGHT,
+    height: DEFAULT_IMAGE_HEIGHT,
   },
   imageWrapper: {
-    width: CARD_WIDTH,
-    height: IMAGE_HEIGHT,
     overflow: 'hidden',
     borderRadius: 12,
   },

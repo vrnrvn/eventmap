@@ -20,9 +20,10 @@ import { categoriesService } from '@/services/categories';
 import { RankedEvent, Category } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { getCategoryColor } from '@/constants/categories';
-import { Search, MapPin, Calendar, Users, Filter, GripHorizontal, List, Repeat } from 'lucide-react-native';
+import { Search, MapPin, Calendar, Users, Filter, List, Repeat } from 'lucide-react-native';
 import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView';
 import { EventCardCarousel } from '@/components/EventCardCarousel';
+import { Avatar } from '@/components/Avatar';
 import { SearchOverlay, SearchBarCollapsed } from '@/components/SearchOverlay';
 import { filterEventsByDateRange } from '@/utils/recurrence';
 
@@ -243,17 +244,14 @@ export default function DiscoverScreen() {
       if (index >= 0) {
         isScrollingFromMapRef.current = true;
         beginProgrammaticMove(1000);
-        bottomSheetRef.current?.snapToIndex(1);
-        setTimeout(() => {
-          flatListRef.current?.scrollToIndex({
-            index,
-            animated: true,
-            viewPosition: 0.5,
-          });
-        }, 350);
+        flatListRef.current?.scrollToIndex({
+          index,
+          animated: true,
+          viewPosition: 0.5,
+        });
         setTimeout(() => {
           isScrollingFromMapRef.current = false;
-        }, 800);
+        }, 400);
       }
     },
     [visibleEvents, beginProgrammaticMove]
@@ -316,6 +314,8 @@ export default function DiscoverScreen() {
         title: e.title,
         categorySlug: e.category_slug,
         coverImageUrl: e.cover_image_url,
+        businessLogoUrl: e.business_logo_url,
+        businessName: e.business_name,
       })),
     [events]
   );
@@ -364,16 +364,24 @@ export default function DiscoverScreen() {
         <View style={styles.categoryBadge}>
           <Text style={styles.categoryText}>{item.category_label}</Text>
         </View>
-        <Text style={styles.businessName}>{item.business_name}</Text>
+        <TouchableOpacity
+          style={styles.businessRow}
+          onPress={() => router.push(`/business/${item.business_id}` as never)}
+          activeOpacity={0.7}
+        >
+          <Avatar
+            imageUrl={item.business_logo_url}
+            name={item.business_name}
+            size={24}
+          />
+          <Text style={styles.businessName}>{item.business_name}</Text>
+        </TouchableOpacity>
       </View>
     </TouchableOpacity>
   );
 
   const renderListHeader = () => (
     <View style={styles.sheetHeader}>
-      <View style={styles.grabHandle}>
-        <GripHorizontal size={24} color={Colors.text.tertiary} />
-      </View>
       <TouchableOpacity
         style={styles.showListRow}
         onPress={() => bottomSheetRef.current?.snapToIndex(1)}
@@ -652,14 +660,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border.light,
   },
-  grabHandle: {
-    alignSelf: 'center',
-    marginBottom: Spacing.sm,
-  },
   showListRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: Spacing.xxl,
     gap: Spacing.sm,
     paddingVertical: Spacing.sm,
   },
@@ -803,7 +808,14 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
   },
+  businessRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.xs,
+  },
   businessName: {
+    flex: 1,
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,

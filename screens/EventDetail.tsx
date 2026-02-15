@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,14 +10,22 @@ import {
   Image,
   Linking,
   Platform,
+  FlatList,
+  Dimensions,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import { eventsService } from '@/services/events';
 import { socialService } from '@/services/social';
+import { reviewsService, type ReviewWithProfile } from '@/services/reviews';
 import { EventDetails } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { ImageViewer } from '@/components/ImageViewer';
+import { Avatar } from '@/components/Avatar';
+import { StarRatingDisplay } from '@/components/StarRatingDisplay';
+import { ReviewCard } from '@/components/ReviewCard';
+import { ReviewForm } from '@/components/ReviewForm';
 import {
   ArrowLeft,
   Calendar,
@@ -30,6 +38,8 @@ import {
   Trash2,
 } from 'lucide-react-native';
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
 export default function EventDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
@@ -37,8 +47,27 @@ export default function EventDetail() {
   const [details, setDetails] = useState<EventDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const [reviews, setReviews] = useState<ReviewWithProfile[]>([]);
+  const [averageRating, setAverageRating] = useState({ average: 0, count: 0 });
+  const [userReview, setUserReview] = useState<{ rating: number; text: string } | null>(null);
+  const [showReviewForm, setShowReviewForm] = useState(false);
 
   const isOwner = userBusiness && details?.event.business_id === userBusiness.id;
+
+  const allPhotoUrls = useMemo(() => {
+    if (!details) return [];
+    const urls: string[] = [];
+    if (details.photos?.length) {
+      details.photos
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .forEach((p) => urls.push(p.image_url));
+    } else if (details.event.cover_image_url) {
+      urls.push(details.event.cover_image_url);
+    }
+    return urls;
+  }, [details]);
 
   useEffect(() => {
     if (!id) return;
@@ -54,6 +83,49 @@ export default function EventDetail() {
     };
     load();
   }, [id]);
+
+  const businessId = details?.business.id;
+
+  useEffect(() => {
+    if (!businessId) return;
+    const loadReviews = async () => {
+      try {
+        const [list, avg, mine] = await Promise.all([
+          reviewsService.getReviewsForBusiness(businessId),
+          reviewsService.getAverageRatingAndCount(businessId),
+          user ? reviewsService.getUserReview(businessId) : Promise.resolve(null),
+        ]);
+        setReviews(list);
+        setAverageRating(avg);
+        setUserReview(mine ? { rating: mine.rating, text: mine.text || '' } : null);
+      } catch {
+        setReviews([]);
+        setAverageRating({ average: 0, count: 0 });
+        setUserReview(null);
+      }
+    };
+    loadReviews();
+  }, [businessId, user]);
+
+  const handleReviewSubmit = async (rating: number, text: string) => {
+    if (!businessId) return;
+    await reviewsService.createOrUpdateReview(businessId, rating, text || null);
+    const [list, avg] = await Promise.all([
+      reviewsService.getReviewsForBusiness(businessId),
+      reviewsService.getAverageRatingAndCount(businessId),
+    ]);
+    setReviews(list);
+    setAverageRating(avg);
+    setUserReview({ rating, text });
+    setShowReviewForm(false);
+  };
+
+  const handleReviewRespond = async (reviewId: string, response: string) => {
+    await reviewsService.updateBusinessResponse(reviewId, response);
+    if (!businessId) return;
+    const list = await reviewsService.getReviewsForBusiness(businessId);
+    setReviews(list);
+  };
 
   const handleRsvp = async (status: 'going' | 'interested') => {
     if (!user || !id) return;
@@ -206,17 +278,50 @@ export default function EventDetail() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {event.cover_image_url ? (
-          <Image
-            source={{ uri: event.cover_image_url }}
-            style={styles.coverImage}
-            resizeMode="cover"
-          />
+        {allPhotoUrls.length > 0 ? (
+          <View>
+            <FlatList
+              data={allPhotoUrls}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              keyExtractor={(_, i) => `photo-${i}`}
+              renderItem={({ item, index }) => (
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={() => {
+                    setViewerIndex(index);
+                    setViewerVisible(true);
+                  }}
+                >
+                  <Image
+                    source={{ uri: item }}
+                    style={styles.coverImage}
+                    resizeMode="cover"
+                  />
+                </TouchableOpacity>
+              )}
+            />
+            {allPhotoUrls.length > 1 && (
+              <View style={styles.photoDots}>
+                {allPhotoUrls.map((_, i) => (
+                  <View key={i} style={[styles.photoDot, i === 0 && styles.photoDotActive]} />
+                ))}
+              </View>
+            )}
+          </View>
         ) : (
           <View style={styles.coverPlaceholder}>
             <Calendar size={48} color={Colors.text.tertiary} />
           </View>
         )}
+
+        <ImageViewer
+          visible={viewerVisible}
+          images={allPhotoUrls}
+          initialIndex={viewerIndex}
+          onClose={() => setViewerVisible(false)}
+        />
 
         <View style={styles.content}>
           <Text style={styles.title}>{event.title}</Text>
@@ -224,8 +329,16 @@ export default function EventDetail() {
             <Text style={styles.categoryText}>{category.label}</Text>
           </View>
 
-          <View style={styles.businessRow}>
-            <Building2 size={18} color={Colors.text.secondary} />
+          <TouchableOpacity
+            style={styles.businessRow}
+            onPress={() => router.push(`/business/${business.id}` as any)}
+            activeOpacity={0.7}
+          >
+            <Avatar
+              imageUrl={business.logo_url}
+              name={business.name}
+              size={28}
+            />
             <Text style={styles.businessName}>{business.name}</Text>
             {user && !isOwner && (
               <TouchableOpacity
@@ -246,7 +359,7 @@ export default function EventDetail() {
                 </Text>
               </TouchableOpacity>
             )}
-          </View>
+          </TouchableOpacity>
 
           <View style={styles.metaRow}>
             <Calendar size={18} color={Colors.text.secondary} />
@@ -403,6 +516,44 @@ export default function EventDetail() {
               <Text style={styles.statText}>{details.save_count} saved</Text>
             </View>
           </View>
+
+          <View style={styles.reviewsSection}>
+            <Text style={styles.sectionTitle}>Reviews</Text>
+            <View style={{ marginBottom: Spacing.md }}>
+              <StarRatingDisplay
+                average={averageRating.average}
+                count={averageRating.count}
+              />
+            </View>
+            {user && !isOwner && (
+              showReviewForm ? (
+                <ReviewForm
+                  initialRating={userReview?.rating || 0}
+                  initialText={userReview?.text || ''}
+                  onSubmit={handleReviewSubmit}
+                  onCancel={() => setShowReviewForm(false)}
+                  isEditing={!!userReview}
+                />
+              ) : (
+                <TouchableOpacity
+                  style={styles.writeReviewBtn}
+                  onPress={() => setShowReviewForm(true)}
+                >
+                  <Text style={styles.writeReviewBtnText}>
+                    {userReview ? 'Edit your review' : 'Write a review'}
+                  </Text>
+                </TouchableOpacity>
+              )
+            )}
+            {reviews.map((review) => (
+              <ReviewCard
+                key={review.id}
+                review={review}
+                isOwner={isOwner}
+                onRespond={isOwner ? handleReviewRespond : undefined}
+              />
+            ))}
+          </View>
         </View>
       </ScrollView>
     </View>
@@ -449,9 +600,25 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.xxl,
   },
   coverImage: {
-    width: '100%',
+    width: SCREEN_WIDTH,
     height: 200,
     backgroundColor: Colors.background.secondary,
+  },
+  photoDots: {
+    position: 'absolute',
+    bottom: 10,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    gap: 5,
+  },
+  photoDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.45)',
+  },
+  photoDotActive: {
+    backgroundColor: '#FFFFFF',
   },
   coverPlaceholder: {
     width: '100%',
@@ -660,6 +827,27 @@ const styles = StyleSheet.create({
   statText: {
     fontSize: Typography.sizes.sm,
     color: Colors.text.tertiary,
+  },
+  reviewsSection: {
+    marginTop: Spacing.xl,
+    paddingTop: Spacing.xl,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border.light,
+  },
+  writeReviewBtn: {
+    alignSelf: 'flex-start',
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.md,
+    borderRadius: 8,
+    backgroundColor: Colors.background.secondary,
+  },
+  writeReviewBtnText: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.primary,
   },
   errorText: {
     fontSize: Typography.sizes.md,
