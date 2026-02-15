@@ -62,7 +62,17 @@ export const BorderRadius = {
   round: 9999,
 };
 
+/** Inter font family names (use with fontFamily for correct weight rendering on native) */
+export const InterFont = {
+  regular: 'Inter_400Regular',
+  medium: 'Inter_500Medium',
+  semibold: 'Inter_600SemiBold',
+  bold: 'Inter_700Bold',
+} as const;
+
 export const Typography = {
+  fontFamily: InterFont.regular,
+  fontFamilies: InterFont,
   sizes: {
     xs: 12,
     sm: 14,

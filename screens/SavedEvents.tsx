@@ -131,6 +131,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: Typography.sizes.xl,
+    fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
   },
@@ -151,6 +152,7 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
     marginBottom: Spacing.xs,
@@ -171,6 +173,7 @@ const styles = StyleSheet.create({
   },
   eventTitle: {
     fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
     marginBottom: Spacing.sm,

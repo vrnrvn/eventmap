@@ -60,6 +60,24 @@ export default function DiscoverScreen() {
   const lastViewedIndexRef = useRef<number>(0);
   const hasInitializedMapRef = useRef(false);
 
+  // ─── NEW: guard flag to suppress region-change reloads during
+  //          programmatic map moves (marker tap, list scroll, etc.) ───
+  const isProgrammaticMoveRef = useRef(false);
+  const programmaticMoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Call this before any programmatic animateTo / center change so that
+   *  the subsequent onRegionChange events are ignored. */
+  const beginProgrammaticMove = useCallback((durationMs = 800) => {
+    isProgrammaticMoveRef.current = true;
+    if (programmaticMoveTimerRef.current) {
+      clearTimeout(programmaticMoveTimerRef.current);
+    }
+    programmaticMoveTimerRef.current = setTimeout(() => {
+      isProgrammaticMoveRef.current = false;
+      programmaticMoveTimerRef.current = null;
+    }, durationMs);
+  }, []);
+
   useEffect(() => {
     loadInitialData();
   }, [profile]);
@@ -68,6 +86,9 @@ export default function DiscoverScreen() {
     return () => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
+      }
+      if (programmaticMoveTimerRef.current) {
+        clearTimeout(programmaticMoveTimerRef.current);
       }
     };
   }, []);
@@ -109,6 +130,7 @@ export default function DiscoverScreen() {
         const loc = { lat: fetchLat, lng: fetchLng };
         setCenter(loc);
         setMapCenter(loc);
+        beginProgrammaticMove(1200); // suppress region-change during init
         setExplicitMoveTrigger((t) => t + 1);
         hasInitializedMapRef.current = true;
         await loadEventsWithCenter(fetchLat, fetchLng);
@@ -159,30 +181,43 @@ export default function DiscoverScreen() {
   const handleSearchFromOverlay = useCallback(
     (location: { lat: number; lng: number; label: string } | null) => {
       const target = location ?? userLocation ?? { lat: DEFAULT_CENTER.lat, lng: DEFAULT_CENTER.lng };
+      beginProgrammaticMove(1200);
       setCenter(target);
       setMapCenter(target);
       setExplicitMoveTrigger((t) => t + 1);
       mapRef.current?.animateTo(target.lat, target.lng);
       loadEventsWithCenter(target.lat, target.lng);
     },
-    [userLocation]
+    [userLocation, beginProgrammaticMove]
   );
 
+  // ─── FIX: ignore region changes that result from programmatic moves ───
   const handleRegionChange = useCallback(
-    (region: { lat: number; lng: number; bounds?: { ne: { lat: number; lng: number }; sw: { lat: number; lng: number } } }) => {
+    (region: {
+      lat: number;
+      lng: number;
+      bounds?: { ne: { lat: number; lng: number }; sw: { lat: number; lng: number } };
+    }) => {
+      // Always keep bounds up-to-date (cheap, no flicker)
       setMapCenter({ lat: region.lat, lng: region.lng });
       if (region.bounds) setMapBounds(region.bounds);
+
+      // Skip reload when the map was moved programmatically or hasn't initialized
       if (!hasInitializedMapRef.current) return;
+      if (isProgrammaticMoveRef.current) return;
+
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
       debounceTimerRef.current = setTimeout(() => {
         debounceTimerRef.current = null;
+        // Double-check the flag again after debounce
+        if (isProgrammaticMoveRef.current) return;
         setCenter({ lat: region.lat, lng: region.lng });
         loadEventsWithCenterRef.current(region.lat, region.lng);
       }, REGION_DEBOUNCE_MS);
     },
-    []
+    [/* stable – no deps needed */]
   );
 
   const isInBounds = (
@@ -200,12 +235,14 @@ export default function DiscoverScreen() {
     return events.filter((e) => isInBounds(e.lat, e.lng, mapBounds));
   }, [events, mapBounds]);
 
+  // ─── FIX: set programmatic-move guard before animating ───
   const handleMarkerPress = useCallback(
     (eventId: string) => {
       setActiveMarkerId(eventId);
       const index = visibleEvents.findIndex((e) => e.id === eventId);
       if (index >= 0) {
         isScrollingFromMapRef.current = true;
+        beginProgrammaticMove(1000);
         bottomSheetRef.current?.snapToIndex(1);
         setTimeout(() => {
           flatListRef.current?.scrollToIndex({
@@ -219,22 +256,35 @@ export default function DiscoverScreen() {
         }, 800);
       }
     },
-    [visibleEvents]
+    [visibleEvents, beginProgrammaticMove]
   );
 
-  const handleViewableItemsChanged = useCallback(
-    ({ viewableItems }: { viewableItems: Array<{ item: RankedEvent; index: number | null }> }) => {
+  // ─── Stable ref-based viewability handler (FlatList forbids changing this on the fly) ───
+  const viewabilityCallbackRef = useRef<
+    (info: { viewableItems: Array<{ item: RankedEvent; index: number | null }> }) => void
+  >(() => {});
+
+  // Keep the ref updated with latest logic + dependencies
+  useEffect(() => {
+    viewabilityCallbackRef.current = ({ viewableItems }) => {
       if (isScrollingFromMapRef.current || viewableItems.length === 0) return;
       const first = viewableItems[0];
       if (first?.index != null && first.index !== lastViewedIndexRef.current) {
         lastViewedIndexRef.current = first.index;
         const event = first.item;
         setActiveMarkerId(event.id);
+        beginProgrammaticMove(800);
         mapRef.current?.animateTo(event.lat, event.lng);
       }
-    },
-    []
-  );
+    };
+  }, [beginProgrammaticMove]);
+
+  // Stable handler that never changes identity — just delegates to the ref
+  const handleViewableItemsChanged = useRef(
+    (info: { viewableItems: Array<{ item: RankedEvent; index: number | null }> }) => {
+      viewabilityCallbackRef.current(info);
+    }
+  ).current;
 
   const viewabilityConfig = useRef({
     itemVisiblePercentThreshold: 50,
@@ -250,10 +300,11 @@ export default function DiscoverScreen() {
     });
   };
 
-  const markerIdsKey = events.map((e) => e.id).sort().join(',');
+  // ─── FIX: decouple centerForMap from markerIdsKey so new event data
+  //          doesn't force a map re-center ───
   const centerForMap = useMemo(
     () => mapCenter,
-    [markerIdsKey, explicitMoveTrigger]
+    [explicitMoveTrigger]            // ← removed markerIdsKey
   );
 
   const mapMarkers = useMemo(
@@ -420,7 +471,9 @@ export default function DiscoverScreen() {
         </View>
       )}
 
-      {loading && (
+      {/* ─── FIX: only show "Searching" overlay on *initial* load, not on
+           every refetch, to avoid the flash ─── */}
+      {loading && events.length === 0 && (
         <View style={styles.mapSearchingOverlay}>
           <ActivityIndicator size="small" color={Colors.primary} />
           <Text style={styles.mapSearchingText}>Searching...</Text>
@@ -550,6 +603,7 @@ const styles = StyleSheet.create({
   },
   filterBadgeText: {
     fontSize: 10,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.inverse,
   },
@@ -578,6 +632,7 @@ const styles = StyleSheet.create({
   },
   mapSearchingText: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
   },
   sheetBackground: {
@@ -610,6 +665,7 @@ const styles = StyleSheet.create({
   },
   sheetSummary: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
     textAlign: 'center',
   },
@@ -621,6 +677,7 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: Spacing.sm,
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.primary,
   },
   filtersContainer: {
@@ -637,11 +694,13 @@ const styles = StyleSheet.create({
   },
   filtersTitle: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
   },
   clearText: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
     color: Colors.primary,
   },
   categoriesGrid: {
@@ -663,10 +722,12 @@ const styles = StyleSheet.create({
   },
   categoryChipText: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.primary,
   },
   categoryChipTextSelected: {
     color: Colors.text.inverse,
+    fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
   },
   eventCard: {
@@ -684,6 +745,7 @@ const styles = StyleSheet.create({
   },
   imagePlaceholder: {
     fontSize: 48,
+    fontFamily: Typography.fontFamily,
   },
   eventContent: {
     padding: Spacing.md,
@@ -697,6 +759,7 @@ const styles = StyleSheet.create({
   eventTitle: {
     flex: 1,
     fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
   },
@@ -709,6 +772,7 @@ const styles = StyleSheet.create({
   },
   premiumText: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.primary,
   },
   eventMeta: {
@@ -722,6 +786,7 @@ const styles = StyleSheet.create({
   },
   metaText: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
   },
   categoryBadge: {
@@ -735,10 +800,12 @@ const styles = StyleSheet.create({
   categoryText: {
     fontSize: Typography.sizes.xs,
     color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
   },
   businessName: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
   },
   loadingRow: {
@@ -748,6 +815,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: Spacing.md,
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
   },
   emptyState: {
@@ -756,12 +824,14 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
     marginTop: Spacing.md,
   },
   emptySubtitle: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
     marginTop: Spacing.xs,
     textAlign: 'center',
@@ -775,6 +845,7 @@ const styles = StyleSheet.create({
   },
   clearFiltersText: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
     color: Colors.text.inverse,
   },

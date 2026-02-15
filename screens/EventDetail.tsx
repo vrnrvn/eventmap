@@ -435,6 +435,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     flex: 1,
     fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
   },
@@ -464,6 +465,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: Typography.sizes.xxl,
+    fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginBottom: Spacing.sm,
@@ -479,6 +481,7 @@ const styles = StyleSheet.create({
   categoryText: {
     fontSize: Typography.sizes.sm,
     color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
   },
   businessRow: {
@@ -505,6 +508,7 @@ const styles = StyleSheet.create({
   followButtonText: {
     fontSize: Typography.sizes.sm,
     color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
   followButtonTextActive: {
@@ -533,6 +537,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.secondary,
     textTransform: 'uppercase',
@@ -572,6 +577,7 @@ const styles = StyleSheet.create({
   actionChipText: {
     fontSize: Typography.sizes.sm,
     color: Colors.text.primary,
+    fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
   },
   actionChipTextActive: {
@@ -600,6 +606,7 @@ const styles = StyleSheet.create({
   },
   saveButtonTextActive: {
     color: Colors.error,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
   ownerActions: {
@@ -621,6 +628,7 @@ const styles = StyleSheet.create({
   editButtonText: {
     fontSize: Typography.sizes.md,
     color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
   deleteButton: {
@@ -637,6 +645,7 @@ const styles = StyleSheet.create({
   deleteButtonText: {
     fontSize: Typography.sizes.md,
     color: Colors.error,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
   statsRow: {

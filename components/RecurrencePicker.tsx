@@ -99,6 +99,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
   },
@@ -120,6 +121,7 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
   },
   optionTextSelected: {
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.primary,
   },

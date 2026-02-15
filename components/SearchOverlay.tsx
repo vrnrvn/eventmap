@@ -304,6 +304,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
   },
@@ -356,6 +357,7 @@ const styles = StyleSheet.create({
   },
   resultPrimary: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
   },
@@ -428,6 +430,7 @@ const styles = StyleSheet.create({
   },
   searchButtonText: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.inverse,
   },

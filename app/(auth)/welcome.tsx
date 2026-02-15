@@ -58,6 +58,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: Typography.sizes.xxxl,
+    fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginBottom: Spacing.sm,
@@ -91,6 +92,7 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: Colors.text.inverse,
     fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
   secondaryButton: {
@@ -103,6 +105,7 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: Colors.primary,
     fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
 });

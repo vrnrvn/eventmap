@@ -327,6 +327,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: Typography.sizes.xl,
+    fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
   },
@@ -351,6 +352,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
   },
@@ -359,6 +361,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
     color: Colors.text.primary,
     marginBottom: Spacing.xs,
@@ -386,6 +389,7 @@ const styles = StyleSheet.create({
   },
   categoryChipTextSelected: {
     color: Colors.text.inverse,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
   errorText: {
@@ -406,6 +410,7 @@ const styles = StyleSheet.create({
   saveButtonText: {
     color: Colors.text.inverse,
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
 });
