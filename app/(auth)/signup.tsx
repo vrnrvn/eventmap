@@ -10,15 +10,39 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/Input';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
 import { profilesService } from '@/services/profiles';
-import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
-import { ArrowLeft } from 'lucide-react-native';
+import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import {
+  ArrowLeft,
+  User,
+  Mail,
+  Lock,
+  MapPin,
+  UserPlus,
+  Sparkles,
+} from 'lucide-react-native';
+
+const Palette = {
+  gradientStart: '#6366F1',
+  gradientEnd: '#8B5CF6',
+  cardBg: '#FFFFFF',
+  surfaceMuted: '#F8F9FC',
+  accentSoft: 'rgba(99,102,241,0.08)',
+  accentMedium: 'rgba(99,102,241,0.14)',
+  textOnGradient: '#FFFFFF',
+  textOnGradientMuted: 'rgba(255,255,255,0.75)',
+  separator: '#F0F0F5',
+  badge: '#6366F1',
+};
 
 export default function SignupScreen() {
+  const insets = useSafeAreaInsets();
   const { signUp, refreshProfile } = useAuth();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -79,155 +103,402 @@ export default function SignupScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
+    <View style={styles.root}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingTop: insets.top, paddingBottom: insets.bottom + 32 },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <ArrowLeft size={24} color={Colors.text.primary} />
-        </TouchableOpacity>
+          {/* ── Back button ── */}
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => router.back()}
+            activeOpacity={0.7}
+          >
+            <ArrowLeft size={22} color={Colors.text.primary} />
+          </TouchableOpacity>
 
-        <View style={styles.content}>
-          <Text style={styles.title}>Create Account</Text>
-          <Text style={styles.subtitle}>Sign up to get started</Text>
+          {/* ── Hero area ── */}
+          <View style={styles.heroSection}>
+            <View style={styles.logoWrap}>
+              <LinearGradient
+                colors={[Palette.gradientStart, Palette.gradientEnd]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.logoGradient}
+              >
+                <Sparkles size={28} color="#FFFFFF" />
+              </LinearGradient>
+            </View>
+            <Text style={styles.heroTitle}>Create Account</Text>
+            <Text style={styles.heroSubtitle}>
+              Join to discover and share local events
+            </Text>
+          </View>
 
-          <View style={styles.form}>
-            <Input
-              label="Name"
-              value={name}
-              onChangeText={setName}
-              placeholder="Your name"
-              error={errors.name}
-            />
+          {/* ── Form card ── */}
+          <View style={styles.formCard}>
+            {/* Name */}
+            <View style={styles.fieldRow}>
+              <View style={styles.fieldIcon}>
+                <User size={16} color={Palette.gradientStart} />
+              </View>
+              <View style={styles.fieldContent}>
+                <Input
+                  label="Name"
+                  value={name}
+                  onChangeText={setName}
+                  placeholder="Your name"
+                  error={errors.name}
+                />
+              </View>
+            </View>
 
-            <Input
-              label="Email"
-              value={email}
-              onChangeText={setEmail}
-              placeholder="your@email.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              error={errors.email}
-            />
+            <View style={styles.fieldSeparator} />
 
-            <Input
-              label="Password"
-              value={password}
-              onChangeText={setPassword}
-              placeholder="At least 6 characters"
-              secureTextEntry
-              error={errors.password}
-            />
+            {/* Email */}
+            <View style={styles.fieldRow}>
+              <View style={styles.fieldIcon}>
+                <Mail size={16} color={Palette.gradientStart} />
+              </View>
+              <View style={styles.fieldContent}>
+                <Input
+                  label="Email"
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="your@email.com"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  error={errors.email}
+                />
+              </View>
+            </View>
 
-            <AddressSearchInput
-              label="City or area (optional)"
-              value={city}
-              onChangeText={(text) => {
-                setCity(text);
-                if (!text.trim()) {
-                  setCityLat(null);
-                  setCityLng(null);
-                }
-              }}
-              onSelect={(result) => {
-                setCity(result.formattedAddress);
-                setCityLat(result.lat);
-                setCityLng(result.lng);
-              }}
-              placeholder="e.g. San Francisco, Bay Area"
-              approximate
-            />
+            <View style={styles.fieldSeparator} />
 
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={handleSignUp}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color={Colors.text.inverse} />
-              ) : (
-                <Text style={styles.primaryButtonText}>Create Account</Text>
-              )}
-            </TouchableOpacity>
+            {/* Password */}
+            <View style={styles.fieldRow}>
+              <View style={styles.fieldIcon}>
+                <Lock size={16} color={Palette.gradientStart} />
+              </View>
+              <View style={styles.fieldContent}>
+                <Input
+                  label="Password"
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="At least 6 characters"
+                  secureTextEntry
+                  error={errors.password}
+                />
+              </View>
+            </View>
 
-            <View style={styles.footer}>
-              <Text style={styles.footerText}>Already have an account? </Text>
-              <TouchableOpacity onPress={() => router.push('/(auth)/login')}>
-                <Text style={styles.footerLink}>Sign In</Text>
-              </TouchableOpacity>
+            <View style={styles.fieldSeparator} />
+
+            {/* Location */}
+            <View style={styles.fieldRow}>
+              <View style={styles.fieldIcon}>
+                <MapPin size={16} color={Palette.gradientStart} />
+              </View>
+              <View style={styles.fieldContent}>
+                <AddressSearchInput
+                  label="City or area (optional)"
+                  value={city}
+                  onChangeText={(text) => {
+                    setCity(text);
+                    if (!text.trim()) {
+                      setCityLat(null);
+                      setCityLng(null);
+                    }
+                  }}
+                  onSelect={(result) => {
+                    setCity(result.formattedAddress);
+                    setCityLat(result.lat);
+                    setCityLng(result.lng);
+                  }}
+                  placeholder="e.g. San Francisco, Bay Area"
+                  approximate
+                />
+                <Text style={styles.locationHint}>
+                  Helps us show events near you
+                </Text>
+              </View>
             </View>
           </View>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+
+          {/* ── Create account button ── */}
+          <TouchableOpacity
+            style={styles.submitWrap}
+            onPress={handleSignUp}
+            disabled={loading}
+            activeOpacity={0.85}
+          >
+            <LinearGradient
+              colors={
+                loading
+                  ? ['#A5B4FC', '#C4B5FD']
+                  : [Palette.gradientStart, Palette.gradientEnd]
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.submitGradient}
+            >
+              {loading ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <>
+                  <UserPlus size={18} color="#FFFFFF" />
+                  <Text style={styles.submitText}>Create Account</Text>
+                </>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+
+          {/* ── Terms hint ── */}
+          <Text style={styles.termsText}>
+            By creating an account, you agree to our{' '}
+            <Text style={styles.termsLink}>Terms of Service</Text> and{' '}
+            <Text style={styles.termsLink}>Privacy Policy</Text>
+          </Text>
+
+          {/* ── Divider ── */}
+          <View style={styles.dividerRow}>
+            <View style={styles.dividerLine} />
+            <Text style={styles.dividerText}>or</Text>
+            <View style={styles.dividerLine} />
+          </View>
+
+          {/* ── Footer ── */}
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>Already have an account?</Text>
+            <TouchableOpacity
+              style={styles.signInBtn}
+              onPress={() => router.push('/(auth)/login')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.signInBtnText}>Sign In</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
+/* ────────────────────────── STYLES ────────────────────────── */
+
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    backgroundColor: Colors.background.primary,
+    backgroundColor: Palette.surfaceMuted,
+  },
+  flex: {
+    flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
+    paddingHorizontal: 24,
   },
-  backButton: {
-    padding: Spacing.md,
-    marginTop: Spacing.xl,
+
+  /* ── Back button ── */
+  backBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: Palette.cardBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+      },
+      android: { elevation: 3 },
+    }),
   },
-  content: {
-    flex: 1,
-    paddingHorizontal: Spacing.xl,
-    paddingTop: Spacing.xl,
+
+  /* ── Hero ── */
+  heroSection: {
+    alignItems: 'center',
+    marginTop: 28,
+    marginBottom: 32,
   },
-  title: {
-    fontSize: Typography.sizes.xxl,
+  logoWrap: {
+    marginBottom: 18,
+    ...Platform.select({
+      ios: {
+        shadowColor: Palette.gradientStart,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.25,
+        shadowRadius: 16,
+      },
+      android: { elevation: 8 },
+    }),
+  },
+  logoGradient: {
+    width: 72,
+    height: 72,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroTitle: {
+    fontSize: 28,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
-    marginBottom: Spacing.xs,
+    marginBottom: 6,
   },
-  subtitle: {
+  heroSubtitle: {
     fontSize: Typography.sizes.md,
-    color: Colors.text.secondary,
-    marginBottom: Spacing.xl,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+    textAlign: 'center',
   },
-  form: {
-    marginTop: Spacing.lg,
+
+  /* ── Form card ── */
+  formCard: {
+    backgroundColor: Palette.cardBg,
+    borderRadius: 22,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.07,
+        shadowRadius: 12,
+      },
+      android: { elevation: 4 },
+    }),
   },
-  primaryButton: {
-    backgroundColor: Colors.primary,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.lg,
-    alignItems: 'center',
-    marginTop: Spacing.lg,
-  },
-  primaryButtonText: {
-    color: Colors.text.inverse,
-    fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-  },
-  footer: {
+  fieldRow: {
     flexDirection: 'row',
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    gap: 14,
+  },
+  fieldIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    backgroundColor: Palette.accentSoft,
+    alignItems: 'center',
     justifyContent: 'center',
-    marginTop: Spacing.lg,
+  },
+  fieldContent: {
+    flex: 1,
+  },
+  fieldSeparator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Palette.separator,
+    marginLeft: 70,
+  },
+  locationHint: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+    marginTop: 4,
+  },
+
+  /* ── Submit ── */
+  submitWrap: {
+    marginTop: 24,
+    borderRadius: 16,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: Palette.gradientStart,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.3,
+        shadowRadius: 14,
+      },
+      android: { elevation: 8 },
+    }),
+  },
+  submitGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 17,
+  },
+  submitText: {
+    fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
+  },
+
+  /* ── Terms ── */
+  termsText: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginTop: 16,
+    paddingHorizontal: 12,
+  },
+  termsLink: {
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Palette.gradientStart,
+  },
+
+  /* ── Divider ── */
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 24,
+    marginBottom: 20,
+    gap: 14,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Palette.separator,
+  },
+  dividerText: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.text.tertiary,
+    textTransform: 'lowercase',
+  },
+
+  /* ── Footer ── */
+  footer: {
+    alignItems: 'center',
+    gap: 12,
   },
   footerText: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
   },
-  footerLink: {
+  signInBtn: {
+    paddingVertical: 13,
+    paddingHorizontal: 32,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: Palette.gradientStart,
+    backgroundColor: Palette.accentSoft,
+  },
+  signInBtnText: {
     fontSize: Typography.sizes.md,
-    color: Colors.primary,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
+    color: Palette.gradientStart,
   },
 });
