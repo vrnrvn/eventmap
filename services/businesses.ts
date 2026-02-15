@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { profilesService } from './profiles';
-import { Business } from '@/types/database';
+import { eventsService } from './events';
+import { Business, BusinessLink, BusinessPhoto } from '@/types/database';
 
 export const businessesService = {
   async getUserBusiness(): Promise<Business | null> {
@@ -105,5 +106,71 @@ export const businessesService = {
 
     if (error) throw error;
     return count || 0;
+  },
+
+  async getFollowers(businessId: string): Promise<Array<{ id: string; user_id: string; created_at: string; profile: { name: string; avatar_url: string | null } }>> {
+    const { data, error } = await supabase
+      .from('follows')
+      .select(`
+        id,
+        user_id,
+        created_at,
+        profiles:user_id (name, avatar_url)
+      `)
+      .eq('business_id', businessId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return (data || []).map((row: any) => {
+      const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+      return {
+        id: row.id,
+        user_id: row.user_id,
+        created_at: row.created_at,
+        profile: profile || { name: 'User', avatar_url: null },
+      };
+    });
+  },
+
+  async getBusinessLinks(businessId: string): Promise<BusinessLink[]> {
+    const { data, error } = await supabase
+      .from('business_links')
+      .select('*')
+      .eq('business_id', businessId)
+      .order('sort_order', { ascending: true });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getBusinessPhotos(businessId: string): Promise<BusinessPhoto[]> {
+    const { data, error } = await supabase
+      .from('business_photos')
+      .select('*')
+      .eq('business_id', businessId)
+      .order('sort_order', { ascending: true });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async addBusinessPhoto(businessId: string, imageUrl: string, sortOrder: number): Promise<void> {
+    const { error } = await supabase.from('business_photos').insert({
+      business_id: businessId,
+      image_url: imageUrl,
+      sort_order: sortOrder,
+    });
+
+    if (error) throw error;
+  },
+
+  async deleteBusinessPhoto(photoId: string): Promise<void> {
+    const { error } = await supabase
+      .from('business_photos')
+      .delete()
+      .eq('id', photoId);
+
+    if (error) throw error;
   },
 };

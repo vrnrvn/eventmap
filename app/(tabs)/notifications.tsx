@@ -30,7 +30,13 @@ import {
   ChevronRight,
 } from 'lucide-react-native';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
-import { getNotifications, type Notification as ApiNotification } from '@/services/notifications';
+import {
+  getNotifications,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+  deleteNotification,
+  type Notification as ApiNotification,
+} from '@/services/notifications';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -149,14 +155,17 @@ export default function NotificationsScreen() {
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read: true } : n))
     );
+    markNotificationAsRead(id).catch(() => {});
   }, []);
 
   const markAllRead = useCallback(() => {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    markAllNotificationsAsRead().catch(() => {});
   }, []);
 
   const dismissNotification = useCallback((id: string) => {
     swipeableRefs.current.get(id)?.close();
+    deleteNotification(id).catch(() => {});
     setTimeout(() => {
       setNotifications((prev) => prev.filter((n) => n.id !== id));
     }, 200);
@@ -167,6 +176,8 @@ export default function NotificationsScreen() {
       markAsRead(notification.id);
       if (notification.eventId) {
         router.push(`/event/${notification.eventId}` as never);
+      } else {
+        router.push('/(tabs)/discover' as never);
       }
     },
     [markAsRead]

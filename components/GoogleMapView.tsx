@@ -14,6 +14,8 @@ type MapMarker = {
   title: string;
   categorySlug?: string;
   coverImageUrl?: string | null;
+  businessLogoUrl?: string | null;
+  businessName?: string;
 };
 
 type GoogleMapViewProps = {
