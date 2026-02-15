@@ -10,6 +10,8 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
@@ -17,8 +19,36 @@ import { profilesService } from '@/services/profiles';
 import { businessesService } from '@/services/businesses';
 import { Input } from '@/components/Input';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
-import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
-import { ArrowLeft, User, Building2 } from 'lucide-react-native';
+import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import {
+  ArrowLeft,
+  User,
+  Building2,
+  Settings,
+  Mail,
+  Heart,
+  MapPin,
+  Tag,
+  AtSign,
+  Navigation,
+  Save,
+  Check,
+} from 'lucide-react-native';
+
+const Palette = {
+  gradientStart: '#6366F1',
+  gradientEnd: '#8B5CF6',
+  cardBg: '#FFFFFF',
+  surfaceMuted: '#F8F9FC',
+  accentSoft: 'rgba(99,102,241,0.08)',
+  accentMedium: 'rgba(99,102,241,0.14)',
+  textOnGradient: '#FFFFFF',
+  textOnGradientMuted: 'rgba(255,255,255,0.75)',
+  separator: '#F0F0F5',
+  badge: '#6366F1',
+  successSoft: 'rgba(34,197,94,0.10)',
+  successDot: '#22C55E',
+};
 
 const BUSINESS_CATEGORIES = [
   'Restaurant',
@@ -33,10 +63,12 @@ const BUSINESS_CATEGORIES = [
   'Other',
 ];
 
-export default function Settings() {
+export default function SettingsScreen() {
+  const insets = useSafeAreaInsets();
   const { user, profile, refreshProfile } = useAuth();
   const { userBusiness, refreshBusiness } = useApp();
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState<'user' | 'business' | null>(null);
+  const [savedSection, setSavedSection] = useState<'user' | 'business' | null>(null);
 
   const [userForm, setUserForm] = useState({
     name: '',
@@ -82,6 +114,11 @@ export default function Settings() {
     }
   }, [userBusiness]);
 
+  const showSavedFeedback = (section: 'user' | 'business') => {
+    setSavedSection(section);
+    setTimeout(() => setSavedSection(null), 2000);
+  };
+
   const validateUser = () => {
     const next: Record<string, string> = {};
     if (!userForm.name.trim()) next.name = 'Name is required';
@@ -99,7 +136,7 @@ export default function Settings() {
 
   const handleSaveUser = async () => {
     if (!user || !validateUser()) return;
-    setSaving(true);
+    setSaving('user');
     try {
       await profilesService.updateProfile(user.id, {
         name: userForm.name.trim(),
@@ -109,17 +146,17 @@ export default function Settings() {
         lng: userForm.lng,
       });
       await refreshProfile();
-      Alert.alert('Saved', 'Your profile has been updated.');
+      showSavedFeedback('user');
     } catch (e) {
       Alert.alert('Error', 'Failed to save profile. Please try again.');
     } finally {
-      setSaving(false);
+      setSaving(null);
     }
   };
 
   const handleSaveBusiness = async () => {
     if (!userBusiness || !validateBusiness()) return;
-    setSaving(true);
+    setSaving('business');
     try {
       await businessesService.updateBusiness(userBusiness.id, {
         name: businessForm.name.trim(),
@@ -130,176 +167,325 @@ export default function Settings() {
         lng: businessForm.lng,
       });
       await refreshBusiness();
-      Alert.alert('Saved', 'Your business has been updated.');
+      showSavedFeedback('business');
     } catch (e) {
       Alert.alert('Error', 'Failed to save business. Please try again.');
     } finally {
-      setSaving(false);
+      setSaving(null);
     }
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.root, { paddingTop: insets.top }]}>
+      {/* ── Header ── */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <ArrowLeft size={24} color={Colors.text.primary} />
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.back()}
+          activeOpacity={0.7}
+        >
+          <ArrowLeft size={22} color={Colors.text.primary} />
         </TouchableOpacity>
-        <Text style={styles.title}>Settings</Text>
+        <View style={styles.headerCenter}>
+          <View style={styles.headerIconWrap}>
+            <Settings size={18} color={Palette.gradientStart} />
+          </View>
+          <Text style={styles.headerTitle}>Settings</Text>
+        </View>
+        <View style={styles.headerSpacer} />
       </View>
 
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
         <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
+          style={styles.scroll}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: insets.bottom + 40 },
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <User size={20} color={Colors.primary} />
-              <Text style={styles.sectionTitle}>User Profile</Text>
-            </View>
-            <Input
-              label="Name"
-              value={userForm.name}
-              onChangeText={(t) => setUserForm((p) => ({ ...p, name: t }))}
-              placeholder="Your name"
-              error={errors.name}
-            />
-            <Input
-              label="Hobbies"
-              value={userForm.hobbies}
-              onChangeText={(t) => setUserForm((p) => ({ ...p, hobbies: t }))}
-              placeholder="e.g. hiking, music, cooking (comma-separated)"
-              error={errors.hobbies}
-            />
-            <Input
-              label="Email"
-              value={user?.email ?? ''}
-              editable={false}
-              placeholder="Email"
-            />
-            <AddressSearchInput
-              label="Location"
-              value={userForm.city}
-              onChangeText={(t) => setUserForm((p) => ({ ...p, city: t }))}
-              onSelect={(r) =>
-                setUserForm((p) => ({
-                  ...p,
-                  city: r.formattedAddress,
-                  lat: r.lat,
-                  lng: r.lng,
-                }))
-              }
-              placeholder="City or area for event discovery"
-              approximate
-            />
-            <TouchableOpacity
-              style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-              onPress={handleSaveUser}
-              disabled={saving}
-            >
-              {saving ? (
-                <ActivityIndicator size="small" color={Colors.text.inverse} />
-              ) : (
-                <Text style={styles.saveButtonText}>Save User Profile</Text>
-              )}
-            </TouchableOpacity>
+          {/* ── User Profile Section ── */}
+          <View style={styles.sectionLabelRow}>
+            <Text style={styles.sectionLabel}>Personal Profile</Text>
+            {savedSection === 'user' && (
+              <View style={styles.savedBadge}>
+                <Check size={12} color={Palette.successDot} />
+                <Text style={styles.savedBadgeText}>Saved</Text>
+              </View>
+            )}
           </View>
 
-          {userBusiness && (
-            <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <Building2 size={20} color={Colors.primary} />
-                <Text style={styles.sectionTitle}>Business Profile</Text>
+          <View style={styles.card}>
+            {/* Name */}
+            <View style={styles.fieldRow}>
+              <View style={styles.fieldIcon}>
+                <User size={16} color={Palette.gradientStart} />
               </View>
-              <Input
-                label="Business Name"
-                value={businessForm.name}
-                onChangeText={(t) =>
-                  setBusinessForm((p) => ({ ...p, name: t }))
-                }
-                placeholder="Business name"
-                error={errors.businessName}
-              />
-              <View style={styles.field}>
-                <Text style={styles.label}>Category</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.categoryRow}
-                >
-                  {BUSINESS_CATEGORIES.map((cat) => (
-                    <TouchableOpacity
-                      key={cat}
-                      style={[
-                        styles.categoryChip,
-                        businessForm.category === cat &&
-                          styles.categoryChipSelected,
-                      ]}
-                      onPress={() =>
-                        setBusinessForm((p) => ({ ...p, category: cat }))
-                      }
-                    >
-                      <Text
-                        style={[
-                          styles.categoryChipText,
-                          businessForm.category === cat &&
-                            styles.categoryChipTextSelected,
-                        ]}
-                      >
-                        {cat}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-                {errors.category && (
-                  <Text style={styles.errorText}>{errors.category}</Text>
-                )}
+              <View style={styles.fieldContent}>
+                <Input
+                  label="Name"
+                  value={userForm.name}
+                  onChangeText={(t) => setUserForm((p) => ({ ...p, name: t }))}
+                  placeholder="Your name"
+                  error={errors.name}
+                />
               </View>
-              <Input
-                label="Contact Email"
-                value={businessForm.contactEmail}
-                onChangeText={(t) =>
-                  setBusinessForm((p) => ({ ...p, contactEmail: t }))
-                }
-                placeholder="Business contact email"
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-              <AddressSearchInput
-                label="Business Location"
-                value={businessForm.address}
-                onChangeText={(t) =>
-                  setBusinessForm((p) => ({ ...p, address: t }))
-                }
-                onSelect={(r) =>
-                  setBusinessForm((p) => ({
-                    ...p,
-                    address: r.formattedAddress,
-                    lat: r.lat,
-                    lng: r.lng,
-                  }))
-                }
-                placeholder="Building, street address, business or condo name"
-                addressPrecision="full"
-              />
-              <TouchableOpacity
-                style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-                onPress={handleSaveBusiness}
-                disabled={saving}
-              >
-                {saving ? (
-                  <ActivityIndicator size="small" color={Colors.text.inverse} />
-                ) : (
-                  <Text style={styles.saveButtonText}>Save Business Profile</Text>
-                )}
-              </TouchableOpacity>
             </View>
+
+            <View style={styles.fieldSeparator} />
+
+            {/* Hobbies */}
+            <View style={styles.fieldRow}>
+              <View style={styles.fieldIcon}>
+                <Heart size={16} color={Palette.gradientStart} />
+              </View>
+              <View style={styles.fieldContent}>
+                <Input
+                  label="Hobbies"
+                  value={userForm.hobbies}
+                  onChangeText={(t) =>
+                    setUserForm((p) => ({ ...p, hobbies: t }))
+                  }
+                  placeholder="e.g. hiking, music, cooking"
+                  error={errors.hobbies}
+                />
+              </View>
+            </View>
+
+            <View style={styles.fieldSeparator} />
+
+            {/* Email (read-only) */}
+            <View style={styles.fieldRow}>
+              <View style={[styles.fieldIcon, styles.fieldIconMuted]}>
+                <Mail size={16} color={Colors.text.tertiary} />
+              </View>
+              <View style={styles.fieldContent}>
+                <Input
+                  label="Email"
+                  value={user?.email ?? ''}
+                  editable={false}
+                  placeholder="Email"
+                />
+              </View>
+            </View>
+
+            <View style={styles.fieldSeparator} />
+
+            {/* Location */}
+            <View style={styles.fieldRow}>
+              <View style={styles.fieldIcon}>
+                <MapPin size={16} color={Palette.gradientStart} />
+              </View>
+              <View style={styles.fieldContent}>
+                <AddressSearchInput
+                  label="Location"
+                  value={userForm.city}
+                  onChangeText={(t) =>
+                    setUserForm((p) => ({ ...p, city: t }))
+                  }
+                  onSelect={(r) =>
+                    setUserForm((p) => ({
+                      ...p,
+                      city: r.formattedAddress,
+                      lat: r.lat,
+                      lng: r.lng,
+                    }))
+                  }
+                  placeholder="City or area for event discovery"
+                  approximate
+                />
+              </View>
+            </View>
+          </View>
+
+          {/* Save user */}
+          <TouchableOpacity
+            style={styles.saveWrap}
+            onPress={handleSaveUser}
+            disabled={saving !== null}
+            activeOpacity={0.85}
+          >
+            <LinearGradient
+              colors={
+                saving === 'user'
+                  ? ['#A5B4FC', '#C4B5FD']
+                  : [Palette.gradientStart, Palette.gradientEnd]
+              }
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.saveGradient}
+            >
+              {saving === 'user' ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Save size={16} color="#FFFFFF" />
+                  <Text style={styles.saveText}>Save Profile</Text>
+                </>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+
+          {/* ── Business Profile Section ── */}
+          {userBusiness && (
+            <>
+              <View style={[styles.sectionLabelRow, { marginTop: 32 }]}>
+                <Text style={styles.sectionLabel}>Business Profile</Text>
+                {savedSection === 'business' && (
+                  <View style={styles.savedBadge}>
+                    <Check size={12} color={Palette.successDot} />
+                    <Text style={styles.savedBadgeText}>Saved</Text>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.card}>
+                {/* Business Name */}
+                <View style={styles.fieldRow}>
+                  <View style={styles.fieldIcon}>
+                    <Building2 size={16} color={Palette.gradientStart} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Input
+                      label="Business Name"
+                      value={businessForm.name}
+                      onChangeText={(t) =>
+                        setBusinessForm((p) => ({ ...p, name: t }))
+                      }
+                      placeholder="Business name"
+                      error={errors.businessName}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.fieldSeparator} />
+
+                {/* Category */}
+                <View style={styles.fieldRowNoPad}>
+                  <View style={[styles.fieldIcon, { marginTop: 14 }]}>
+                    <Tag size={16} color={Palette.gradientStart} />
+                  </View>
+                  <View style={styles.catContainer}>
+                    <Text style={styles.catLabel}>Category</Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.catScrollContent}
+                    >
+                      {BUSINESS_CATEGORIES.map((cat) => {
+                        const selected = businessForm.category === cat;
+                        return (
+                          <TouchableOpacity
+                            key={cat}
+                            style={[
+                              styles.catChip,
+                              selected && styles.catChipSelected,
+                            ]}
+                            onPress={() =>
+                              setBusinessForm((p) => ({ ...p, category: cat }))
+                            }
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[
+                                styles.catChipText,
+                                selected && styles.catChipTextSelected,
+                              ]}
+                            >
+                              {cat}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                    {errors.category && (
+                      <Text style={styles.errorText}>{errors.category}</Text>
+                    )}
+                  </View>
+                </View>
+
+                <View style={styles.fieldSeparator} />
+
+                {/* Contact Email */}
+                <View style={styles.fieldRow}>
+                  <View style={styles.fieldIcon}>
+                    <AtSign size={16} color={Palette.gradientStart} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Input
+                      label="Contact Email"
+                      value={businessForm.contactEmail}
+                      onChangeText={(t) =>
+                        setBusinessForm((p) => ({ ...p, contactEmail: t }))
+                      }
+                      placeholder="Business contact email"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.fieldSeparator} />
+
+                {/* Business Address */}
+                <View style={styles.fieldRow}>
+                  <View style={styles.fieldIcon}>
+                    <Navigation size={16} color={Palette.gradientStart} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <AddressSearchInput
+                      label="Business Location"
+                      value={businessForm.address}
+                      onChangeText={(t) =>
+                        setBusinessForm((p) => ({ ...p, address: t }))
+                      }
+                      onSelect={(r) =>
+                        setBusinessForm((p) => ({
+                          ...p,
+                          address: r.formattedAddress,
+                          lat: r.lat,
+                          lng: r.lng,
+                        }))
+                      }
+                      placeholder="Full business address"
+                      addressPrecision="full"
+                    />
+                  </View>
+                </View>
+              </View>
+
+              {/* Save business */}
+              <TouchableOpacity
+                style={styles.saveWrap}
+                onPress={handleSaveBusiness}
+                disabled={saving !== null}
+                activeOpacity={0.85}
+              >
+                <LinearGradient
+                  colors={
+                    saving === 'business'
+                      ? ['#A5B4FC', '#C4B5FD']
+                      : [Palette.gradientStart, Palette.gradientEnd]
+                  }
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.saveGradient}
+                >
+                  {saving === 'business' ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Save size={16} color="#FFFFFF" />
+                      <Text style={styles.saveText}>Save Business</Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </>
           )}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -307,110 +493,229 @@ export default function Settings() {
   );
 }
 
+/* ────────────────────────── STYLES ────────────────────────── */
+
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    backgroundColor: Colors.background.primary,
+    backgroundColor: Palette.surfaceMuted,
   },
+
+  /* ── Header ── */
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.md,
-    paddingTop: Spacing.xl + 24,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border.light,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: Palette.cardBg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Palette.separator,
   },
-  backButton: {
-    padding: Spacing.sm,
-    marginRight: Spacing.sm,
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: Palette.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  title: {
-    fontSize: Typography.sizes.xl,
+  headerCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: Palette.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: Typography.sizes.lg,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
   },
+  headerSpacer: {
+    width: 40,
+  },
+
   keyboardView: {
     flex: 1,
   },
-  scrollView: {
+  scroll: {
     flex: 1,
   },
   scrollContent: {
-    padding: Spacing.xl,
-    paddingBottom: Spacing.xxl,
+    paddingHorizontal: 20,
+    paddingTop: 24,
   },
-  section: {
-    marginBottom: Spacing.xxl,
-  },
-  sectionHeader: {
+
+  /* ── Section label ── */
+  sectionLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    marginLeft: 4,
   },
-  sectionTitle: {
-    fontSize: Typography.sizes.lg,
+  sectionLabel: {
+    fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: Colors.text.primary,
+    color: Colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
-  field: {
-    marginBottom: Spacing.md,
+  savedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Palette.successSoft,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
   },
-  label: {
+  savedBadgeText: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Palette.successDot,
+  },
+
+  /* ── Card ── */
+  card: {
+    backgroundColor: Palette.cardBg,
+    borderRadius: 20,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 10,
+      },
+      android: { elevation: 3 },
+    }),
+  },
+
+  /* ── Field rows ── */
+  fieldRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 14,
+  },
+  fieldRowNoPad: {
+    flexDirection: 'row',
+    paddingLeft: 16,
+    paddingRight: 0,
+    gap: 10,
+  },
+  fieldIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: Palette.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fieldIconMuted: {
+    backgroundColor: Palette.surfaceMuted,
+  },
+  fieldContent: {
+    flex: 1,
+  },
+  fieldSeparator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Palette.separator,
+    marginLeft: 66,
+  },
+
+  /* ── Category chips ── */
+  catContainer: {
+    flex: 1,
+    paddingVertical: 10,
+  },
+  catLabel: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.text.tertiary,
+    marginBottom: 8,
+    marginLeft: 4,
+  },
+  catScrollContent: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingRight: 16,
+    paddingBottom: 4,
+  },
+  catChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: Palette.surfaceMuted,
+    borderWidth: 1.5,
+    borderColor: Palette.separator,
+  },
+  catChipSelected: {
+    backgroundColor: Palette.badge,
+    borderColor: Palette.badge,
+  },
+  catChipText: {
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
     color: Colors.text.primary,
-    marginBottom: Spacing.xs,
   },
-  categoryRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.xs,
-  },
-  categoryChip: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Colors.background.secondary,
-    borderWidth: 1,
-    borderColor: Colors.border.light,
-  },
-  categoryChipSelected: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  categoryChipText: {
-    fontSize: Typography.sizes.sm,
-    color: Colors.text.primary,
-  },
-  categoryChipTextSelected: {
-    color: Colors.text.inverse,
+  catChipTextSelected: {
+    color: '#FFFFFF',
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
+
+  /* ── Error ── */
   errorText: {
     fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamily,
     color: Colors.error,
-    marginTop: Spacing.xs,
+    marginTop: 4,
+    marginLeft: 4,
   },
-  saveButton: {
-    backgroundColor: Colors.primary,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.lg,
+
+  /* ── Save button ── */
+  saveWrap: {
+    marginTop: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: Palette.gradientStart,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.25,
+        shadowRadius: 14,
+      },
+      android: { elevation: 6 },
+    }),
+  },
+  saveGradient: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: Spacing.sm,
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
   },
-  saveButtonDisabled: {
-    opacity: 0.7,
-  },
-  saveButtonText: {
-    color: Colors.text.inverse,
+  saveText: {
     fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
   },
+
+  /* ── No-business empty (not used but kept consistent) ── */
 });

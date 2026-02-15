@@ -132,8 +132,8 @@ function buildMapHtml(
             var content = '<div class="info-window-content" data-event-id="' + escapeHtml(eventId) + '" style="padding:0;margin:0;min-width:200px;max-width:260px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.15);border-radius:8px;overflow:hidden;">' +
               (imgUrl ? '<img src="' + escapeHtml(imgUrl) + '" style="width:100%;height:120px;object-fit:cover;border-radius:8px 8px 0 0;display:block;pointer-events:none;" />' : '') +
               '<div style="padding:12px;background:#fff;border-radius:' + (imgUrl ? '0 0 8px 8px' : '8px') + ';">' +
-              '<div style="font-family:\'Inter\',sans-serif;font-weight:600;font-size:14px;color:#1a1a1a;margin-bottom:8px;">' + escapeHtml(m.title || 'Event') + '</div>' +
-              '<div style="font-family:\'Inter\',sans-serif;font-size:12px;color:#6366f1;font-weight:500;">View details →</div>' +
+              '<div style="font-weight:600;font-size:14px;color:#1a1a1a;margin-bottom:8px;">' + escapeHtml(m.title || 'Event') + '</div>' +
+              '<div style="font-size:12px;color:#6366f1;font-weight:500;">View details →</div>' +
               '</div></div>';
             infoWindow.setContent(content);
             infoWindow.open(map, marker);
