@@ -8,28 +8,63 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Dimensions,
 } from 'react-native';
 import { TouchableOpacity } from 'react-native-gesture-handler';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
-import { ChevronRight } from 'lucide-react-native';
+import {
+  ChevronRight,
+  CalendarPlus,
+  Type,
+  AlignLeft,
+  Tag,
+  Clock,
+  CalendarDays,
+  Repeat,
+  MapPin,
+  Briefcase,
+  Sparkles,
+  Navigation,
+} from 'lucide-react-native';
 import { useApp } from '@/contexts/AppContext';
 import { router } from 'expo-router';
 import { Input } from '@/components/Input';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
 import { GoogleMapView } from '@/components/GoogleMapView';
-import { RecurrencePicker, getRecurrenceLabel, type RecurrencePickerHandle } from '@/components/RecurrencePicker';
+import {
+  RecurrencePicker,
+  getRecurrenceLabel,
+  type RecurrencePickerHandle,
+} from '@/components/RecurrencePicker';
 import { geocodingService } from '@/services/geocoding';
 import { eventsService } from '@/services/events';
 import { categoriesService } from '@/services/categories';
 import { Category } from '@/types/database';
-import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import type { RecurrenceOption } from '@/utils/recurrence';
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
 const MAX_EVENT_DATE = new Date();
 MAX_EVENT_DATE.setFullYear(MAX_EVENT_DATE.getFullYear() + 10);
 
+const Palette = {
+  gradientStart: '#6366F1',
+  gradientEnd: '#8B5CF6',
+  cardBg: '#FFFFFF',
+  surfaceMuted: '#F8F9FC',
+  accentSoft: 'rgba(99,102,241,0.08)',
+  accentMedium: 'rgba(99,102,241,0.14)',
+  textOnGradient: '#FFFFFF',
+  textOnGradientMuted: 'rgba(255,255,255,0.75)',
+  separator: '#F0F0F5',
+  badge: '#6366F1',
+};
+
 export default function CreateScreen() {
+  const insets = useSafeAreaInsets();
   const { hasBusiness, userBusiness } = useApp();
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(false);
@@ -113,8 +148,12 @@ export default function CreateScreen() {
     if (!validate() || !userBusiness) return;
 
     const address = formData.address.trim() || (businessLocation?.address ?? '');
-    const lat = formData.address.trim() ? formData.lat : (businessLocation?.lat ?? formData.lat);
-    const lng = formData.address.trim() ? formData.lng : (businessLocation?.lng ?? formData.lng);
+    const lat = formData.address.trim()
+      ? formData.lat
+      : (businessLocation?.lat ?? formData.lat);
+    const lng = formData.address.trim()
+      ? formData.lng
+      : (businessLocation?.lng ?? formData.lng);
 
     setLoading(true);
     try {
@@ -153,186 +192,325 @@ export default function CreateScreen() {
 
   const formatDateTime = (d: Date) =>
     d.toLocaleString('en-US', {
+      weekday: 'short',
       month: 'short',
       day: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
     });
 
+  /* ── No business state ── */
   if (!hasBusiness) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Create Events</Text>
-        <Text style={styles.subtitle}>
-          You need a business profile to create events
+      <View style={[styles.noBizContainer, { paddingTop: insets.top + 40 }]}>
+        <View style={styles.noBizIconWrap}>
+          <Briefcase size={36} color={Palette.gradientStart} />
+        </View>
+        <Text style={styles.noBizTitle}>Create Events</Text>
+        <Text style={styles.noBizSubtitle}>
+          You need a business profile to start posting events and reaching your
+          community.
         </Text>
         <TouchableOpacity
-          style={styles.button}
+          style={styles.noBizCta}
           onPress={() => router.push('/(tabs)/profile')}
+          activeOpacity={0.85}
         >
-          <Text style={styles.buttonText}>Set Up Business</Text>
+          <LinearGradient
+            colors={[Palette.gradientStart, Palette.gradientEnd]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.noBizCtaGradient}
+          >
+            <Text style={styles.noBizCtaText}>Set Up Business</Text>
+            <ChevronRight size={18} color="#fff" />
+          </LinearGradient>
         </TouchableOpacity>
       </View>
     );
   }
 
+  /* ── Main form ── */
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        style={styles.scroll}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 40 },
+        ]}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.title}>Create Event</Text>
-
-        <Input
-          label="Title"
-          value={formData.title}
-          onChangeText={(t) => setFormData((f) => ({ ...f, title: t }))}
-          placeholder="Event name"
-          error={errors.title}
-        />
-
-        <Input
-          label="Description"
-          value={formData.description}
-          onChangeText={(t) => setFormData((f) => ({ ...f, description: t }))}
-          placeholder="Describe your event"
-          multiline
-          numberOfLines={4}
-          style={styles.textArea}
-          error={errors.description}
-        />
-
-        <Text style={styles.label}>Category</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoriesScroll}
-          contentContainerStyle={styles.categoriesRow}
-        >
-          {categories.map((c) => (
-            <TouchableOpacity
-              key={c.id}
-              style={[
-                styles.categoryChip,
-                formData.categoryId === c.id && styles.categoryChipSelected,
-              ]}
-              onPress={() => setFormData((f) => ({ ...f, categoryId: c.id }))}
-            >
-              <Text
-                style={[
-                  styles.categoryChipText,
-                  formData.categoryId === c.id && styles.categoryChipTextSelected,
-                ]}
-              >
-                {c.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-        {errors.categoryId && (
-          <Text style={styles.errorText}>{errors.categoryId}</Text>
-        )}
-
-        <Text style={styles.label}>Start</Text>
-        <TouchableOpacity
-          style={styles.dateButton}
-          onPress={() => openDatePicker(formData.startDatetime, 'start')}
-        >
-          <Text style={styles.dateButtonText}>
-            {formatDateTime(formData.startDatetime)}
-          </Text>
-        </TouchableOpacity>
-
-        <Text style={styles.label}>End</Text>
-        <TouchableOpacity
-          style={styles.dateButton}
-          onPress={() => openDatePicker(formData.endDatetime, 'end')}
-        >
-          <Text style={styles.dateButtonText}>
-            {formatDateTime(formData.endDatetime)}
-          </Text>
-        </TouchableOpacity>
-        {errors.endDatetime && (
-          <Text style={styles.errorText}>{errors.endDatetime}</Text>
-        )}
-
-        <Text style={styles.label}>Repeat</Text>
-        <TouchableOpacity
-          style={styles.dateButton}
-          onPress={() => recurrencePickerRef.current?.present()}
-        >
-          <Text style={styles.dateButtonText}>
-            {getRecurrenceLabel(formData.recurrence)}
-          </Text>
-          <ChevronRight size={20} color={Colors.text.tertiary} />
-        </TouchableOpacity>
-
-        <Text style={styles.label}>Location (optional – defaults to business address)</Text>
-        <AddressSearchInput
-          value={formData.address}
-          onChangeText={(t) => setFormData((f) => ({ ...f, address: t }))}
-          onSelect={(result) =>
-            setFormData((f) => ({
-              ...f,
-              address: result.formattedAddress,
-              lat: result.lat,
-              lng: result.lng,
-            }))
-          }
-          placeholder="Address or venue"
-          approximate={false}
-          showSetButton
-        />
-        <Text style={styles.tapHint}>Tap on the map to set location</Text>
-        <View style={styles.mapPreview}>
-          <GoogleMapView
-            center={{ lat: formData.lat, lng: formData.lng }}
-            zoom={15}
-            markers={[
-              {
-                id: 'event',
-                lat: formData.lat,
-                lng: formData.lng,
-                title: formData.title || 'Event location',
-              },
-            ]}
-            style={styles.mapPreviewInner}
-            onMapPress={async (lat, lng) => {
-              const result = await geocodingService.reverseGeocode(lat, lng);
-              if (result) {
-                setFormData((f) => ({
-                  ...f,
-                  address: result.formattedAddress,
-                  lat: result.lat,
-                  lng: result.lng,
-                }));
-              }
-            }}
-          />
+        {/* ── Page header ── */}
+        <View style={styles.pageHeader}>
+          <View style={styles.pageHeaderIcon}>
+            <CalendarPlus size={22} color={Palette.gradientStart} />
+          </View>
+          <View>
+            <Text style={styles.pageTitle}>Create Event</Text>
+            <Text style={styles.pageSubtitle}>
+              Fill in the details below to publish
+            </Text>
+          </View>
         </View>
-        {formData.address && (
-          <Text style={styles.locationHint}>
-            Pin at {formData.lat.toFixed(4)}, {formData.lng.toFixed(4)}
-          </Text>
-        )}
 
+        {/* ── Section: Basic Info ── */}
+        <Text style={styles.sectionLabel}>Basic Information</Text>
+        <View style={styles.card}>
+          <View style={styles.fieldRow}>
+            <View style={styles.fieldIcon}>
+              <Type size={16} color={Palette.gradientStart} />
+            </View>
+            <View style={styles.fieldContent}>
+              <Input
+                label="Title"
+                value={formData.title}
+                onChangeText={(t) => setFormData((f) => ({ ...f, title: t }))}
+                placeholder="Event name"
+                error={errors.title}
+              />
+            </View>
+          </View>
+
+          <View style={styles.fieldSeparator} />
+
+          <View style={styles.fieldRow}>
+            <View style={styles.fieldIcon}>
+              <AlignLeft size={16} color={Palette.gradientStart} />
+            </View>
+            <View style={styles.fieldContent}>
+              <Input
+                label="Description"
+                value={formData.description}
+                onChangeText={(t) =>
+                  setFormData((f) => ({ ...f, description: t }))
+                }
+                placeholder="What's this event about?"
+                multiline
+                numberOfLines={4}
+                style={styles.textArea}
+                error={errors.description}
+              />
+            </View>
+          </View>
+        </View>
+
+        {/* ── Section: Category ── */}
+        <Text style={styles.sectionLabel}>Category</Text>
+        <View style={styles.card}>
+          <View style={styles.fieldRowNoPad}>
+            <View style={[styles.fieldIcon, { marginTop: 14 }]}>
+              <Tag size={16} color={Palette.gradientStart} />
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.catScroll}
+              contentContainerStyle={styles.catScrollContent}
+            >
+              {categories.map((c) => {
+                const selected = formData.categoryId === c.id;
+                return (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[styles.catChip, selected && styles.catChipSelected]}
+                    onPress={() =>
+                      setFormData((f) => ({ ...f, categoryId: c.id }))
+                    }
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[
+                        styles.catChipText,
+                        selected && styles.catChipTextSelected,
+                      ]}
+                    >
+                      {c.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+          {errors.categoryId && (
+            <View style={styles.inlineError}>
+              <Text style={styles.errorText}>{errors.categoryId}</Text>
+            </View>
+          )}
+        </View>
+
+        {/* ── Section: Date & Time ── */}
+        <Text style={styles.sectionLabel}>Date & Time</Text>
+        <View style={styles.card}>
+          {/* Start */}
+          <TouchableOpacity
+            style={styles.dateRow}
+            activeOpacity={0.6}
+            onPress={() => openDatePicker(formData.startDatetime, 'start')}
+          >
+            <View style={styles.fieldIcon}>
+              <Clock size={16} color={Palette.gradientStart} />
+            </View>
+            <View style={styles.dateTextBlock}>
+              <Text style={styles.dateLabel}>Starts</Text>
+              <Text style={styles.dateValue}>
+                {formatDateTime(formData.startDatetime)}
+              </Text>
+            </View>
+            <ChevronRight size={18} color={Colors.text.tertiary} />
+          </TouchableOpacity>
+
+          <View style={styles.fieldSeparator} />
+
+          {/* End */}
+          <TouchableOpacity
+            style={styles.dateRow}
+            activeOpacity={0.6}
+            onPress={() => openDatePicker(formData.endDatetime, 'end')}
+          >
+            <View style={styles.fieldIcon}>
+              <CalendarDays size={16} color={Palette.gradientStart} />
+            </View>
+            <View style={styles.dateTextBlock}>
+              <Text style={styles.dateLabel}>Ends</Text>
+              <Text style={styles.dateValue}>
+                {formatDateTime(formData.endDatetime)}
+              </Text>
+            </View>
+            <ChevronRight size={18} color={Colors.text.tertiary} />
+          </TouchableOpacity>
+
+          {errors.endDatetime && (
+            <View style={styles.inlineError}>
+              <Text style={styles.errorText}>{errors.endDatetime}</Text>
+            </View>
+          )}
+
+          <View style={styles.fieldSeparator} />
+
+          {/* Recurrence */}
+          <TouchableOpacity
+            style={styles.dateRow}
+            activeOpacity={0.6}
+            onPress={() => recurrencePickerRef.current?.present()}
+          >
+            <View style={styles.fieldIcon}>
+              <Repeat size={16} color={Palette.gradientStart} />
+            </View>
+            <View style={styles.dateTextBlock}>
+              <Text style={styles.dateLabel}>Repeat</Text>
+              <Text style={styles.dateValue}>
+                {getRecurrenceLabel(formData.recurrence)}
+              </Text>
+            </View>
+            <ChevronRight size={18} color={Colors.text.tertiary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* ── Section: Location ── */}
+        <Text style={styles.sectionLabel}>Location</Text>
+        <View style={styles.card}>
+          <View style={styles.fieldRow}>
+            <View style={styles.fieldIcon}>
+              <MapPin size={16} color={Palette.gradientStart} />
+            </View>
+            <View style={styles.fieldContent}>
+              <Text style={styles.locationNote}>
+                Defaults to your business address if left empty
+              </Text>
+              <AddressSearchInput
+                value={formData.address}
+                onChangeText={(t) =>
+                  setFormData((f) => ({ ...f, address: t }))
+                }
+                onSelect={(result) =>
+                  setFormData((f) => ({
+                    ...f,
+                    address: result.formattedAddress,
+                    lat: result.lat,
+                    lng: result.lng,
+                  }))
+                }
+                placeholder="Address or venue"
+                approximate={false}
+                showSetButton
+              />
+            </View>
+          </View>
+
+          {/* Map */}
+          <View style={styles.mapContainer}>
+            <View style={styles.mapCard}>
+              <GoogleMapView
+                center={{ lat: formData.lat, lng: formData.lng }}
+                zoom={15}
+                markers={[
+                  {
+                    id: 'event',
+                    lat: formData.lat,
+                    lng: formData.lng,
+                    title: formData.title || 'Event location',
+                  },
+                ]}
+                style={styles.mapInner}
+                onMapPress={async (lat, lng) => {
+                  const result = await geocodingService.reverseGeocode(lat, lng);
+                  if (result) {
+                    setFormData((f) => ({
+                      ...f,
+                      address: result.formattedAddress,
+                      lat: result.lat,
+                      lng: result.lng,
+                    }));
+                  }
+                }}
+              />
+              <View style={styles.mapHintOverlay}>
+                <Navigation size={12} color={Palette.gradientStart} />
+                <Text style={styles.mapHintText}>Tap to set location</Text>
+              </View>
+            </View>
+            {formData.address ? (
+              <Text style={styles.coordText}>
+                📍 {formData.lat.toFixed(4)}, {formData.lng.toFixed(4)}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+
+        {/* ── Submit ── */}
         <TouchableOpacity
-          style={styles.submitButton}
+          style={styles.submitWrap}
           onPress={handleSubmit}
           disabled={loading}
+          activeOpacity={0.85}
         >
-          {loading ? (
-            <ActivityIndicator color={Colors.text.inverse} />
-          ) : (
-            <Text style={styles.submitButtonText}>Create Event</Text>
-          )}
+          <LinearGradient
+            colors={
+              loading
+                ? ['#A5B4FC', '#C4B5FD']
+                : [Palette.gradientStart, Palette.gradientEnd]
+            }
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.submitGradient}
+          >
+            {loading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <>
+                <Sparkles size={18} color="#FFFFFF" />
+                <Text style={styles.submitText}>Publish Event</Text>
+              </>
+            )}
+          </LinearGradient>
         </TouchableOpacity>
       </ScrollView>
+
       <RecurrencePicker
         ref={recurrencePickerRef}
         selectedValue={formData.recurrence}
@@ -342,133 +520,297 @@ export default function CreateScreen() {
   );
 }
 
+/* ────────────────────────── STYLES ────────────────────────── */
+
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    backgroundColor: Colors.background.primary,
+    backgroundColor: Palette.surfaceMuted,
   },
-  scrollView: {
+  scroll: {
     flex: 1,
   },
   scrollContent: {
-    padding: Spacing.xl,
-    paddingBottom: Spacing.xxl,
+    paddingHorizontal: 20,
   },
-  title: {
-    fontSize: Typography.sizes.xxl,
+
+  /* ── Page header ── */
+  pageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginBottom: 28,
+  },
+  pageHeaderIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: Palette.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pageTitle: {
+    fontSize: 24,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
-    marginBottom: Spacing.lg,
   },
-  subtitle: {
-    fontSize: Typography.sizes.md,
-    color: Colors.text.secondary,
-    textAlign: 'center',
-    marginBottom: Spacing.xl,
+  pageSubtitle: {
+    fontSize: 13,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+    marginTop: 2,
   },
-  button: {
-    backgroundColor: Colors.primary,
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.xl,
-    borderRadius: BorderRadius.lg,
-  },
-  buttonText: {
-    color: Colors.text.inverse,
-    fontSize: Typography.sizes.md,
+
+  /* ── Section labels ── */
+  sectionLabel: {
+    fontSize: 13,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
+    color: Colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 10,
+    marginLeft: 4,
+    marginTop: 24,
   },
-  label: {
-    fontSize: Typography.sizes.sm,
+
+  /* ── Card ── */
+  card: {
+    backgroundColor: Palette.cardBg,
+    borderRadius: 20,
+    overflow: 'hidden',
+    elevation: 3,
+  },
+
+  /* ── Field rows ── */
+  fieldRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 14,
+  },
+  fieldRowNoPad: {
+    flexDirection: 'row',
+    paddingLeft: 16,
+    paddingRight: 0,
+    gap: 10,
+  },
+  fieldIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: Palette.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fieldContent: {
+    flex: 1,
+  },
+  fieldSeparator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Palette.separator,
+    marginLeft: 66,
+  },
+
+  textArea: {
+    minHeight: 90,
+    textAlignVertical: 'top',
+  },
+
+  /* ── Category chips ── */
+  catScroll: {
+    flex: 1,
+  },
+  catScrollContent: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingVertical: 14,
+    paddingRight: 16,
+  },
+  catChip: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 20,
+    backgroundColor: Palette.surfaceMuted,
+    borderWidth: 1.5,
+    borderColor: Palette.separator,
+  },
+  catChipSelected: {
+    backgroundColor: Palette.badge,
+    borderColor: Palette.badge,
+  },
+  catChipText: {
+    fontSize: 13,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
     color: Colors.text.primary,
-    marginBottom: Spacing.xs,
   },
-  textArea: {
-    minHeight: 100,
-    textAlignVertical: 'top',
-  },
-  categoriesScroll: {
-    marginBottom: Spacing.md,
-  },
-  categoriesRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.xs,
-  },
-  categoryChip: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Colors.background.secondary,
-  },
-  categoryChipSelected: {
-    backgroundColor: Colors.primary,
-  },
-  categoryChipText: {
-    fontSize: Typography.sizes.md,
-    color: Colors.text.primary,
-  },
-  categoryChipTextSelected: {
-    color: Colors.text.inverse,
+  catChipTextSelected: {
+    color: '#FFFFFF',
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
-  dateButton: {
+
+  /* ── Date rows ── */
+  dateRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: Colors.border.light,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm + 4,
-    marginBottom: Spacing.md,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 14,
   },
-  dateButtonText: {
-    fontSize: Typography.sizes.md,
+  dateTextBlock: {
+    flex: 1,
+  },
+  dateLabel: {
+    fontSize: 12,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.text.tertiary,
+    marginBottom: 2,
+  },
+  dateValue: {
+    fontSize: 15,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
+  },
+
+  /* ── Errors ── */
+  inlineError: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    paddingTop: 4,
   },
   errorText: {
-    fontSize: Typography.sizes.xs,
+    fontSize: 12,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
     color: Colors.error,
-    marginTop: -Spacing.sm,
-    marginBottom: Spacing.sm,
   },
-  locationHint: {
-    fontSize: Typography.sizes.xs,
+
+  /* ── Location ── */
+  locationNote: {
+    fontSize: 12,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
-    marginTop: Spacing.xs,
-    marginBottom: Spacing.md,
+    marginBottom: 8,
   },
-  tapHint: {
-    fontSize: Typography.sizes.sm,
-    color: Colors.text.secondary,
-    marginBottom: Spacing.sm,
+  mapContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    paddingTop: 4,
   },
-  mapPreview: {
-    height: 280,
-    borderRadius: BorderRadius.lg,
+  mapCard: {
+    height: 220,
+    borderRadius: 16,
     overflow: 'hidden',
-    marginBottom: Spacing.md,
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: Palette.separator,
   },
-  mapPreviewInner: {
+  mapInner: {
     flex: 1,
-    minHeight: 280,
+    minHeight: 220,
   },
-  submitButton: {
-    backgroundColor: Colors.primary,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.lg,
+  mapHintOverlay: {
+    position: 'absolute',
+    bottom: 10,
+    alignSelf: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: Spacing.lg,
+    gap: 5,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    elevation: 3,
   },
-  submitButtonText: {
-    color: Colors.text.inverse,
-    fontSize: Typography.sizes.md,
+  mapHintText: {
+    fontSize: 12,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
+    color: Palette.gradientStart,
+  },
+  coordText: {
+    fontSize: 12,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+
+  /* ── Submit ── */
+  submitWrap: {
+    marginTop: 32,
+    borderRadius: 16,
+    overflow: 'hidden',
+    elevation: 8,
+  },
+  submitGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 17,
+  },
+  submitText: {
+    fontSize: 16,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
+  },
+
+  /* ── No-business state ── */
+  noBizContainer: {
+    flex: 1,
+    backgroundColor: Palette.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
+  },
+  noBizIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 24,
+    backgroundColor: Palette.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  noBizTitle: {
+    fontSize: 22,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: Colors.text.primary,
+    marginBottom: 8,
+  },
+  noBizSubtitle: {
+    fontSize: 15,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 28,
+  },
+  noBizCta: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  noBizCtaGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 15,
+    paddingHorizontal: 32,
+  },
+  noBizCtaText: {
+    fontSize: 16,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: '#FFFFFF',
   },
 });

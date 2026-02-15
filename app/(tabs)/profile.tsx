@@ -313,18 +313,21 @@ const styles = StyleSheet.create({
   },
   avatarInitials: {
     fontSize: 28,
-    fontWeight: '700',
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
     color: Palette.textOnGradient,
     letterSpacing: 1,
   },
   headerName: {
     fontSize: 22,
-    fontWeight: '700',
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
     color: Palette.textOnGradient,
     marginBottom: 4,
   },
   headerSubtitle: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
     color: Palette.textOnGradientMuted,
     marginBottom: Spacing.md,
   },
@@ -340,8 +343,9 @@ const styles = StyleSheet.create({
   },
   businessBadgeText: {
     fontSize: 13,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
     color: Palette.textOnGradient,
-    fontWeight: '600',
   },
   modePill: {
     flexDirection: 'row',
@@ -355,7 +359,8 @@ const styles = StyleSheet.create({
   },
   modePillText: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
     color: Palette.gradientStart,
   },
 
@@ -376,11 +381,13 @@ const styles = StyleSheet.create({
   },
   statValue: {
     fontSize: 18,
-    fontWeight: '700',
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
   },
   statLabel: {
     fontSize: 12,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
     marginTop: 2,
   },
@@ -397,7 +404,8 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
     color: Colors.text.tertiary,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
@@ -438,11 +446,13 @@ const styles = StyleSheet.create({
   },
   menuLabel: {
     fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
   },
   menuSublabel: {
     fontSize: 12,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
     marginTop: 1,
   },
@@ -473,11 +483,13 @@ const styles = StyleSheet.create({
   },
   createBusinessTitle: {
     fontSize: 15,
-    fontWeight: '700',
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
     color: Palette.textOnGradient,
   },
   createBusinessSubtitle: {
     fontSize: 12,
+    fontFamily: Typography.fontFamily,
     color: Palette.textOnGradientMuted,
     marginTop: 2,
   },
@@ -498,13 +510,15 @@ const styles = StyleSheet.create({
   signOutText: {
     color: Colors.error,
     fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
   },
 
   /* ── Footer ── */
   versionText: {
     textAlign: 'center',
     fontSize: 12,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
     marginTop: Spacing.xl,
     marginBottom: Spacing.md,
