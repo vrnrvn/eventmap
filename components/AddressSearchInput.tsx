@@ -214,6 +214,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
     color: Colors.text.primary,
     marginBottom: Spacing.xs,
@@ -279,6 +280,7 @@ const styles = StyleSheet.create({
   setButtonText: {
     color: Colors.text.inverse,
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
   errorText: {

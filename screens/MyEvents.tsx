@@ -308,6 +308,7 @@ const styles = StyleSheet.create({
   title: {
     flex: 1,
     fontSize: Typography.sizes.xl,
+    fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
   },
@@ -322,6 +323,7 @@ const styles = StyleSheet.create({
   },
   noBusinessText: {
     fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
     marginBottom: Spacing.xs,
@@ -340,6 +342,7 @@ const styles = StyleSheet.create({
   createBusinessButtonText: {
     color: Colors.text.inverse,
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
   listContent: {
@@ -362,6 +365,7 @@ const styles = StyleSheet.create({
   createButtonText: {
     color: Colors.text.inverse,
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
   eventRow: {
@@ -379,6 +383,7 @@ const styles = StyleSheet.create({
   },
   eventTitle: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
   },
@@ -408,6 +413,7 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
     marginBottom: Spacing.xs,
@@ -427,6 +433,7 @@ const styles = StyleSheet.create({
   createEventLinkText: {
     color: Colors.text.inverse,
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
   footerLoader: {

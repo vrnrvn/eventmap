@@ -23,6 +23,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: Typography.sizes.xxl,
+    fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginBottom: Spacing.md,

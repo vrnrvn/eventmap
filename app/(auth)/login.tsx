@@ -144,6 +144,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: Typography.sizes.xxl,
+    fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginBottom: Spacing.xs,
@@ -163,6 +164,7 @@ const styles = StyleSheet.create({
   forgotLinkText: {
     fontSize: Typography.sizes.sm,
     color: Colors.primary,
+    fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
   },
   primaryButton: {
@@ -175,6 +177,7 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: Colors.text.inverse,
     fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
   footer: {
@@ -189,6 +192,7 @@ const styles = StyleSheet.create({
   footerLink: {
     fontSize: Typography.sizes.md,
     color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
 });

@@ -395,6 +395,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
   },
@@ -405,6 +406,7 @@ const styles = StyleSheet.create({
   },
   saveHeaderText: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.primary,
   },
@@ -417,6 +419,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
     color: Colors.text.primary,
     marginBottom: Spacing.xs,
@@ -448,6 +451,7 @@ const styles = StyleSheet.create({
   },
   categoryChipTextSelected: {
     color: Colors.text.inverse,
+    fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
   dateButton: {
