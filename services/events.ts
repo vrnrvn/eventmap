@@ -1,6 +1,8 @@
 import { supabase } from './supabase';
 import { RankedEvent, EventDetails, Event } from '@/types/database';
 import { FilterOptions } from '@/types/app';
+import * as FileSystem from 'expo-file-system/legacy';
+import { decode } from 'base64-arraybuffer';
 
 export const eventsService = {
   async getRankedEvents(
@@ -44,7 +46,11 @@ export const eventsService = {
     address: string;
     coverImageUrl?: string | null;
     isRecurring?: boolean;
-    recurrencePattern?: { frequency: 'daily' | 'weekly' | 'monthly'; interval: number; endDate?: string } | null;
+    recurrencePattern?: {
+      frequency: 'daily' | 'weekly' | 'monthly';
+      interval: number;
+      endDate?: string;
+    } | null;
   }): Promise<string> {
     const { data, error } = await supabase.rpc('create_event_with_limit_check', {
       p_business_id: eventData.businessId,
@@ -62,7 +68,8 @@ export const eventsService = {
     });
 
     if (error) throw error;
-    const eventId = typeof data === 'string' ? data : (data as { id?: string })?.id;
+    const eventId =
+      typeof data === 'string' ? data : (data as { id?: string })?.id;
     if (!eventId) throw new Error('Event was created but no ID was returned');
     return eventId;
   },
@@ -165,22 +172,24 @@ export const eventsService = {
     folder: 'events' | 'logos' | 'venues' = 'events'
   ): Promise<string> {
     const fileExt = file.name.split('.').pop() || 'jpg';
-    const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    const fileName = `${Date.now()}-${Math.random()
+      .toString(36)
+      .substring(7)}.${fileExt}`;
     const filePath = `${folder}/${fileName}`;
 
-    // React Native Android: FormData/Blob upload fails. Use ArrayBuffer from base64.
-    const { decode } = await import('base64-arraybuffer');
-    const { readAsStringAsync, EncodingType } = await import('expo-file-system');
-
-    const base64 = await readAsStringAsync(file.uri, {
-      encoding: EncodingType.Base64,
+    // Read file as base64 using the legacy expo-file-system API
+    const base64 = await FileSystem.readAsStringAsync(file.uri, {
+      encoding: FileSystem.EncodingType.Base64,
     });
+
+    // Convert base64 to ArrayBuffer for Supabase upload
     const arrayBuffer = decode(base64);
 
     const { data, error } = await supabase.storage
       .from('event-images')
       .upload(filePath, arrayBuffer, {
         contentType: file.type || 'image/jpeg',
+        upsert: false,
       });
 
     if (error) throw error;
