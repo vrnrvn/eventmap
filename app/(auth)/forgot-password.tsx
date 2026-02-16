@@ -25,18 +25,13 @@ import {
 } from 'lucide-react-native';
 
 const Palette = {
-  gradientStart: '#6366F1',
-  gradientEnd: '#8B5CF6',
-  cardBg: '#FFFFFF',
-  surfaceMuted: '#F8F9FC',
-  accentSoft: 'rgba(99,102,241,0.08)',
-  accentMedium: 'rgba(99,102,241,0.14)',
-  textOnGradient: '#FFFFFF',
-  textOnGradientMuted: 'rgba(255,255,255,0.75)',
-  separator: '#F0F0F5',
-  badge: '#6366F1',
-  successSoft: 'rgba(34,197,94,0.10)',
-  successColor: '#22C55E',
+  gradientStart: Colors.primary,
+  gradientEnd: Colors.accent,
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  successSoft: 'rgba(45, 138, 110, 0.12)',
+  successColor: Colors.success,
 };
 
 export default function ForgotPasswordScreen() {
@@ -109,7 +104,7 @@ export default function ForgotPasswordScreen() {
 
             {/* Email badge */}
             <View style={styles.emailBadge}>
-              <Mail size={14} color={Palette.gradientStart} />
+              <Mail size={14} color={Colors.primary} />
               <Text style={styles.emailBadgeText}>{email}</Text>
             </View>
 
@@ -200,7 +195,7 @@ export default function ForgotPasswordScreen() {
           <View style={styles.formCard}>
             <View style={styles.fieldRow}>
               <View style={styles.fieldIcon}>
-                <Mail size={16} color={Palette.gradientStart} />
+                <Mail size={16} color={Colors.primary} />
               </View>
               <View style={styles.fieldContent}>
                 <Input
@@ -229,7 +224,7 @@ export default function ForgotPasswordScreen() {
             <LinearGradient
               colors={
                 loading
-                  ? ['#A5B4FC', '#C4B5FD']
+                  ? [Colors.primaryLight, Colors.accentLight]
                   : [Palette.gradientStart, Palette.gradientEnd]
               }
               start={{ x: 0, y: 0 }}
@@ -254,7 +249,7 @@ export default function ForgotPasswordScreen() {
             disabled={loading}
             activeOpacity={0.7}
           >
-            <LogIn size={16} color={Palette.gradientStart} />
+            <LogIn size={16} color={Colors.primary} />
             <Text style={styles.backLinkText}>Back to Sign In</Text>
           </TouchableOpacity>
         </ScrollView>
@@ -311,7 +306,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     ...Platform.select({
       ios: {
-        shadowColor: Palette.gradientStart,
+        shadowColor: Colors.primary,
         shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.25,
         shadowRadius: 16,
@@ -328,7 +323,7 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     fontSize: 28,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginBottom: 8,
@@ -381,7 +376,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     ...Platform.select({
       ios: {
-        shadowColor: Palette.gradientStart,
+        shadowColor: Colors.primary,
         shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.3,
         shadowRadius: 14,
@@ -417,7 +412,7 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
+    color: Colors.primary,
   },
 
   /* ── Success state ── */
@@ -436,7 +431,7 @@ const styles = StyleSheet.create({
   },
   successTitle: {
     fontSize: 26,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginBottom: 8,
@@ -462,7 +457,7 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
+    color: Colors.primary,
   },
   successHint: {
     fontSize: Typography.sizes.sm,
@@ -479,7 +474,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     ...Platform.select({
       ios: {
-        shadowColor: Palette.gradientStart,
+        shadowColor: Colors.primary,
         shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.3,
         shadowRadius: 14,
@@ -509,6 +504,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
-    color: Palette.gradientStart,
+    color: Colors.primary,
   },
 });

@@ -15,14 +15,14 @@ import { usePremium } from '@/contexts/PremiumContext';
 import { Colors, Typography } from '@/constants/theme';
 
 const Palette = {
-  gradientStart: '#6366F1',
-  gradientEnd: '#8B5CF6',
-  cardBg: '#FFFFFF',
-  surfaceMuted: '#F8F9FC',
-  accentSoft: 'rgba(99,102,241,0.08)',
-  separator: '#F0F0F5',
-  premiumGold: '#F59E0B',
-  premiumGoldSoft: 'rgba(245,158,11,0.10)',
+  gradientStart: Colors.primary,
+  gradientEnd: Colors.accent,
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  separator: Colors.border.light,
+  premiumGold: Colors.accent,
+  premiumGoldSoft: 'rgba(232, 168, 56, 0.12)',
 };
 
 type FeatureKey =

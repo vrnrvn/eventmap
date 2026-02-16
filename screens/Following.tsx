@@ -20,14 +20,13 @@ import { ArrowLeft, Heart, HeartOff, ChevronRight, Building2 } from 'lucide-reac
 import { Avatar } from '@/components/Avatar';
 
 const Palette = {
-  gradientStart: '#6366F1',
-  gradientEnd: '#8B5CF6',
-  cardBg: '#FFFFFF',
-  surfaceMuted: '#F8F9FC',
-  accentSoft: 'rgba(99,102,241,0.08)',
-  accentMedium: 'rgba(99,102,241,0.14)',
-  separator: '#F0F0F5',
-  badge: '#6366F1',
+  gradientStart: Colors.primary,
+  gradientEnd: Colors.accent,
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  separator: Colors.border.light,
+  badge: Colors.primary,
 };
 
 type FollowedBusiness = Business & { followId: string };

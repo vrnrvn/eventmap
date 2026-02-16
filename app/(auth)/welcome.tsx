@@ -23,23 +23,23 @@ import {
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const Palette = {
-  gradientStart: '#6366F1',
-  gradientEnd: '#8B5CF6',
-  gradientDeep: '#4F46E5',
-  cardBg: '#FFFFFF',
-  surfaceMuted: '#F8F9FC',
-  accentSoft: 'rgba(99,102,241,0.08)',
-  accentMedium: 'rgba(99,102,241,0.14)',
-  textOnGradient: '#FFFFFF',
-  textOnGradientMuted: 'rgba(255,255,255,0.7)',
-  separator: '#F0F0F5',
-  badge: '#6366F1',
-  featurePin: 'rgba(99,102,241,0.12)',
-  featureHeart: 'rgba(239,68,68,0.10)',
-  featureBiz: 'rgba(245,158,11,0.10)',
-  featurePinIcon: '#6366F1',
-  featureHeartIcon: '#EF4444',
-  featureBizIcon: '#F59E0B',
+  gradientStart: Colors.primary,
+  gradientEnd: Colors.accent,
+  gradientDeep: Colors.primaryDark,
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  accentMedium: 'rgba(196, 92, 62, 0.18)',
+  textOnGradient: Colors.text.inverse,
+  textOnGradientMuted: 'rgba(250, 248, 245, 0.8)',
+  separator: Colors.border.light,
+  badge: Colors.primary,
+  featurePin: 'rgba(13, 79, 79, 0.12)',
+  featureHeart: 'rgba(196, 92, 62, 0.12)',
+  featureBiz: 'rgba(232, 168, 56, 0.15)',
+  featurePinIcon: Colors.secondary,
+  featureHeartIcon: Colors.primary,
+  featureBizIcon: Colors.accent,
 };
 
 export default function WelcomeScreen() {
@@ -62,7 +62,7 @@ export default function WelcomeScreen() {
         <View style={styles.logoContainer}>
           <View style={styles.logoOuter}>
             <View style={styles.logoInner}>
-              <Sparkles size={32} color={Palette.gradientStart} />
+              <Sparkles size={32} color={Colors.primary} />
             </View>
           </View>
         </View>
@@ -127,7 +127,7 @@ export default function WelcomeScreen() {
             onPress={() => router.push('/(auth)/login')}
             activeOpacity={0.7}
           >
-            <LogIn size={18} color={Palette.gradientStart} />
+            <LogIn size={18} color={Colors.primary} />
             <Text style={styles.secondaryBtnText}>
               Already have an account? Sign In
             </Text>
@@ -230,7 +230,7 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     fontSize: 36,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Palette.textOnGradient,
     letterSpacing: -0.5,
@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
   },
   featureTitle: {
     fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.semibold,
+    fontFamily: Typography.displayFontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
     marginBottom: 2,
@@ -316,7 +316,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     ...Platform.select({
       ios: {
-        shadowColor: Palette.gradientStart,
+        shadowColor: Colors.primary,
         shadowOffset: { width: 0, height: 8 },
         shadowOpacity: 0.35,
         shadowRadius: 16,
@@ -349,7 +349,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: Palette.cardBg,
     borderWidth: 1.5,
-    borderColor: Palette.separator,
+    borderColor: Colors.border.light,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -364,6 +364,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
+    color: Colors.primary,
   },
 });

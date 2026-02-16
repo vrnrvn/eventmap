@@ -39,17 +39,17 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const TOTAL_PAGES = 4;
 
 const Palette = {
-  gradientStart: '#6366F1',
-  gradientEnd: '#8B5CF6',
-  gradientDeep: '#4F46E5',
-  cardBg: '#FFFFFF',
-  surfaceMuted: '#F8F9FC',
-  accentSoft: 'rgba(99,102,241,0.08)',
-  textOnGradient: '#FFFFFF',
-  textOnGradientMuted: 'rgba(255,255,255,0.7)',
-  separator: '#F0F0F5',
-  successGreen: '#10B981',
-  successBg: 'rgba(16,185,129,0.08)',
+  gradientStart: Colors.primary,
+  gradientEnd: Colors.accent,
+  gradientDeep: Colors.primaryDark,
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  textOnGradient: Colors.text.inverse,
+  textOnGradientMuted: 'rgba(250, 248, 245, 0.7)',
+  separator: Colors.border.light,
+  successGreen: Colors.success,
+  successBg: 'rgba(45, 138, 110, 0.12)',
 };
 
 export default function OnboardingScreen() {
@@ -241,7 +241,7 @@ function WelcomePage({
 
         <View style={styles.logoOuter}>
           <View style={styles.logoInner}>
-            <Sparkles size={36} color={Palette.gradientStart} />
+            <Sparkles size={36} color={Colors.primary} />
           </View>
         </View>
 
@@ -252,7 +252,7 @@ function WelcomePage({
 
         <View style={styles.welcomeFeatures}>
           <WelcomeFeature
-            icon={<Compass size={20} color={Palette.gradientStart} />}
+            icon={<Compass size={20} color={Colors.primary} />}
             text="Discover events near you"
           />
           <WelcomeFeature
@@ -426,7 +426,7 @@ function PermissionsPage({
 
         <View style={styles.permissionCards}>
           <PermissionCard
-            icon={<MapPin size={24} color={locationGranted ? Palette.successGreen : Palette.gradientStart} />}
+            icon={<MapPin size={24} color={locationGranted ? Palette.successGreen : Colors.primary} />}
             iconBg={locationGranted ? Palette.successBg : Palette.accentSoft}
             title="Location"
             description="We use your location to show events near you"
@@ -434,7 +434,7 @@ function PermissionsPage({
             onPress={onRequestLocation}
           />
           <PermissionCard
-            icon={<Bell size={24} color={notificationGranted ? Palette.successGreen : Palette.gradientStart} />}
+            icon={<Bell size={24} color={notificationGranted ? Palette.successGreen : Colors.primary} />}
             iconBg={notificationGranted ? Palette.successBg : Palette.accentSoft}
             title="Notifications"
             description="Get notified about events you care about"
@@ -529,7 +529,7 @@ function TutorialPage({
 
         <View style={styles.tutorialCards}>
           <TutorialCard
-            icon={<Hand size={28} color={Palette.gradientStart} />}
+            icon={<Hand size={28} color={Colors.primary} />}
             title="Explore the map"
             description="Pinch to zoom in and out. Drag to move around and explore different areas."
           />
@@ -554,7 +554,7 @@ function TutorialPage({
           activeOpacity={0.85}
         >
           <LinearGradient
-            colors={completing ? ['#A5B4FC', '#C4B5FD'] : [Palette.gradientStart, Palette.gradientEnd]}
+            colors={completing ? [Colors.primaryLight, Colors.accentLight] : [Palette.gradientStart, Palette.gradientEnd]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={styles.primaryBtnGradient}
@@ -651,7 +651,7 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
+    color: Colors.primary,
   },
 
   /* ── Page content area ── */
@@ -661,7 +661,7 @@ const styles = StyleSheet.create({
   },
   pageTitle: {
     fontSize: 28,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginBottom: 8,
@@ -685,7 +685,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     ...Platform.select({
-      ios: { shadowColor: Palette.gradientStart, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.35, shadowRadius: 16 },
+      ios: { shadowColor: Colors.primary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.35, shadowRadius: 16 },
       android: { elevation: 10 },
     }),
   },
@@ -754,7 +754,7 @@ const styles = StyleSheet.create({
   },
   welcomeTitle: {
     fontSize: 32,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Palette.textOnGradient,
     letterSpacing: -0.5,
@@ -837,7 +837,7 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
-    color: Palette.gradientStart,
+    color: Colors.primary,
     textAlign: 'center',
   },
 
@@ -883,7 +883,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.lg,
     backgroundColor: Palette.accentSoft,
     borderWidth: 1.5,
-    borderColor: Palette.gradientStart,
+    borderColor: Colors.primary,
   },
   permissionBtnGranted: {
     backgroundColor: Palette.successBg,
@@ -893,7 +893,7 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
+    color: Colors.primary,
   },
 
   /* ─── Tutorial page ─── */

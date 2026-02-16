@@ -72,16 +72,33 @@ function buildMapHtml(
   <script>
     var categoryColors = ${JSON.stringify(CATEGORY_COLORS)};
     var defaultColor = ${JSON.stringify(DEFAULT_CATEGORY_COLOR)};
-    function getPinpointIcon(categorySlug, isActive) {
-      var color = (categorySlug && categoryColors[categorySlug]) ? categoryColors[categorySlug] : defaultColor;
+    function getCategoryMarkerSvg(slug, isActive) {
+      var color = (slug && categoryColors[slug]) ? categoryColors[slug] : defaultColor;
       var stroke = isActive ? '#1a1a1a' : '#ffffff';
-      var r = isActive ? 8 : 6;
-      var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="' + r + '" fill="' + color + '" stroke="' + stroke + '" stroke-width="2"/></svg>';
+      var strokeW = isActive ? 2.5 : 1.5;
+      var svg = '';
+      if (slug === 'live-music' || slug === 'nightlife') {
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="10" rx="2" fill="' + color + '" stroke="' + stroke + '" stroke-width="' + strokeW + '"/><line x1="8" y1="8" x2="8" y2="18" stroke="' + stroke + '" stroke-width="1"/><line x1="16" y1="8" x2="16" y2="18" stroke="' + stroke + '" stroke-width="1"/></svg>';
+      } else if (slug === 'food-drink' || slug === 'dining') {
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="' + color + '" stroke="' + stroke + '" stroke-width="' + strokeW + '"/><path d="M12 6v6M9 9h6" stroke="' + stroke + '" stroke-width="1.5" stroke-linecap="round"/><path d="M10 14l2 4 2-4" stroke="' + stroke + '" stroke-width="1" fill="none"/></svg>';
+      } else if (slug === 'fitness' || slug === 'sports') {
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect x="4" y="9" width="4" height="6" rx="1" fill="' + color + '" stroke="' + stroke + '" stroke-width="' + strokeW + '"/><rect x="16" y="9" width="4" height="6" rx="1" fill="' + color + '" stroke="' + stroke + '" stroke-width="' + strokeW + '"/><path d="M8 12h8" stroke="' + stroke + '" stroke-width="2" stroke-linecap="round"/></svg>';
+      } else if (slug === 'culture' || slug === 'workshops') {
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="' + color + '" stroke="' + stroke + '" stroke-width="' + strokeW + '"/><path d="M8 14c1-2 2-4 4-4s3 2 4 4" stroke="' + stroke + '" stroke-width="1" fill="none" stroke-linecap="round"/><circle cx="12" cy="10" r="1.5" fill="' + stroke + '"/></svg>';
+      } else if (slug === 'markets' || slug === 'trivia') {
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M6 4l6 6 6-6" fill="' + color + '" stroke="' + stroke + '" stroke-width="' + strokeW + '" stroke-linejoin="round"/><rect x="6" y="10" width="12" height="10" rx="2" fill="' + color + '" stroke="' + stroke + '" stroke-width="' + strokeW + '"/></svg>';
+      } else {
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 2c-4 0-7 3-7 7 0 5 7 13 7 13s7-8 7-13c0-4-3-7-7-7z" fill="' + color + '" stroke="' + stroke + '" stroke-width="' + strokeW + '" stroke-linejoin="round"/></svg>';
+      }
+      var size = 26;
       return {
         url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
-        scaledSize: new google.maps.Size(24, 24),
-        anchor: new google.maps.Point(12, 12)
+        scaledSize: new google.maps.Size(size, size),
+        anchor: new google.maps.Point(size / 2, size / 2)
       };
+    }
+    function getPinpointIcon(categorySlug, isActive) {
+      return getCategoryMarkerSvg(categorySlug, isActive);
     }
     function escapeHtml(s) {
       if (!s) return '';

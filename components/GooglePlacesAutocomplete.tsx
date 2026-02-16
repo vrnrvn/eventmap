@@ -1,8 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { View, TextInput, StyleSheet, ActivityIndicator } from 'react-native';
-import { MapPin } from 'lucide-react-native';
+import { View, TextInput, StyleSheet, ActivityIndicator, Platform } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import { EventmapMapPin } from '@/components/icons/EventmapIcons';
 import { placesService, AutocompletePrediction } from '@/services/places';
-import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { Colors, Spacing, Typography, Shadows } from '@/constants/theme';
 
 const DEBOUNCE_MS = 300;
 
@@ -39,7 +40,17 @@ export function GooglePlacesAutocomplete({
   autoFocus = false,
 }: GooglePlacesAutocompleteProps) {
   const [loading, setLoading] = useState(false);
+  const [focused, setFocused] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const focusVal = useSharedValue(0);
+
+  useEffect(() => {
+    focusVal.value = withSpring(focused ? 1 : 0, { damping: 18 });
+  }, [focused, focusVal]);
+
+  const animatedWrapperStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 + focusVal.value * 0.02 }],
+  }));
 
   useEffect(() => {
     return () => {
@@ -79,15 +90,19 @@ export function GooglePlacesAutocomplete({
   );
 
   return (
-    <View style={styles.inputWrapper}>
-      <MapPin size={20} color={Colors.text.tertiary} style={styles.inputIcon} />
+    <Animated.View style={[styles.inputWrapper, animatedWrapperStyle]}>
+      <EventmapMapPin size={20} color={Colors.text.tertiary} style={styles.inputIcon} />
       <TextInput
         style={styles.input}
         placeholder={placeholder}
         placeholderTextColor={Colors.text.tertiary}
         value={value}
         onChangeText={handleInputChange}
-        onFocus={() => value.trim() && fetchSuggestions(value)}
+        onFocus={() => {
+          setFocused(true);
+          value.trim() && fetchSuggestions(value);
+        }}
+        onBlur={() => setFocused(false)}
         autoFocus={autoFocus}
         autoCorrect={false}
         autoCapitalize="none"
@@ -95,7 +110,7 @@ export function GooglePlacesAutocomplete({
       {loading && (
         <ActivityIndicator size="small" color={Colors.primary} style={styles.loader} />
       )}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -104,11 +119,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.background.primary,
-    borderRadius: BorderRadius.lg,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderWidth: 1,
-    borderColor: Colors.border.light,
+    borderRadius: 9999,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    ...Platform.select({
+      ios: {
+        ...Shadows.md,
+      },
+      android: { elevation: 4 },
+    }),
   },
   inputIcon: {
     marginRight: Spacing.sm,

@@ -28,8 +28,6 @@ import { ReviewCard } from '@/components/ReviewCard';
 import { ReviewForm } from '@/components/ReviewForm';
 import {
   ArrowLeft,
-  Calendar,
-  MapPin,
   Building2,
   ExternalLink,
   Heart,
@@ -40,6 +38,7 @@ import {
   Star,
   Flag,
 } from 'lucide-react-native';
+import { EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { complaintsService } from '@/services/complaints';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -349,7 +348,7 @@ export default function EventDetail() {
           </View>
         ) : (
           <View style={styles.coverPlaceholder}>
-            <Calendar size={48} color={Colors.text.tertiary} />
+            <EventmapCalendar size={48} color={Colors.text.tertiary} />
           </View>
         )}
 
@@ -399,7 +398,7 @@ export default function EventDetail() {
           </TouchableOpacity>
 
           <View style={styles.metaRow}>
-            <Calendar size={18} color={Colors.text.secondary} />
+            <EventmapCalendar size={18} color={Colors.text.secondary} />
             <Text style={styles.metaText}>
               {formatDate(event.start_datetime)}
               {event.end_datetime && ` – ${formatDate(event.end_datetime)}`}
@@ -408,7 +407,7 @@ export default function EventDetail() {
 
           {event.address && (
             <View style={styles.metaRow}>
-              <MapPin size={18} color={Colors.text.secondary} />
+              <EventmapMapPin size={18} color={Colors.text.secondary} />
               <Text style={styles.metaText}>{event.address}</Text>
             </View>
           )}
@@ -709,14 +708,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   content: {
-    padding: Spacing.xl,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xl,
+    paddingBottom: Spacing.xxl,
   },
   title: {
     fontSize: Typography.sizes.xxl,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
+    fontFamily: Typography.displayFontFamilies.extrabold,
+    fontWeight: '800',
     color: Colors.text.primary,
     marginBottom: Spacing.sm,
+    letterSpacing: 0.5,
   },
   categoryBadge: {
     alignSelf: 'flex-start',
@@ -782,6 +784,10 @@ const styles = StyleSheet.create({
   },
   linksSection: {
     marginBottom: Spacing.lg,
+    backgroundColor: Colors.background.secondary,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    ...Shadows.md,
   },
   sectionTitle: {
     fontSize: Typography.sizes.sm,
@@ -806,6 +812,10 @@ const styles = StyleSheet.create({
   },
   actionsSection: {
     marginBottom: Spacing.lg,
+    backgroundColor: Colors.background.secondary,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    ...Shadows.md,
   },
   actionRow: {
     flexDirection: 'row',
@@ -924,9 +934,10 @@ const styles = StyleSheet.create({
   },
   reviewsSection: {
     marginTop: Spacing.xl,
-    paddingTop: Spacing.xl,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border.light,
+    backgroundColor: Colors.background.secondary,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    ...Shadows.md,
   },
   writeReviewBtn: {
     alignSelf: 'flex-start',

@@ -18,12 +18,12 @@ import { ArrowLeft, Users } from 'lucide-react-native';
 import { Avatar } from '@/components/Avatar';
 
 const Palette = {
-  gradientStart: '#0F766E',
-  gradientEnd: '#14B8A6',
-  cardBg: '#FFFFFF',
-  surfaceMuted: '#F8F9FC',
-  accentSoft: 'rgba(15,118,110,0.08)',
-  separator: '#F0F0F5',
+  gradientStart: Colors.secondary,
+  gradientEnd: Colors.secondaryLight,
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  accentSoft: 'rgba(13, 79, 79, 0.12)',
+  separator: Colors.border.light,
 };
 
 type Follower = {

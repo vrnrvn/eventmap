@@ -1,18 +1,34 @@
+import { useState } from 'react';
 import { View, Text, TextInput, StyleSheet, TextInputProps } from 'react-native';
-import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { Colors, Spacing, Typography } from '@/constants/theme';
 
 type InputProps = TextInputProps & {
   label?: string;
   error?: string;
 };
 
-export function Input({ label, error, style, ...props }: InputProps) {
+export function Input({ label, error, style, onFocus, onBlur, ...props }: InputProps) {
+  const [focused, setFocused] = useState(false);
+
   return (
     <View style={styles.container}>
       {label && <Text style={styles.label}>{label}</Text>}
       <TextInput
-        style={[styles.input, error && styles.inputError, style]}
+        style={[
+          styles.input,
+          focused && styles.inputFocused,
+          error && styles.inputError,
+          style,
+        ]}
         placeholderTextColor={Colors.text.tertiary}
+        onFocus={(e) => {
+          setFocused(true);
+          onFocus?.(e);
+        }}
+        onBlur={(e) => {
+          setFocused(false);
+          onBlur?.(e);
+        }}
         {...props}
       />
       {error && <Text style={styles.errorText}>{error}</Text>}
@@ -32,17 +48,19 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   input: {
-    borderWidth: 1,
-    borderColor: Colors.border.light,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm + 4,
+    borderBottomWidth: 2,
+    borderBottomColor: Colors.border.light,
+    paddingHorizontal: 0,
+    paddingVertical: 12,
     fontSize: Typography.sizes.md,
     color: Colors.text.primary,
-    backgroundColor: Colors.background.primary,
+    backgroundColor: 'transparent',
+  },
+  inputFocused: {
+    borderBottomColor: Colors.primary,
   },
   inputError: {
-    borderColor: Colors.error,
+    borderBottomColor: Colors.error,
   },
   errorText: {
     fontSize: Typography.sizes.xs,

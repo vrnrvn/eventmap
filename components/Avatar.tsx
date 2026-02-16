@@ -2,14 +2,14 @@ import { useState } from 'react';
 import { View, Image, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Camera } from 'lucide-react-native';
-import { Typography } from '@/constants/theme';
+import { Colors, Typography } from '@/constants/theme';
 
 const GRADIENT_PAIRS: [string, string][] = [
-  ['#6366F1', '#8B5CF6'],
+  [Colors.primary, Colors.accent],
+  [Colors.secondary, Colors.secondaryLight],
   ['#EC4899', '#F43F5E'],
-  ['#14B8A6', '#06B6D4'],
-  ['#F59E0B', '#EF4444'],
-  ['#8B5CF6', '#3B82F6'],
+  [Colors.accent, Colors.accentDark],
+  [Colors.primaryDark, Colors.primary],
 ];
 
 function getGradient(name: string): [string, string] {
