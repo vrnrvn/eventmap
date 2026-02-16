@@ -89,11 +89,25 @@ export const businessesService = {
     if (!business) throw new Error('Business not found');
 
     const maxCount = business.subscription_tier === 'premium' ? 30 : 2;
-    const canCreate = business.events_created_this_month < maxCount;
+    let currentCount = business.events_created_this_month;
+
+    const now = new Date();
+    const lastReset = business.last_reset_date
+      ? new Date(business.last_reset_date)
+      : null;
+    if (
+      lastReset &&
+      (now.getMonth() !== lastReset.getMonth() ||
+        now.getFullYear() !== lastReset.getFullYear())
+    ) {
+      currentCount = 0;
+    }
+
+    const canCreate = currentCount < maxCount;
 
     return {
       canCreate,
-      currentCount: business.events_created_this_month,
+      currentCount,
       maxCount,
     };
   },

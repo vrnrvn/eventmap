@@ -59,7 +59,7 @@ const FEATURE_ICONS: Record<string, any> = {
 
 export default function PremiumPlansScreen() {
   const insets = useSafeAreaInsets();
-  const { userBusiness } = useApp();
+  const { userBusiness, refreshBusiness } = useApp();
   const {
     allPlans,
     currentPlan,
@@ -88,6 +88,7 @@ export default function PremiumPlansScreen() {
           billingCycle
         );
         if (success) {
+          await refreshBusiness();
           await refreshSubscription();
           router.back();
         }
@@ -97,7 +98,7 @@ export default function PremiumPlansScreen() {
         setSubscribingPlanId(null);
       }
     },
-    [billingCycle, refreshSubscription, subscribingPlanId]
+    [billingCycle, refreshBusiness, refreshSubscription, subscribingPlanId]
   );
 
   const formatPrice = (cents: number) => {

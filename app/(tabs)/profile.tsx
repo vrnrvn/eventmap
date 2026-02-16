@@ -158,6 +158,7 @@ export default function ProfileScreen() {
         'monthly'
       );
       if (success) {
+        await refreshBusiness();
         await refreshSubscription();
         setShowPremiumModal(false);
         Alert.alert('Premium Activated', 'Your premium subscription is now active.');
