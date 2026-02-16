@@ -9,9 +9,11 @@ type ReviewCardProps = {
   review: ReviewWithProfile;
   isOwner?: boolean;
   onRespond?: (reviewId: string, response: string) => Promise<void>;
+  onReport?: (reviewId: string) => void;
+  canReport?: boolean;
 };
 
-export function ReviewCard({ review, isOwner, onRespond }: ReviewCardProps) {
+export function ReviewCard({ review, isOwner, onRespond, onReport, canReport }: ReviewCardProps) {
   const [editing, setEditing] = useState(false);
   const [responseText, setResponseText] = useState(review.business_response || '');
   const [saving, setSaving] = useState(false);
@@ -57,6 +59,14 @@ export function ReviewCard({ review, isOwner, onRespond }: ReviewCardProps) {
               />
             ))}
             <Text style={styles.date}>{formatDate(review.created_at)}</Text>
+            {canReport && onReport && (
+              <TouchableOpacity
+                style={styles.reportLink}
+                onPress={() => onReport(review.id)}
+              >
+                <Text style={styles.reportLinkText}>Report</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </View>
@@ -234,5 +244,13 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.inverse,
+  },
+  reportLink: {
+    marginLeft: 'auto',
+  },
+  reportLinkText: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
   },
 });

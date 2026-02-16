@@ -3,6 +3,7 @@ import { Session, User } from '@supabase/supabase-js';
 import { authService } from '@/services/auth';
 import { Profile } from '@/types/database';
 import { profilesService } from '@/services/profiles';
+import { bannedService } from '@/services/banned';
 
 type AuthContextType = {
   session: Session | null;
@@ -10,6 +11,7 @@ type AuthContextType = {
   profile: Profile | null;
   loading: boolean;
   hasCompletedOnboarding: boolean;
+  isBanned: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, name: string) => Promise<{ user: User } | null>;
   signOut: () => Promise<void>;
@@ -23,11 +25,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isBanned, setIsBanned] = useState(false);
 
   const loadProfile = async (userId: string) => {
     try {
-      const userProfile = await profilesService.getProfile(userId);
+      const [userProfile, banned] = await Promise.all([
+        profilesService.getProfile(userId),
+        bannedService.isUserBanned(userId),
+      ]);
       setProfile(userProfile);
+      setIsBanned(banned);
     } catch (error) {
       console.error('Error loading profile:', error);
     }
@@ -51,6 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           loadProfile(newSession.user.id);
         } else {
           setProfile(null);
+          setIsBanned(false);
         }
         setLoading(false);
       }
@@ -86,6 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSession(null);
     setUser(null);
     setProfile(null);
+    setIsBanned(false);
   };
 
   const refreshProfile = async () => {
@@ -104,6 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         profile,
         loading,
         hasCompletedOnboarding,
+        isBanned,
         signIn,
         signUp,
         signOut,
