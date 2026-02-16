@@ -47,6 +47,7 @@ import {
 import { geocodingService } from '@/services/geocoding';
 import { eventsService } from '@/services/events';
 import { categoriesService } from '@/services/categories';
+import { businessesService } from '@/services/businesses';
 import { Category } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import type { RecurrenceOption } from '@/utils/recurrence';
@@ -167,6 +168,17 @@ export default function CreateScreen() {
   const handleSubmit = async () => {
     if (!validate() || !userBusiness) return;
 
+    const { canCreate, currentCount, maxCount } =
+      await businessesService.checkEventLimit(userBusiness.id);
+    if (!canCreate) {
+      Alert.alert(
+        'Limit Reached',
+        `You've created ${currentCount} of ${maxCount} events this month. Upgrade to Premium for more events.`,
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
     const address = formData.address.trim() || (businessLocation?.address ?? '');
     const lat = formData.address.trim()
       ? formData.lat
@@ -221,10 +233,12 @@ export default function CreateScreen() {
         },
       ]);
     } catch (err: unknown) {
-      Alert.alert(
-        'Error',
-        err instanceof Error ? err.message : 'Failed to create event'
-      );
+      const message =
+        err instanceof Error
+          ? err.message
+          : (err as { message?: string })?.message ?? 'Failed to create event';
+      if (__DEV__) console.error('[CreateEvent]', err);
+      Alert.alert('Error', message);
     } finally {
       setLoading(false);
     }
@@ -505,13 +519,29 @@ export default function CreateScreen() {
           </View>
         )}
 
-        {/* Recurrence */}
+        {/* Recurrence (Premium only) */}
         <View style={styles.dateCardSpacing}>
           <View style={styles.card}>
             <TouchableOpacity
               style={styles.dateRow}
               activeOpacity={0.6}
-              onPress={() => recurrencePickerRef.current?.present()}
+              onPress={() => {
+                if (userBusiness?.subscription_tier !== 'premium') {
+                  Alert.alert(
+                    'Premium Feature',
+                    'Recurring events are only available for Premium businesses. Upgrade to create recurring events.',
+                    [
+                      { text: 'OK' },
+                      {
+                        text: 'Upgrade',
+                        onPress: () => router.push('/(tabs)/profile'),
+                      },
+                    ]
+                  );
+                  return;
+                }
+                recurrencePickerRef.current?.present();
+              }}
             >
               <View style={styles.fieldIcon}>
                 <Repeat size={16} color={Palette.gradientStart} />
@@ -520,6 +550,7 @@ export default function CreateScreen() {
                 <Text style={styles.dateLabel}>Repeat</Text>
                 <Text style={styles.dateValue}>
                   {getRecurrenceLabel(formData.recurrence)}
+                  {userBusiness?.subscription_tier !== 'premium' && ' (Premium)'}
                 </Text>
               </View>
               <ChevronRight size={18} color={Colors.text.tertiary} />

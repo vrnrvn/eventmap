@@ -36,6 +36,8 @@ import {
   Users,
   Pencil,
   Trash2,
+  CheckCircle2,
+  Star,
 } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -400,22 +402,26 @@ export default function EventDetail() {
 
           {user && !isOwner && (
             <View style={styles.actionsSection}>
-              <Text style={styles.sectionTitle}>Actions</Text>
               <View style={styles.actionRow}>
                 {details.user_rsvp ? (
                   <>
                     <TouchableOpacity
                       style={[
-                        styles.actionChip,
-                        details.user_rsvp === 'going' && styles.actionChipActive,
+                        styles.actionButton,
+                        details.user_rsvp === 'going' && styles.actionButtonActive,
                       ]}
                       onPress={() => handleRsvp('going')}
                       disabled={saving}
+                      activeOpacity={0.8}
                     >
+                      <CheckCircle2
+                        size={22}
+                        color={details.user_rsvp === 'going' ? Colors.text.inverse : Colors.primary}
+                      />
                       <Text
                         style={[
-                          styles.actionChipText,
-                          details.user_rsvp === 'going' && styles.actionChipTextActive,
+                          styles.actionButtonText,
+                          details.user_rsvp === 'going' && styles.actionButtonTextActive,
                         ]}
                       >
                         Going
@@ -423,44 +429,54 @@ export default function EventDetail() {
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[
-                        styles.actionChip,
-                        details.user_rsvp === 'interested' && styles.actionChipActive,
+                        styles.actionButton,
+                        details.user_rsvp === 'interested' && styles.actionButtonActive,
                       ]}
                       onPress={() => handleRsvp('interested')}
                       disabled={saving}
+                      activeOpacity={0.8}
                     >
+                      <Star
+                        size={22}
+                        color={details.user_rsvp === 'interested' ? Colors.text.inverse : Colors.primary}
+                      />
                       <Text
                         style={[
-                          styles.actionChipText,
-                          details.user_rsvp === 'interested' && styles.actionChipTextActive,
+                          styles.actionButtonText,
+                          details.user_rsvp === 'interested' && styles.actionButtonTextActive,
                         ]}
                       >
                         Interested
                       </Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={styles.actionChipOutlined}
+                      style={styles.actionButtonRemove}
                       onPress={handleRemoveRsvp}
                       disabled={saving}
+                      activeOpacity={0.8}
                     >
-                      <Text style={styles.actionChipOutlinedText}>Remove</Text>
+                      <Text style={styles.actionButtonRemoveText}>Remove</Text>
                     </TouchableOpacity>
                   </>
                 ) : (
                   <>
                     <TouchableOpacity
-                      style={styles.actionChip}
+                      style={styles.actionButton}
                       onPress={() => handleRsvp('going')}
                       disabled={saving}
+                      activeOpacity={0.8}
                     >
-                      <Text style={styles.actionChipText}>Going</Text>
+                      <CheckCircle2 size={22} color={Colors.primary} />
+                      <Text style={styles.actionButtonText}>Going</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={styles.actionChip}
+                      style={styles.actionButton}
                       onPress={() => handleRsvp('interested')}
                       disabled={saving}
+                      activeOpacity={0.8}
                     >
-                      <Text style={styles.actionChipText}>Interested</Text>
+                      <Star size={22} color={Colors.primary} />
+                      <Text style={styles.actionButtonText}>Interested</Text>
                     </TouchableOpacity>
                   </>
                 )}
@@ -729,37 +745,50 @@ const styles = StyleSheet.create({
   actionRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: Spacing.sm,
+    gap: Spacing.md,
     marginBottom: Spacing.md,
   },
-  actionChip: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Colors.background.secondary,
+  actionButton: {
+    flex: 1,
+    minWidth: 140,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 2,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.background.primary,
+    ...Shadows.md,
   },
-  actionChipActive: {
+  actionButtonActive: {
     backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
   },
-  actionChipText: {
-    fontSize: Typography.sizes.sm,
-    color: Colors.text.primary,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
+  actionButtonText: {
+    fontSize: Typography.sizes.md,
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
   },
-  actionChipTextActive: {
+  actionButtonTextActive: {
     color: Colors.text.inverse,
   },
-  actionChipOutlined: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.round,
+  actionButtonRemove: {
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.lg,
     borderWidth: 1,
     borderColor: Colors.border.medium,
+    alignSelf: 'center',
   },
-  actionChipOutlinedText: {
+  actionButtonRemoveText: {
     fontSize: Typography.sizes.sm,
     color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
   },
   saveButton: {
     flexDirection: 'row',

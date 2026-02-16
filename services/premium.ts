@@ -1,5 +1,7 @@
 // services/premium.ts
 
+import { businessesService } from './businesses';
+
 export interface PremiumPlan {
     id: string;
     slug: string;
@@ -235,6 +237,8 @@ export interface PremiumPlan {
       premiumTestHelpers.setMockPlan(
         planSlug as 'free' | 'starter' | 'pro' | 'enterprise'
       );
+      const tier = planSlug === 'free' ? 'free' : 'premium';
+      await businessesService.updateBusiness(businessId, { subscription_tier: tier });
       return { success: true };
     },
   
@@ -245,6 +249,7 @@ export interface PremiumPlan {
       if (mockSubscription) {
         mockSubscription = { ...mockSubscription, cancel_at_period_end: true };
       }
+      await businessesService.updateBusiness(businessId, { subscription_tier: 'free' });
       return { success: true };
     },
   
