@@ -1,4 +1,4 @@
-import { useMemo, useRef, useImperativeHandle, forwardRef, useEffect, memo } from 'react';
+import { useMemo, useRef, useImperativeHandle, forwardRef, useEffect, useCallback, memo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { CATEGORY_COLORS, DEFAULT_CATEGORY_COLOR } from '@/constants/categories';
@@ -38,14 +38,10 @@ function buildMapHtml(
   apiKey: string,
   center: { lat: number; lng: number },
   zoom: number,
-  markers: MapMarker[],
-  activeMarkerId: string | null,
   selectable: boolean,
   hasMarkerPress: boolean,
   hasRegionChange: boolean
 ) {
-  const markersJson = JSON.stringify(markers);
-  const activeIdJson = JSON.stringify(activeMarkerId || '');
   const clickHandler = selectable
     ? `
       map.addListener('click', function(e) {
@@ -102,46 +98,55 @@ function buildMapHtml(
         keyboardShortcuts: false,
         gestureHandling: 'greedy'
       });
-      var markersData = ${markersJson};
-      var activeId = ${activeIdJson};
-      var bounds = new google.maps.LatLngBounds();
       var infoWindow = new google.maps.InfoWindow();
       var hasMarkerPress = ${hasMarkerPress};
-      markersData.forEach(function(m) {
-        var lat = typeof m.lat === 'number' ? m.lat : parseFloat(m.lat);
-        var lng = typeof m.lng === 'number' ? m.lng : parseFloat(m.lng);
-        if (isNaN(lat) || isNaN(lng)) return;
-        var pos = { lat: lat, lng: lng };
-        var categorySlug = m.categorySlug || '';
-        var isActive = m.id && activeId === m.id;
-        var marker = new google.maps.Marker({
-          position: pos,
-          map: map,
-          title: m.title || '',
-          icon: getPinpointIcon(categorySlug, isActive),
-          animation: google.maps.Animation.DROP
+      window.__markerData = [];
+      window.__map = map;
+      window.__updateActiveMarker = function(activeId) {
+        if (!window.__markerData) return;
+        window.__markerData.forEach(function(d) {
+          var isActive = d.id && activeId === d.id;
+          d.marker.setIcon(getPinpointIcon(d.categorySlug, isActive));
         });
-        window.__markerData = window.__markerData || [];
-        window.__markerData.push({ marker: marker, id: m.id, categorySlug: categorySlug });
-        bounds.extend(pos);
-        if (hasMarkerPress && m.id) {
-          marker.addListener('click', function() {
-            if (window.ReactNativeWebView) {
-              window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'markerPress', eventId: m.id }));
-            }
-            var imgUrl = m.coverImageUrl || '';
-            var eventId = m.id;
-            var content = '<div class="info-window-content" data-event-id="' + escapeHtml(eventId) + '" style="padding:0;margin:0;min-width:200px;max-width:260px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.15);border-radius:8px;overflow:hidden;">' +
-              (imgUrl ? '<img src="' + escapeHtml(imgUrl) + '" style="width:100%;height:120px;object-fit:cover;border-radius:8px 8px 0 0;display:block;pointer-events:none;" />' : '') +
-              '<div style="padding:12px;background:#fff;border-radius:' + (imgUrl ? '0 0 8px 8px' : '8px') + ';">' +
-              '<div style="font-weight:600;font-size:14px;color:#1a1a1a;margin-bottom:8px;">' + escapeHtml(m.title || 'Event') + '</div>' +
-              '<div style="font-size:12px;color:#6366f1;font-weight:500;">View details →</div>' +
-              '</div></div>';
-            infoWindow.setContent(content);
-            infoWindow.open(map, marker);
+      };
+      window.__updateMarkers = function(markersData, activeId) {
+        if (!window.__markerData) return;
+        window.__markerData.forEach(function(d) { d.marker.setMap(null); });
+        window.__markerData = [];
+        if (!markersData || !markersData.length) return;
+        markersData.forEach(function(m) {
+          var lat = typeof m.lat === 'number' ? m.lat : parseFloat(m.lat);
+          var lng = typeof m.lng === 'number' ? m.lng : parseFloat(m.lng);
+          if (isNaN(lat) || isNaN(lng)) return;
+          var pos = { lat: lat, lng: lng };
+          var categorySlug = m.categorySlug || '';
+          var isActive = m.id && activeId === m.id;
+          var marker = new google.maps.Marker({
+            position: pos,
+            map: map,
+            title: m.title || '',
+            icon: getPinpointIcon(categorySlug, isActive)
           });
-        }
-      });
+          window.__markerData.push({ marker: marker, id: m.id, categorySlug: categorySlug });
+          if (hasMarkerPress && m.id) {
+            marker.addListener('click', function() {
+              if (window.ReactNativeWebView) {
+                window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'markerPress', eventId: m.id }));
+              }
+              var imgUrl = m.coverImageUrl || '';
+              var eventId = m.id;
+              var content = '<div class="info-window-content" data-event-id="' + escapeHtml(eventId) + '" style="padding:0;margin:0;min-width:200px;max-width:260px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.15);border-radius:8px;overflow:hidden;">' +
+                (imgUrl ? '<img src="' + escapeHtml(imgUrl) + '" style="width:100%;height:120px;object-fit:cover;border-radius:8px 8px 0 0;display:block;pointer-events:none;" />' : '') +
+                '<div style="padding:12px;background:#fff;border-radius:' + (imgUrl ? '0 0 8px 8px' : '8px') + ';">' +
+                '<div style="font-weight:600;font-size:14px;color:#1a1a1a;margin-bottom:8px;">' + escapeHtml(m.title || 'Event') + '</div>' +
+                '<div style="font-size:12px;color:#6366f1;font-weight:500;">View details →</div>' +
+                '</div></div>';
+              infoWindow.setContent(content);
+              infoWindow.open(map, marker);
+            });
+          }
+        });
+      };
       if (hasMarkerPress) {
         google.maps.event.addListener(infoWindow, 'domready', function() {
           var el = document.querySelector('.info-window-content');
@@ -155,14 +160,6 @@ function buildMapHtml(
           }
         });
       }
-      if (markersData.length === 1) {
-        var m0 = markersData[0];
-        map.setCenter({ lat: typeof m0.lat === 'number' ? m0.lat : parseFloat(m0.lat), lng: typeof m0.lng === 'number' ? m0.lng : parseFloat(m0.lng) });
-        map.setZoom(14);
-      } else if (markersData.length > 1) {
-        map.fitBounds(bounds, 50);
-      }
-      window.__map = map;
       if (${hasRegionChange}) {
         map.addListener('idle', function() {
           var c = map.getCenter();
@@ -179,6 +176,9 @@ function buildMapHtml(
         });
       }
       ${clickHandler}
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mapReady' }));
+      }
     }
   </script>
   <script async defer src="https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap"></script>
@@ -216,18 +216,47 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
         apiKey,
         center,
         zoom,
-        validMarkers,
-        activeMarkerId ?? null,
         !!onMapPress,
         !!onMarkerPress,
         !!onRegionChange
       ),
-    [apiKey, center.lat, center.lng, zoom, validMarkers, activeMarkerId, !!onMapPress, !!onMarkerPress, !!onRegionChange]
+    [apiKey, center.lat, center.lng, zoom, !!onMapPress, !!onMarkerPress, !!onRegionChange]
   );
 
-  const webViewKey = `map-${validMarkers.map((m) => m.id).sort().join('-')}`;
-
   const webViewRef = useRef<WebView>(null);
+  const validMarkersRef = useRef(validMarkers);
+  const activeMarkerIdRef = useRef(activeMarkerId);
+  const lastInjectedIdsRef = useRef<string>('');
+  const lastInjectedActiveRef = useRef<string>('');
+  validMarkersRef.current = validMarkers;
+  activeMarkerIdRef.current = activeMarkerId;
+
+  const injectMarkers = useCallback(() => {
+    const markers = validMarkersRef.current;
+    const activeId = activeMarkerIdRef.current ?? '';
+    const idsKey = markers
+      .map((m) => m.id)
+      .sort()
+      .join(',');
+    const idsChanged = idsKey !== lastInjectedIdsRef.current;
+    const activeChanged = activeId !== lastInjectedActiveRef.current;
+    if (!idsChanged && !activeChanged) return;
+    if (idsChanged) {
+      lastInjectedIdsRef.current = idsKey;
+      lastInjectedActiveRef.current = activeId;
+      const markersRaw = JSON.stringify(markers);
+      const markersEscaped = markersRaw.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const activeRaw = JSON.stringify(activeId);
+      const activeEscaped = activeRaw.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const script = `(function(){if(typeof window.__updateMarkers==='function'){try{window.__updateMarkers(JSON.parse('${markersEscaped}'),JSON.parse('${activeEscaped}'));}catch(e){}}}());true;`;
+      webViewRef.current?.injectJavaScript(script);
+    } else {
+      lastInjectedActiveRef.current = activeId;
+      const activeEscaped = JSON.stringify(activeId).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const script = `(function(){if(typeof window.__updateActiveMarker==='function'){try{window.__updateActiveMarker(JSON.parse('${activeEscaped}'));}catch(e){}}}());true;`;
+      webViewRef.current?.injectJavaScript(script);
+    }
+  }, []);
 
   const animateTo = (lat: number, lng: number) => {
     webViewRef.current?.injectJavaScript(
@@ -236,19 +265,8 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
   };
 
   useEffect(() => {
-    const activeId = JSON.stringify(activeMarkerId ?? '');
-    const script = `(function(){
-      var data=window.__markerData;
-      var activeId=${activeId};
-      if(data){
-        data.forEach(function(d){
-          var isActive=d.id===activeId;
-          d.marker.setIcon(getPinpointIcon(d.categorySlug,isActive));
-        });
-      }
-    })();true;`;
-    webViewRef.current?.injectJavaScript(script);
-  }, [activeMarkerId]);
+    injectMarkers();
+  }, [validMarkers, activeMarkerId, injectMarkers]);
 
   useImperativeHandle(ref, () => ({ animateTo }), []);
 
@@ -256,7 +274,7 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
     <View style={[styles.container, style]}>
       <WebView
         ref={webViewRef}
-        key={webViewKey}
+        key="map"
         source={{ html }}
         style={styles.webview}
         scrollEnabled
@@ -282,6 +300,11 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
                 lng: payload.lng,
                 bounds: payload.bounds,
               });
+            }
+            if (payload?.type === 'mapReady') {
+              lastInjectedIdsRef.current = '';
+              lastInjectedActiveRef.current = '__none__';
+              injectMarkers();
             }
           } catch {
             // ignore

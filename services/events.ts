@@ -62,7 +62,9 @@ export const eventsService = {
     });
 
     if (error) throw error;
-    return data;
+    const eventId = typeof data === 'string' ? data : (data as { id?: string })?.id;
+    if (!eventId) throw new Error('Event was created but no ID was returned');
+    return eventId;
   },
 
   async updateEvent(eventId: string, updates: Partial<Event>): Promise<void> {
@@ -162,20 +164,24 @@ export const eventsService = {
     file: { uri: string; name: string; type: string },
     folder: 'events' | 'logos' | 'venues' = 'events'
   ): Promise<string> {
-    const fileExt = file.name.split('.').pop();
+    const fileExt = file.name.split('.').pop() || 'jpg';
     const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
     const filePath = `${folder}/${fileName}`;
 
-    const formData = new FormData();
-    formData.append('file', {
-      uri: file.uri,
-      name: file.name,
-      type: file.type,
-    } as any);
+    // React Native Android: FormData/Blob upload fails. Use ArrayBuffer from base64.
+    const { decode } = await import('base64-arraybuffer');
+    const { readAsStringAsync, EncodingType } = await import('expo-file-system');
+
+    const base64 = await readAsStringAsync(file.uri, {
+      encoding: EncodingType.Base64,
+    });
+    const arrayBuffer = decode(base64);
 
     const { data, error } = await supabase.storage
       .from('event-images')
-      .upload(filePath, formData);
+      .upload(filePath, arrayBuffer, {
+        contentType: file.type || 'image/jpeg',
+      });
 
     if (error) throw error;
 
