@@ -38,13 +38,15 @@ import {
   Trash2,
   CheckCircle2,
   Star,
+  Flag,
 } from 'lucide-react-native';
+import { complaintsService } from '@/services/complaints';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function EventDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { user } = useAuth();
+  const { user, isBanned } = useAuth();
   const { userBusiness } = useApp();
   const [details, setDetails] = useState<EventDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -131,6 +133,10 @@ export default function EventDetail() {
 
   const handleRsvp = async (status: 'going' | 'interested') => {
     if (!user || !id) return;
+    if (isBanned) {
+      Alert.alert('Account Suspended', 'Your account has been suspended. Please contact support.');
+      return;
+    }
     setSaving(true);
     try {
       await socialService.createOrUpdateRsvp(id, status);
@@ -272,7 +278,36 @@ export default function EventDetail() {
         <Text style={styles.headerTitle} numberOfLines={1}>
           {event.title}
         </Text>
-        <View style={styles.headerRight} />
+        <View style={styles.headerRight}>
+          {user && !isOwner && (
+            <TouchableOpacity
+              style={styles.reportButton}
+              onPress={async () => {
+                Alert.alert(
+                  'Report Event',
+                  'Report this event for inappropriate content?',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Report',
+                      style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          await complaintsService.createComplaint('event', event.id);
+                          Alert.alert('Thank you', 'Your report has been submitted.');
+                        } catch {
+                          Alert.alert('Error', 'Failed to submit report.');
+                        }
+                      },
+                    },
+                  ]
+                );
+              }}
+            >
+              <Flag size={20} color={Colors.text.tertiary} />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       <ScrollView
@@ -567,6 +602,32 @@ export default function EventDetail() {
                 review={review}
                 isOwner={isOwner}
                 onRespond={isOwner ? handleReviewRespond : undefined}
+                canReport={!!user && review.user_id !== user.id}
+                onReport={
+                  user
+                    ? (reviewId) => {
+                        Alert.alert(
+                          'Report Review',
+                          'Report this review for inappropriate content?',
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                              text: 'Report',
+                              style: 'destructive',
+                              onPress: async () => {
+                                try {
+                                  await complaintsService.createComplaint('review', reviewId);
+                                  Alert.alert('Thank you', 'Your report has been submitted.');
+                                } catch {
+                                  Alert.alert('Error', 'Failed to submit report.');
+                                }
+                              },
+                            },
+                          ]
+                        );
+                      }
+                    : undefined
+                }
               />
             ))}
           </View>
@@ -608,6 +669,10 @@ const styles = StyleSheet.create({
   },
   headerRight: {
     width: 40,
+    alignItems: 'flex-end',
+  },
+  reportButton: {
+    padding: Spacing.sm,
   },
   scrollView: {
     flex: 1,

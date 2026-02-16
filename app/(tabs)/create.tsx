@@ -34,6 +34,7 @@ import {
   ImageIcon,
 } from 'lucide-react-native';
 import { useApp } from '@/contexts/AppContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { router } from 'expo-router';
 import { Input } from '@/components/Input';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
@@ -74,6 +75,7 @@ const Palette = {
 export default function CreateScreen() {
   const insets = useSafeAreaInsets();
   const { hasBusiness, userBusiness } = useApp();
+  const { isBanned } = useAuth();
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -167,6 +169,10 @@ export default function CreateScreen() {
 
   const handleSubmit = async () => {
     if (!validate() || !userBusiness) return;
+    if (isBanned) {
+      Alert.alert('Account Suspended', 'Your account has been suspended. Please contact support.');
+      return;
+    }
 
     const { canCreate, currentCount, maxCount } =
       await businessesService.checkEventLimit(userBusiness.id);

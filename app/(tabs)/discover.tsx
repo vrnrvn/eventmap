@@ -26,6 +26,8 @@ import { EventCardCarousel } from '@/components/EventCardCarousel';
 import { Avatar } from '@/components/Avatar';
 import { SearchOverlay, SearchBarCollapsed } from '@/components/SearchOverlay';
 import { filterEventsByDateRange } from '@/utils/recurrence';
+import { bannersService, type AppBanner } from '@/services/banners';
+import { AppBannerCarousel } from '@/components/AppBannerCarousel';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const DEFAULT_CENTER = { lat: 37.7749, lng: -122.4194 };
@@ -53,6 +55,7 @@ export default function DiscoverScreen() {
   const [sheetIndex, setSheetIndex] = useState(0);
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [banners, setBanners] = useState<AppBanner[]>([]);
 
   const bottomSheetRef = useRef<BottomSheet>(null);
   const mapRef = useRef<GoogleMapHandle>(null);
@@ -82,6 +85,10 @@ export default function DiscoverScreen() {
   useEffect(() => {
     loadInitialData();
   }, [profile]);
+
+  useEffect(() => {
+    bannersService.getActiveBanners('discover').then(setBanners).catch(() => setBanners([]));
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -381,20 +388,23 @@ export default function DiscoverScreen() {
   );
 
   const renderListHeader = () => (
-    <View style={styles.sheetHeader}>
-      <TouchableOpacity
-        style={styles.showListRow}
-        onPress={() => bottomSheetRef.current?.snapToIndex(1)}
-        activeOpacity={0.7}
-      >
-        <List size={20} color={Colors.primary} />
-        <Text style={styles.sheetSummary}>
-          {loading
-            ? 'Finding events near you...'
-            : `${visibleEvents.length} event${visibleEvents.length !== 1 ? 's' : ''} in view`}
-        </Text>
-      </TouchableOpacity>
-    </View>
+    <>
+      <AppBannerCarousel banners={banners} />
+      <View style={styles.sheetHeader}>
+        <TouchableOpacity
+          style={styles.showListRow}
+          onPress={() => bottomSheetRef.current?.snapToIndex(1)}
+          activeOpacity={0.7}
+        >
+          <List size={20} color={Colors.primary} />
+          <Text style={styles.sheetSummary}>
+            {loading
+              ? 'Finding events near you...'
+              : `${visibleEvents.length} event${visibleEvents.length !== 1 ? 's' : ''} in view`}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </>
   );
 
   return (

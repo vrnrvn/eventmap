@@ -10,6 +10,7 @@ import {
   Platform,
   Dimensions,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -34,7 +35,9 @@ import {
   Heart,
   Calendar,
   Building2,
+  Flag,
 } from 'lucide-react-native';
+import { complaintsService } from '@/services/complaints';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -187,7 +190,36 @@ export default function BusinessDetail() {
         <Text style={styles.headerTitle} numberOfLines={1}>
           {business.name}
         </Text>
-        <View style={styles.headerSpacer} />
+        <View style={styles.headerSpacer}>
+          {user && !isOwner && (
+            <TouchableOpacity
+              style={styles.reportButton}
+              onPress={() => {
+                Alert.alert(
+                  'Report Business',
+                  'Report this business for inappropriate content?',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Report',
+                      style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          await complaintsService.createComplaint('business', id);
+                          Alert.alert('Thank you', 'Your report has been submitted.');
+                        } catch {
+                          Alert.alert('Error', 'Failed to submit report.');
+                        }
+                      },
+                    },
+                  ]
+                );
+              }}
+            >
+              <Flag size={20} color={Colors.text.tertiary} />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       <ScrollView
@@ -318,6 +350,32 @@ export default function BusinessDetail() {
                     }
                   : undefined
               }
+              canReport={!!user && review.user_id !== user.id}
+              onReport={
+                user
+                  ? (reviewId) => {
+                      Alert.alert(
+                        'Report Review',
+                        'Report this review for inappropriate content?',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          {
+                            text: 'Report',
+                            style: 'destructive',
+                            onPress: async () => {
+                              try {
+                                await complaintsService.createComplaint('review', reviewId);
+                                Alert.alert('Thank you', 'Your report has been submitted.');
+                              } catch {
+                                Alert.alert('Error', 'Failed to submit report.');
+                              }
+                            },
+                          },
+                        ]
+                      );
+                    }
+                  : undefined
+              }
             />
           ))}
         </View>
@@ -382,6 +440,10 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 40,
+    alignItems: 'flex-end',
+  },
+  reportButton: {
+    padding: Spacing.sm,
   },
   centerContainer: {
     flex: 1,
