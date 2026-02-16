@@ -28,6 +28,8 @@ import {
     loading: boolean;
     isPremium: boolean;
     tierSlug: string;
+    eventCount: number;
+    eventLimit: number;
     canUse: (feature: FeatureKey) => boolean;
     canCreateEvent: (currentCount: number) => boolean;
     refreshSubscription: () => Promise<void>;
@@ -40,6 +42,8 @@ import {
     loading: true,
     isPremium: false,
     tierSlug: 'free',
+    eventCount: 0,
+    eventLimit: 2,
     canUse: () => false,
     canCreateEvent: () => true,
     refreshSubscription: async () => {},
@@ -52,6 +56,7 @@ import {
     const [currentPlan, setCurrentPlan] = useState<PremiumPlan | null>(null);
     const [allPlans, setAllPlans] = useState<PremiumPlan[]>([]);
     const [loading, setLoading] = useState(true);
+    const [eventCount, setEventCount] = useState(0);
   
     const loadData = useCallback(async () => {
       try {
@@ -64,9 +69,12 @@ import {
           setSubscription(sub);
           const limits = await premiumService.getFeatureLimits(userBusiness.id);
           setCurrentPlan(limits);
+          const count = await premiumService.getEventCount(userBusiness.id);
+          setEventCount(count);
         } else {
           setSubscription(null);
           setCurrentPlan(plans.find((p) => p.slug === 'free') ?? null);
+          setEventCount(0);
         }
       } catch (err) {
         console.error('Failed to load premium data:', err);
@@ -85,7 +93,8 @@ import {
       currentPlan.slug !== 'free';
   
     const tierSlug = currentPlan?.slug ?? 'free';
-  
+    const eventLimit = currentPlan?.max_events ?? 2;
+
     const canUse = useCallback(
       (feature: FeatureKey) => {
         if (!currentPlan) return false;
@@ -93,7 +102,7 @@ import {
       },
       [currentPlan]
     );
-  
+
     const canCreateEvent = useCallback(
       (currentCount: number) => {
         if (!currentPlan) return true;
@@ -101,7 +110,7 @@ import {
       },
       [currentPlan]
     );
-  
+
     return (
       <PremiumContext.Provider
         value={{
@@ -111,6 +120,8 @@ import {
           loading,
           isPremium,
           tierSlug,
+          eventCount,
+          eventLimit,
           canUse,
           canCreateEvent,
           refreshSubscription: loadData,

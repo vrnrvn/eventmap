@@ -14,6 +14,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
+import { usePremium } from '@/contexts/PremiumContext';
+import { premiumService } from '@/services/premium';
 import { profilesService } from '@/services/profiles';
 import { businessesService } from '@/services/businesses';
 import { eventsService } from '@/services/events';
@@ -56,6 +58,7 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { profile, signOut, refreshProfile, user } = useAuth();
   const { hasBusiness, userMode, setUserMode, userBusiness, refreshBusiness } = useApp();
+  const { isPremium, currentPlan, refreshSubscription } = usePremium();
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [stats, setStats] = useState<{
     events: string;
@@ -66,6 +69,8 @@ export default function ProfileScreen() {
   }>({ events: '—', followers: '—', following: '—', saved: '—', views: '—' });
 
   const isBizMode = hasBusiness && userMode === 'business';
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -136,6 +141,33 @@ export default function ProfileScreen() {
       return;
     }
     setUserMode(userMode === 'user' ? 'business' : 'user');
+  };
+
+  const handleUpgradeToPremium = async () => {
+    if (!userBusiness) {
+      Alert.alert('Business Required', 'Create a business profile before upgrading.');
+      return;
+    }
+    if (upgrading) return;
+
+    setUpgrading(true);
+    try {
+      const { success } = await premiumService.subscribeToPlan(
+        userBusiness.id,
+        'pro',
+        'monthly'
+      );
+      if (success) {
+        await refreshSubscription();
+        setShowPremiumModal(false);
+        Alert.alert('Premium Activated', 'Your premium subscription is now active.');
+      }
+    } catch (err) {
+      console.error('Failed to upgrade to premium', err);
+      Alert.alert('Error', 'Failed to upgrade to premium. Please try again.');
+    } finally {
+      setUpgrading(false);
+    }
   };
 
   const handleAvatarPick = async () => {
@@ -239,6 +271,14 @@ export default function ProfileScreen() {
             <Text style={styles.headerSubtitle}>Event Explorer</Text>
           )}
 
+          {isBizMode && isPremium && (
+            <View style={styles.premiumStatusPill}>
+              <Text style={styles.premiumStatusText}>
+                Premium subscription active{currentPlan ? ` • ${currentPlan.name}` : ''}
+              </Text>
+            </View>
+          )}
+
           {/* Mode toggle pill */}
           <TouchableOpacity
             style={styles.modePill}
@@ -311,6 +351,35 @@ export default function ProfileScreen() {
         {/* ── Menu sections ── */}
         {isBizMode ? (
           <>
+            {/* Upgrade to Premium CTA for business profiles */}
+            {!isPremium && userBusiness && (
+              <View style={styles.sectionPadding}>
+                <TouchableOpacity
+                  style={styles.premiumUpgradeButton}
+                  onPress={() => setShowPremiumModal(true)}
+                  activeOpacity={0.85}
+                >
+                  <LinearGradient
+                    colors={['#F59E0B', '#F97316']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.premiumUpgradeGradient}
+                  >
+                    <View style={styles.premiumUpgradeIcon}>
+                      <Users size={18} color="#FFFFFF" />
+                    </View>
+                    <View style={styles.premiumUpgradeContent}>
+                      <Text style={styles.premiumUpgradeTitle}>Upgrade to Premium!</Text>
+                      <Text style={styles.premiumUpgradeSubtitle}>
+                        Boosted placement, analytics, recurring events & more
+                      </Text>
+                    </View>
+                    <ChevronRight size={18} color="rgba(255,255,255,0.8)" />
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            )}
+
             <View style={styles.sectionPadding}>
               <Text style={styles.sectionLabel}>Business</Text>
               <View style={styles.card}>
@@ -401,6 +470,53 @@ export default function ProfileScreen() {
 
         <Text style={styles.versionText}>Version 1.0.0</Text>
       </ScrollView>
+
+      {showPremiumModal && (
+        <View style={styles.premiumModalOverlay}>
+          <TouchableOpacity
+            style={styles.premiumModalBackdrop}
+            activeOpacity={1}
+            onPress={() => !upgrading && setShowPremiumModal(false)}
+          />
+          <View style={styles.premiumModalCard}>
+            <Text style={styles.premiumModalTitle}>Go Premium</Text>
+            <Text style={styles.premiumModalSubtitle}>
+              Unlock powerful tools to grow your events and stand out on the map.
+            </Text>
+
+            <View style={styles.premiumBenefitsList}>
+              <BenefitItem label="More than 2 event uploads per month" />
+              <BenefitItem label="Boosted event placement in Discover" />
+              <BenefitItem label="Highlighted map markers for your events" />
+              <BenefitItem label="Event analytics (views, saves, clicks)" />
+              <BenefitItem label="Multiple photo uploads per event" />
+              <BenefitItem label="Recurring events & schedules" />
+              <BenefitItem label="Stripe-powered subscription (coming soon)" />
+            </View>
+
+            <TouchableOpacity
+              style={styles.premiumBuyButton}
+              onPress={handleUpgradeToPremium}
+              disabled={upgrading}
+              activeOpacity={0.85}
+            >
+              {upgrading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.premiumBuyButtonText}>Buy Premium (Mock)</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.premiumCloseButton}
+              onPress={() => !upgrading && setShowPremiumModal(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.premiumCloseButtonText}>Maybe later</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -411,6 +527,15 @@ function StatItem({ label, value }: { label: string; value: string }) {
     <View style={styles.statItem}>
       <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function BenefitItem({ label }: { label: string }) {
+  return (
+    <View style={styles.premiumBenefitRow}>
+      <View style={styles.premiumBenefitBullet} />
+      <Text style={styles.premiumBenefitText}>{label}</Text>
     </View>
   );
 }
@@ -512,6 +637,21 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 20,
     marginBottom: Spacing.md,
+  },
+  premiumStatusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(16,185,129,0.18)',
+    marginBottom: Spacing.md,
+  },
+  premiumStatusText: {
+    fontSize: 12,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: '#A7F3D0',
   },
   businessBadgeText: {
     fontSize: 13,
@@ -666,6 +806,43 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
+  /* ── Premium upgrade CTA ── */
+  premiumUpgradeButton: {
+    borderRadius: 18,
+    overflow: 'hidden',
+    ...Shadows.md,
+  },
+  premiumUpgradeGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  premiumUpgradeIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  premiumUpgradeContent: {
+    flex: 1,
+  },
+  premiumUpgradeTitle: {
+    fontSize: 15,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: '#FFFFFF',
+  },
+  premiumUpgradeSubtitle: {
+    fontSize: 12,
+    fontFamily: Typography.fontFamily,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 2,
+  },
+
   /* ── Sign out ── */
   signOutButton: {
     flexDirection: 'row',
@@ -695,5 +872,91 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xl,
     marginBottom: Spacing.md,
     opacity: 0.5,
+  },
+
+  /* ── Premium modal ── */
+  premiumModalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.lg,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  premiumModalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  premiumModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 24,
+    padding: Spacing.lg,
+    backgroundColor: Palette.cardBg,
+    ...Shadows.lg,
+  },
+  premiumModalTitle: {
+    fontSize: 20,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: Colors.text.primary,
+    marginBottom: Spacing.xs,
+  },
+  premiumModalSubtitle: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.secondary,
+    marginBottom: Spacing.md,
+  },
+  premiumBenefitsList: {
+    marginBottom: Spacing.lg,
+    gap: Spacing.xs,
+  },
+  premiumBenefitRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+  },
+  premiumBenefitBullet: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginTop: 6,
+    backgroundColor: Palette.gradientStart,
+  },
+  premiumBenefitText: {
+    flex: 1,
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.primary,
+  },
+  premiumBuyButton: {
+    borderRadius: BorderRadius.md,
+    backgroundColor: Palette.gradientStart,
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+    marginBottom: Spacing.sm,
+  },
+  premiumBuyButtonText: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: '#FFFFFF',
+  },
+  premiumCloseButton: {
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+  },
+  premiumCloseButtonText: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.text.tertiary,
   },
 });
