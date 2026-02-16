@@ -15,6 +15,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
+import { usePremium } from '@/contexts/PremiumContext';
+import { premiumService } from '@/services/premium';
 import { profilesService } from '@/services/profiles';
 import { businessesService } from '@/services/businesses';
 import { eventsService } from '@/services/events';
@@ -70,6 +72,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { user, profile, refreshProfile } = useAuth();
   const { userBusiness, refreshBusiness, userMode, hasBusiness } = useApp();
+  const { isPremium, refreshSubscription } = usePremium();
   const [saving, setSaving] = useState<'user' | 'business' | null>(null);
   const [savedSection, setSavedSection] = useState<'user' | 'business' | null>(null);
 
@@ -243,6 +246,32 @@ export default function SettingsScreen() {
     } finally {
       setSaving(null);
     }
+  };
+
+  const handleUnsubscribePremium = async () => {
+    if (!userBusiness || !isPremium) return;
+    Alert.alert(
+      'Unsubscribe from Premium',
+      'Are you sure you want to go back to a regular account? You will lose premium features.',
+      [
+        { text: 'Keep Premium', style: 'cancel' },
+        {
+          text: 'Unsubscribe',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Mock downgrade to free plan
+              await premiumService.subscribeToPlan(userBusiness.id, 'free', 'monthly');
+              await refreshSubscription();
+              Alert.alert('Premium canceled', 'You are now on a regular account.');
+            } catch (e) {
+              console.error('Failed to unsubscribe from premium', e);
+              Alert.alert('Error', 'Failed to unsubscribe. Please try again.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -461,6 +490,17 @@ export default function SettingsScreen() {
                   )}
                 </LinearGradient>
               </TouchableOpacity>
+
+              {/* Unsubscribe from premium – only for premium business users */}
+              {isBizMode && userBusiness && isPremium && (
+                <TouchableOpacity
+                  style={styles.unsubscribeWrap}
+                  onPress={handleUnsubscribePremium}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.unsubscribeText}>Unsubscribe from premium</Text>
+                </TouchableOpacity>
+              )}
             </>
           ) : (
             <>
@@ -829,6 +869,19 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.bold,
     color: '#FFFFFF',
     letterSpacing: 0.3,
+  },
+
+  unsubscribeWrap: {
+    marginTop: 12,
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  unsubscribeText: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.text.tertiary,
+    textDecorationLine: 'underline',
   },
 
   /* ── No-business empty (not used but kept consistent) ── */
