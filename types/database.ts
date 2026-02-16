@@ -8,6 +8,7 @@ export type Profile = {
   hobbies: string | null;
   has_completed_onboarding?: boolean;
   preferred_categories?: string[];
+  is_admin?: boolean;
   created_at: string;
 };
 
