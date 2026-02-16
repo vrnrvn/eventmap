@@ -262,6 +262,7 @@ export default function SettingsScreen() {
             try {
               // Mock downgrade to free plan
               await premiumService.subscribeToPlan(userBusiness.id, 'free', 'monthly');
+              await refreshBusiness();
               await refreshSubscription();
               Alert.alert('Premium canceled', 'You are now on a regular account.');
             } catch (e) {
