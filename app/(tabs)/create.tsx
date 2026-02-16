@@ -10,8 +10,8 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  TouchableOpacity,
 } from 'react-native';
-import { TouchableOpacity } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePicker, {
@@ -19,6 +19,7 @@ import DateTimePicker, {
 } from '@react-native-community/datetimepicker';
 import {
   ChevronRight,
+  ChevronDown,
   CalendarPlus,
   Type,
   AlignLeft,
@@ -176,7 +177,6 @@ export default function CreateScreen() {
 
     setLoading(true);
     try {
-      // Upload images first
       let coverImageUrl: string | null = null;
       const uploadedUrls: string[] = [];
       for (const img of formData.images) {
@@ -206,7 +206,6 @@ export default function CreateScreen() {
         recurrencePattern: formData.recurrence ?? undefined,
       });
 
-      // Add all photos as event_photos
       for (let i = 0; i < uploadedUrls.length; i++) {
         await eventsService.addEventPhoto(eventId, uploadedUrls[i], i);
       }
@@ -395,7 +394,8 @@ export default function CreateScreen() {
               if (Platform.OS === 'android') {
                 openAndroidPicker(formData.startDatetime, 'start');
               } else {
-                setShowStartPicker(true);
+                setShowEndPicker(false);
+                setShowStartPicker((prev) => !prev);
               }
             }}
           >
@@ -408,83 +408,123 @@ export default function CreateScreen() {
                 {formatDateTime(formData.startDatetime)}
               </Text>
             </View>
-            <ChevronRight size={18} color={Colors.text.tertiary} />
+            {showStartPicker ? (
+              <ChevronDown size={18} color={Palette.gradientStart} />
+            ) : (
+              <ChevronRight size={18} color={Colors.text.tertiary} />
+            )}
           </TouchableOpacity>
-          {Platform.OS !== 'android' && showStartPicker && (
+        </View>
+
+        {/* Start picker rendered OUTSIDE the card */}
+        {Platform.OS !== 'android' && showStartPicker && (
+          <View style={styles.pickerContainer}>
             <DateTimePicker
               value={formData.startDatetime}
               mode="datetime"
               display="spinner"
               maximumDate={MAX_EVENT_DATE}
+              textColor={Colors.text.primary}
+              themeVariant="light"
               onChange={(_, d) => {
-                setShowStartPicker(false);
                 if (d) setFormData((f) => ({ ...f, startDatetime: d }));
               }}
+              style={styles.picker}
             />
-          )}
+            <TouchableOpacity
+              style={styles.pickerDoneButton}
+              onPress={() => setShowStartPicker(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.pickerDoneText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
-          <View style={styles.fieldSeparator} />
+        <View style={styles.dateCardSpacing}>
+          <View style={styles.card}>
+            {/* End */}
+            <TouchableOpacity
+              style={styles.dateRow}
+              activeOpacity={0.6}
+              onPress={() => {
+                if (Platform.OS === 'android') {
+                  openAndroidPicker(formData.endDatetime, 'end');
+                } else {
+                  setShowStartPicker(false);
+                  setShowEndPicker((prev) => !prev);
+                }
+              }}
+            >
+              <View style={styles.fieldIcon}>
+                <CalendarDays size={16} color={Palette.gradientStart} />
+              </View>
+              <View style={styles.dateTextBlock}>
+                <Text style={styles.dateLabel}>Ends</Text>
+                <Text style={styles.dateValue}>
+                  {formatDateTime(formData.endDatetime)}
+                </Text>
+              </View>
+              {showEndPicker ? (
+                <ChevronDown size={18} color={Palette.gradientStart} />
+              ) : (
+                <ChevronRight size={18} color={Colors.text.tertiary} />
+              )}
+            </TouchableOpacity>
 
-          {/* End */}
-          <TouchableOpacity
-            style={styles.dateRow}
-            activeOpacity={0.6}
-            onPress={() => {
-              if (Platform.OS === 'android') {
-                openAndroidPicker(formData.endDatetime, 'end');
-              } else {
-                setShowEndPicker(true);
-              }
-            }}
-          >
-            <View style={styles.fieldIcon}>
-              <CalendarDays size={16} color={Palette.gradientStart} />
-            </View>
-            <View style={styles.dateTextBlock}>
-              <Text style={styles.dateLabel}>Ends</Text>
-              <Text style={styles.dateValue}>
-                {formatDateTime(formData.endDatetime)}
-              </Text>
-            </View>
-            <ChevronRight size={18} color={Colors.text.tertiary} />
-          </TouchableOpacity>
-          {Platform.OS !== 'android' && showEndPicker && (
+            {errors.endDatetime && (
+              <View style={styles.inlineError}>
+                <Text style={styles.errorText}>{errors.endDatetime}</Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* End picker rendered OUTSIDE the card */}
+        {Platform.OS !== 'android' && showEndPicker && (
+          <View style={styles.pickerContainer}>
             <DateTimePicker
               value={formData.endDatetime}
               mode="datetime"
               display="spinner"
               maximumDate={MAX_EVENT_DATE}
+              textColor={Colors.text.primary}
+              themeVariant="light"
               onChange={(_, d) => {
-                setShowEndPicker(false);
                 if (d) setFormData((f) => ({ ...f, endDatetime: d }));
               }}
+              style={styles.picker}
             />
-          )}
-          {errors.endDatetime && (
-            <View style={styles.inlineError}>
-              <Text style={styles.errorText}>{errors.endDatetime}</Text>
-            </View>
-          )}
+            <TouchableOpacity
+              style={styles.pickerDoneButton}
+              onPress={() => setShowEndPicker(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.pickerDoneText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
-          <View style={styles.fieldSeparator} />
-
-          {/* Recurrence */}
-          <TouchableOpacity
-            style={styles.dateRow}
-            activeOpacity={0.6}
-            onPress={() => recurrencePickerRef.current?.present()}
-          >
-            <View style={styles.fieldIcon}>
-              <Repeat size={16} color={Palette.gradientStart} />
-            </View>
-            <View style={styles.dateTextBlock}>
-              <Text style={styles.dateLabel}>Repeat</Text>
-              <Text style={styles.dateValue}>
-                {getRecurrenceLabel(formData.recurrence)}
-              </Text>
-            </View>
-            <ChevronRight size={18} color={Colors.text.tertiary} />
-          </TouchableOpacity>
+        {/* Recurrence */}
+        <View style={styles.dateCardSpacing}>
+          <View style={styles.card}>
+            <TouchableOpacity
+              style={styles.dateRow}
+              activeOpacity={0.6}
+              onPress={() => recurrencePickerRef.current?.present()}
+            >
+              <View style={styles.fieldIcon}>
+                <Repeat size={16} color={Palette.gradientStart} />
+              </View>
+              <View style={styles.dateTextBlock}>
+                <Text style={styles.dateLabel}>Repeat</Text>
+                <Text style={styles.dateValue}>
+                  {getRecurrenceLabel(formData.recurrence)}
+                </Text>
+              </View>
+              <ChevronRight size={18} color={Colors.text.tertiary} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* ── Section: Location ── */}
@@ -781,6 +821,46 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
+  },
+  dateCardSpacing: {
+    marginTop: 8,
+  },
+
+  /* ── Picker container (outside card) ── */
+  pickerContainer: {
+    backgroundColor: Palette.cardBg,
+    borderRadius: 16,
+    marginTop: 8,
+    paddingBottom: 8,
+    overflow: 'visible',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 10,
+      },
+      android: { elevation: 3 },
+    }),
+  },
+  picker: {
+    height: 200,
+    width: '100%',
+  },
+  pickerDoneButton: {
+    alignSelf: 'center',
+    paddingHorizontal: 32,
+    paddingVertical: 10,
+    backgroundColor: Palette.accentSoft,
+    borderRadius: 12,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  pickerDoneText: {
+    fontSize: 15,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Palette.gradientStart,
   },
 
   /* ── Errors ── */
