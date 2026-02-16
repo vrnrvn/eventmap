@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import { MapPin, Globe, Compass } from 'lucide-react-native';
+import { Globe, Compass } from 'lucide-react-native';
+import { EventmapMapPin } from '@/components/icons/EventmapIcons';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 
 export type RegionItem = {
@@ -34,7 +35,7 @@ function RegionIcon({ icon }: { icon?: RegionItem['icon'] }) {
     case 'compass':
       return <Compass size={20} color={Colors.text.secondary} />;
     default:
-      return <MapPin size={20} color={Colors.text.secondary} />;
+      return <EventmapMapPin size={20} color={Colors.text.secondary} />;
   }
 }
 

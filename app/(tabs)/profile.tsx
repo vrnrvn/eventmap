@@ -40,18 +40,15 @@ import {
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// ── Refined palette that layers on top of your existing Colors ──
 const Palette = {
-  gradientStart: '#6366F1', // indigo-500
-  gradientEnd: '#8B5CF6', // violet-500
-  cardBg: '#FFFFFF',
-  surfaceMuted: '#F8F9FC',
-  accentSoft: 'rgba(99,102,241,0.08)',
-  accentMedium: 'rgba(99,102,241,0.15)',
-  textOnGradient: '#FFFFFF',
-  textOnGradientMuted: 'rgba(255,255,255,0.75)',
-  separator: '#F0F0F5',
-  badge: '#6366F1',
+  gradientStart: Colors.primary,
+  gradientEnd: Colors.accent,
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  textOnGradient: Colors.text.inverse,
+  textOnGradientMuted: 'rgba(250, 248, 245, 0.75)',
+  separator: Colors.border.light,
 };
 
 export default function ProfileScreen() {
@@ -233,7 +230,7 @@ export default function ProfileScreen() {
         <LinearGradient
           colors={
             isBizMode
-              ? ['#0F766E', '#14B8A6']
+              ? [Colors.secondary, Colors.secondaryLight]
               : [Palette.gradientStart, Palette.gradientEnd]
           }
           start={{ x: 0, y: 0 }}
@@ -286,8 +283,8 @@ export default function ProfileScreen() {
             onPress={toggleMode}
             activeOpacity={0.8}
           >
-            <ArrowLeftRight size={14} color={isBizMode ? '#0F766E' : Palette.gradientStart} />
-            <Text style={[styles.modePillText, isBizMode && { color: '#0F766E' }]}>
+            <ArrowLeftRight size={14} color={isBizMode ? Colors.secondary : Colors.primary} />
+            <Text style={[styles.modePillText, isBizMode && { color: Colors.secondary }]}>
               {hasBusiness
                 ? userMode === 'user'
                   ? 'Switch to Business'
@@ -333,7 +330,7 @@ export default function ProfileScreen() {
                 style={styles.createBusinessGradient}
               >
                 <View style={styles.createBusinessIcon}>
-                  <Briefcase size={20} color={Palette.gradientStart} />
+                  <Briefcase size={20} color={Colors.primary} />
                 </View>
                 <View style={styles.createBusinessContent}>
                   <Text style={styles.createBusinessTitle}>
@@ -361,7 +358,7 @@ export default function ProfileScreen() {
                   activeOpacity={0.85}
                 >
                   <LinearGradient
-                    colors={['#F59E0B', '#F97316']}
+                    colors={[Colors.accent, Colors.accentDark]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                     style={styles.premiumUpgradeGradient}
@@ -385,19 +382,19 @@ export default function ProfileScreen() {
               <Text style={styles.sectionLabel}>Business</Text>
               <View style={styles.card}>
                 <MenuItem
-                  icon={<Calendar size={20} color="#0F766E" />}
+                  icon={<Calendar size={20} color={Colors.secondary} />}
                   label="My Events"
                   sublabel="Manage your posted events"
                   onPress={() => router.push('/my-events' as any)}
                 />
                 <MenuItem
-                  icon={<Users size={20} color="#0F766E" />}
+                  icon={<Users size={20} color={Colors.secondary} />}
                   label="Followers"
                   sublabel="People following your business"
                   onPress={() => router.push('/followers' as any)}
                 />
                 <MenuItem
-                  icon={<BarChart3 size={20} color="#0F766E" />}
+                  icon={<BarChart3 size={20} color={Colors.secondary} />}
                   label="Analytics"
                   sublabel="Views, saves & engagement"
                   onPress={() =>
@@ -412,7 +409,7 @@ export default function ProfileScreen() {
               <Text style={styles.sectionLabel}>Preferences</Text>
               <View style={styles.card}>
                 <MenuItem
-                  icon={<Settings size={20} color="#0F766E" />}
+                  icon={<Settings size={20} color={Colors.secondary} />}
                   label="Business Settings"
                   sublabel="Edit business details"
                   onPress={() => router.push('/settings' as any)}
@@ -427,13 +424,13 @@ export default function ProfileScreen() {
               <Text style={styles.sectionLabel}>Your Activity</Text>
               <View style={styles.card}>
                 <MenuItem
-                  icon={<Bookmark size={20} color={Palette.gradientStart} />}
+                  icon={<Bookmark size={20} color={Colors.primary} />}
                   label="Saved Events"
                   sublabel="Events you've bookmarked"
                   onPress={() => router.push('/saved-events' as any)}
                 />
                 <MenuItem
-                  icon={<Heart size={20} color={Palette.gradientStart} />}
+                  icon={<Heart size={20} color={Colors.primary} />}
                   label="Following"
                   sublabel="Businesses you follow"
                   onPress={() => router.push('/following' as any)}
@@ -446,7 +443,7 @@ export default function ProfileScreen() {
               <Text style={styles.sectionLabel}>Preferences</Text>
               <View style={styles.card}>
                 <MenuItem
-                  icon={<Settings size={20} color={Palette.gradientStart} />}
+                  icon={<Settings size={20} color={Colors.primary} />}
                   label="Settings"
                   sublabel="Notifications, privacy & more"
                   onPress={() => router.push('/settings' as any)}
@@ -618,7 +615,7 @@ const styles = StyleSheet.create({
   },
   headerName: {
     fontSize: 22,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Palette.textOnGradient,
     marginBottom: 4,
@@ -674,7 +671,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
+    color: Colors.primary,
   },
 
   /* ── Stats row ── */
@@ -929,7 +926,7 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     marginTop: 6,
-    backgroundColor: Palette.gradientStart,
+    backgroundColor: Colors.primary,
   },
   premiumBenefitText: {
     flex: 1,
@@ -939,7 +936,7 @@ const styles = StyleSheet.create({
   },
   premiumBuyButton: {
     borderRadius: BorderRadius.md,
-    backgroundColor: Palette.gradientStart,
+    backgroundColor: Colors.primary,
     alignItems: 'center',
     paddingVertical: Spacing.md,
     marginBottom: Spacing.sm,

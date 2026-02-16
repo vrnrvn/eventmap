@@ -14,15 +14,15 @@ import { Colors, Typography } from '@/constants/theme';
 import { Bug, X, ChevronUp, ChevronDown } from 'lucide-react-native';
 
 const Palette = {
-  cardBg: '#FFFFFF',
-  surfaceMuted: '#F8F9FC',
-  separator: '#F0F0F5',
-  badge: '#6366F1',
-  accentSoft: 'rgba(99,102,241,0.08)',
-  warn: '#F59E0B',
-  warnSoft: 'rgba(245,158,11,0.10)',
-  error: '#EF4444',
-  success: '#22C55E',
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  separator: Colors.border.light,
+  badge: Colors.primary,
+  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  warn: Colors.warning,
+  warnSoft: 'rgba(212, 160, 23, 0.12)',
+  error: Colors.error,
+  success: Colors.success,
 };
 
 const PLANS = ['free', 'starter', 'pro', 'enterprise'] as const;

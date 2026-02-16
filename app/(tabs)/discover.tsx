@@ -5,10 +5,11 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  TextInput,
   Dimensions,
   Platform,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
+import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 import { router } from 'expo-router';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,7 +21,8 @@ import { categoriesService } from '@/services/categories';
 import { RankedEvent, Category } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { getCategoryColor } from '@/constants/categories';
-import { Search, MapPin, Calendar, Users, Filter, List, Repeat } from 'lucide-react-native';
+import { Users, List, Repeat } from 'lucide-react-native';
+import { EventmapFilter, EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView';
 import { EventCardCarousel } from '@/components/EventCardCarousel';
 import { Avatar } from '@/components/Avatar';
@@ -142,6 +144,17 @@ export default function DiscoverScreen() {
         setExplicitMoveTrigger((t) => t + 1);
         hasInitializedMapRef.current = true;
         await loadEventsWithCenter(fetchLat, fetchLng);
+      } else if (
+        profileLocation &&
+        center.lat === DEFAULT_CENTER.lat &&
+        center.lng === DEFAULT_CENTER.lng
+      ) {
+        setCenter(profileLocation);
+        setMapCenter(profileLocation);
+        beginProgrammaticMove(1200);
+        setExplicitMoveTrigger((t) => t + 1);
+        mapRef.current?.animateTo(profileLocation.lat, profileLocation.lng);
+        await loadEventsWithCenter(profileLocation.lat, profileLocation.lng);
       }
     } catch (err) {
       console.error('Failed to load initial data:', err);
@@ -327,14 +340,19 @@ export default function DiscoverScreen() {
     [events]
   );
 
-  const renderEventCard = ({ item }: { item: RankedEvent }) => (
-    <TouchableOpacity
-      style={styles.eventCard}
-      onPress={() => router.push(`/event/${item.id}` as never)}
-      activeOpacity={0.8}
+  const renderEventCard = ({ item, index }: { item: RankedEvent; index: number }) => (
+    <Animated.View
+      entering={FadeInDown.delay(index * 60).springify().damping(18)}
+      style={[styles.eventCardWrapper, index % 2 === 1 && styles.eventCardOffset]}
     >
+      <TouchableOpacity
+        style={styles.eventCard}
+        onPress={() => router.push(`/event/${item.id}` as never)}
+        activeOpacity={0.92}
+      >
       <EventCardCarousel
         imageUrls={item.cover_image_url ? [item.cover_image_url] : []}
+        applySkew={index % 2 === 1}
       />
       <View style={styles.eventContent}>
         <View style={styles.eventHeader}>
@@ -349,14 +367,14 @@ export default function DiscoverScreen() {
         </View>
         <View style={styles.eventMeta}>
           <View style={styles.metaRow}>
-            <Calendar size={14} color={Colors.text.secondary} />
+            <EventmapCalendar size={14} color={Colors.text.secondary} />
             <Text style={styles.metaText}>{formatDate(item.start_datetime)}</Text>
             {item.is_recurring && (
               <Repeat size={14} color={Colors.text.tertiary} style={{ marginLeft: Spacing.xs }} />
             )}
           </View>
           <View style={styles.metaRow}>
-            <MapPin size={14} color={Colors.text.secondary} />
+            <EventmapMapPin size={14} color={Colors.text.secondary} />
             <Text style={styles.metaText}>
               {item.distance_km.toFixed(1)} km from you
             </Text>
@@ -385,24 +403,35 @@ export default function DiscoverScreen() {
         </TouchableOpacity>
       </View>
     </TouchableOpacity>
+    </Animated.View>
   );
 
   const renderListHeader = () => (
     <>
       <AppBannerCarousel banners={banners} />
       <View style={styles.sheetHeader}>
-        <TouchableOpacity
-          style={styles.showListRow}
-          onPress={() => bottomSheetRef.current?.snapToIndex(1)}
-          activeOpacity={0.7}
-        >
-          <List size={20} color={Colors.primary} />
-          <Text style={styles.sheetSummary}>
-            {loading
-              ? 'Finding events near you...'
-              : `${visibleEvents.length} event${visibleEvents.length !== 1 ? 's' : ''} in view`}
-          </Text>
-        </TouchableOpacity>
+        {sheetIndex === 0 ? (
+          <TouchableOpacity
+            style={styles.pullUpPill}
+            onPress={() => bottomSheetRef.current?.snapToIndex(1)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.pullUpText}>Pull up for events</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.showListRow}
+            onPress={() => bottomSheetRef.current?.snapToIndex(1)}
+            activeOpacity={0.7}
+          >
+            <List size={20} color={Colors.primary} />
+            <Text style={styles.sheetSummary}>
+              {loading
+                ? 'Finding events near you...'
+                : `${visibleEvents.length} event${visibleEvents.length !== 1 ? 's' : ''} in view`}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     </>
   );
@@ -423,22 +452,24 @@ export default function DiscoverScreen() {
         />
       </View>
 
-      <View style={[styles.floatingHeader, { top: insets.top + Spacing.md }]}>
-        <SearchBarCollapsed
-          locationLabel={searchLocation?.label ?? null}
-          onPress={() => setShowSearchOverlay(true)}
-        />
-        <TouchableOpacity
-          style={styles.filterButton}
-          onPress={() => setShowFilters(!showFilters)}
-        >
-          <Filter size={20} color={Colors.primary} />
-          {selectedCategories.length > 0 && (
-            <View style={styles.filterBadge}>
-              <Text style={styles.filterBadgeText}>{selectedCategories.length}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
+      <View style={[styles.searchIslandWrapper, { top: insets.top + Spacing.md }]}>
+        <BlurView intensity={Platform.OS === 'ios' ? 60 : 80} tint="light" style={styles.searchIsland}>
+          <SearchBarCollapsed
+            locationLabel={searchLocation?.label ?? null}
+            onPress={() => setShowSearchOverlay(true)}
+          />
+          <TouchableOpacity
+            style={styles.filterButton}
+            onPress={() => setShowFilters(!showFilters)}
+          >
+            <EventmapFilter size={20} color={Colors.primary} />
+            {selectedCategories.length > 0 && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{selectedCategories.length}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </BlurView>
       </View>
 
       <SearchOverlay
@@ -449,7 +480,11 @@ export default function DiscoverScreen() {
       />
 
       {showFilters && (
-        <View style={[styles.filtersDropdown, { top: insets.top + Spacing.md + 56 }]}>
+        <Animated.View
+          entering={FadeInDown.duration(220).springify().damping(18)}
+          style={[styles.filtersDropdown, { top: insets.top + Spacing.md + 56 }]}
+        >
+          <BlurView intensity={Platform.OS === 'ios' ? 60 : 80} tint="light" style={styles.filtersBlur}>
           <View style={styles.filtersHeader}>
             <Text style={styles.filtersTitle}>Categories</Text>
             {selectedCategories.length > 0 && (
@@ -486,7 +521,8 @@ export default function DiscoverScreen() {
               );
             })}
           </View>
-        </View>
+          </BlurView>
+        </Animated.View>
       )}
 
       {/* ─── FIX: only show "Searching" overlay on *initial* load, not on
@@ -509,6 +545,7 @@ export default function DiscoverScreen() {
         enablePanDownToClose={false}
         handleIndicatorStyle={styles.handleIndicator}
         backgroundStyle={styles.sheetBackground}
+        style={styles.sheetContainer}
         onChange={setSheetIndex}
       >
         <BottomSheetFlatList
@@ -525,7 +562,7 @@ export default function DiscoverScreen() {
               </View>
             ) : (
               <View style={styles.emptyState}>
-                <MapPin size={48} color={Colors.text.tertiary} />
+                <EventmapMapPin size={48} color={Colors.text.tertiary} />
                 <Text style={styles.emptyTitle}>Event not found</Text>
                 <Text style={styles.emptySubtitle}>
                   No events in this area. Try moving the map or adjusting your filters
@@ -564,7 +601,7 @@ export default function DiscoverScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background.secondary,
+    backgroundColor: Colors.background.primary,
   },
   mapWrapper: {
     ...StyleSheet.absoluteFillObject,
@@ -575,17 +612,32 @@ const styles = StyleSheet.create({
   },
   mapDimOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.2)',
+    backgroundColor: 'rgba(28,28,28,0.25)',
     pointerEvents: 'box-only',
   },
-  floatingHeader: {
+  searchIslandWrapper: {
     position: 'absolute',
-    left: Spacing.lg,
-    right: Spacing.lg,
-    zIndex: 100,
+    left: Spacing.md,
+    right: Spacing.md,
+    zIndex: 30,
+  },
+  searchIsland: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
+    borderRadius: BorderRadius.round,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#1C1C1C',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.12,
+        shadowRadius: 16,
+      },
+      android: { elevation: 8 },
+    }),
   },
   searchBar: {
     flex: 1,
@@ -598,14 +650,14 @@ const styles = StyleSheet.create({
     ...Shadows.lg,
   },
   filterButton: {
-    width: 48,
-    height: 48,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Colors.background.primary,
+    width: 44,
+    height: 44,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: 'rgba(250,248,245,0.6)',
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    ...Shadows.lg,
+    ...Shadows.sm,
   },
   filterBadge: {
     position: 'absolute',
@@ -627,13 +679,25 @@ const styles = StyleSheet.create({
   },
   filtersDropdown: {
     position: 'absolute',
-    left: Spacing.lg,
-    right: Spacing.lg,
-    zIndex: 99,
-    backgroundColor: Colors.background.primary,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.md,
-    ...Shadows.lg,
+    left: Spacing.md,
+    right: Spacing.md,
+    zIndex: 20,
+    borderRadius: BorderRadius.xl,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#1C1C1C',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.14,
+        shadowRadius: 20,
+      },
+      android: { elevation: 12 },
+    }),
+  },
+  filtersBlur: {
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    overflow: 'hidden',
   },
   mapSearchingOverlay: {
     position: 'absolute',
@@ -653,40 +717,80 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
   },
+  sheetContainer: {
+    marginHorizontal: 12,
+    overflow: 'visible',
+  },
   sheetBackground: {
-    backgroundColor: Colors.background.primary,
-    borderTopLeftRadius: BorderRadius.xl,
-    borderTopRightRadius: BorderRadius.xl,
-    ...Shadows.lg,
+    backgroundColor: 'rgba(250,248,245,0.85)',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#1C1C1C',
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 20,
+      },
+      android: { elevation: 16 },
+    }),
   },
   handleIndicator: {
     backgroundColor: Colors.border.medium,
-    width: 40,
+    width: 48,
   },
   sheetHeader: {
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.md,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.lg,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border.light,
+  },
+  pullUpPill: {
+    alignSelf: 'center',
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.lg,
+  },
+  pullUpText: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.text.tertiary,
   },
   showListRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.xxl,
-    gap: Spacing.sm,
+    gap: Spacing.md,
     paddingVertical: Spacing.sm,
+  },
+  sheetHandleIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.md,
+    backgroundColor: 'rgba(196, 92, 62, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sheetSummary: {
     fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.secondary,
+    fontFamily: Typography.displayFontFamilies.medium,
+    color: Colors.text.primary,
     textAlign: 'center',
   },
   listContent: {
     paddingHorizontal: Spacing.lg,
     paddingBottom: Spacing.xxl * 2,
+  },
+  eventCardWrapper: {
+    marginBottom: Spacing.lg,
+  },
+  eventCardOffset: {
+    marginLeft: 24,
+    transform: [{ rotate: '-1deg' }],
   },
   searchInput: {
     flex: 1,
@@ -709,7 +813,7 @@ const styles = StyleSheet.create({
   },
   filtersTitle: {
     fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.semibold,
+    fontFamily: Typography.displayFontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
   },
@@ -726,7 +830,7 @@ const styles = StyleSheet.create({
   categoryChip: {
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.round,
+    borderRadius: BorderRadius.lg,
     backgroundColor: Colors.background.secondary,
     borderWidth: 1,
     borderColor: Colors.border.light,
@@ -746,11 +850,12 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.medium,
   },
   eventCard: {
-    backgroundColor: Colors.background.secondary,
-    borderRadius: BorderRadius.lg,
-    marginBottom: Spacing.md,
+    backgroundColor: Colors.background.primary,
+    borderRadius: BorderRadius.xl,
     overflow: 'hidden',
-    ...Shadows.md,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+    ...Shadows.card,
   },
   eventImage: {
     height: 150,
@@ -774,12 +879,13 @@ const styles = StyleSheet.create({
   eventTitle: {
     flex: 1,
     fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
+    fontFamily: Typography.displayFontFamilies.extrabold,
+    fontWeight: '800',
     color: Colors.text.primary,
+    letterSpacing: 0.5,
   },
   premiumBadge: {
-    backgroundColor: Colors.premium,
+    backgroundColor: Colors.accent,
     paddingHorizontal: Spacing.sm,
     paddingVertical: 2,
     borderRadius: BorderRadius.sm,
@@ -806,7 +912,7 @@ const styles = StyleSheet.create({
   },
   categoryBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: Colors.background.tertiary,
+    backgroundColor: 'rgba(13, 79, 79, 0.1)',
     paddingHorizontal: Spacing.sm,
     paddingVertical: Spacing.xs,
     borderRadius: BorderRadius.sm,
@@ -814,7 +920,7 @@ const styles = StyleSheet.create({
   },
   categoryText: {
     fontSize: Typography.sizes.xs,
-    color: Colors.text.secondary,
+    color: Colors.secondary,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
   },
@@ -846,7 +952,7 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.semibold,
+    fontFamily: Typography.displayFontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
     marginTop: Spacing.md,
@@ -860,10 +966,10 @@ const styles = StyleSheet.create({
   },
   clearFiltersButton: {
     marginTop: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.xl,
     backgroundColor: Colors.primary,
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.lg,
   },
   clearFiltersText: {
     fontSize: Typography.sizes.sm,

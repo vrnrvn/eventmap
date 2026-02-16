@@ -31,19 +31,18 @@ import {
 } from 'lucide-react-native';
 
 const Palette = {
-  gradientStart: '#6366F1',
-  gradientEnd: '#8B5CF6',
-  cardBg: '#FFFFFF',
-  surfaceMuted: '#F8F9FC',
-  accentSoft: 'rgba(99,102,241,0.08)',
-  accentMedium: 'rgba(99,102,241,0.14)',
-  textOnGradient: '#FFFFFF',
-  textOnGradientMuted: 'rgba(255,255,255,0.75)',
-  separator: '#F0F0F5',
-  badge: '#6366F1',
-  editSoft: 'rgba(99,102,241,0.08)',
-  deleteSoft: 'rgba(239,68,68,0.08)',
-  deleteColor: '#EF4444',
+  gradientStart: Colors.primary,
+  gradientEnd: Colors.accent,
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  textOnGradient: Colors.text.inverse,
+  textOnGradientMuted: 'rgba(250, 248, 245, 0.75)',
+  separator: Colors.border.light,
+  badge: Colors.primary,
+  editSoft: 'rgba(196, 92, 62, 0.12)',
+  deleteSoft: 'rgba(196, 92, 62, 0.12)',
+  deleteColor: Colors.error,
 };
 
 const PAGE_SIZE = 30;

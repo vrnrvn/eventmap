@@ -68,8 +68,8 @@ const styles = StyleSheet.create({
     padding: Spacing.sm,
   },
   bannerTitle: {
-    fontSize: Typography.sizes.base,
-    fontFamily: Typography.fontFamilies.semibold,
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.displayFontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
   },

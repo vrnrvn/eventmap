@@ -41,18 +41,17 @@ import {
 } from 'lucide-react-native';
 
 const Palette = {
-  gradientStart: '#6366F1',
-  gradientEnd: '#8B5CF6',
-  cardBg: '#FFFFFF',
-  surfaceMuted: '#F8F9FC',
-  accentSoft: 'rgba(99,102,241,0.08)',
-  accentMedium: 'rgba(99,102,241,0.14)',
-  textOnGradient: '#FFFFFF',
-  textOnGradientMuted: 'rgba(255,255,255,0.75)',
-  separator: '#F0F0F5',
-  badge: '#6366F1',
-  successSoft: 'rgba(34,197,94,0.10)',
-  successDot: '#22C55E',
+  gradientStart: Colors.primary,
+  gradientEnd: Colors.accent,
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  textOnGradient: Colors.text.inverse,
+  textOnGradientMuted: 'rgba(250, 248, 245, 0.75)',
+  separator: Colors.border.light,
+  badge: Colors.primary,
+  successSoft: 'rgba(45, 138, 110, 0.12)',
+  successDot: Colors.success,
 };
 
 const BUSINESS_CATEGORIES = [
@@ -77,11 +76,11 @@ export default function SettingsScreen() {
   const [savedSection, setSavedSection] = useState<'user' | 'business' | null>(null);
 
   const isBizMode = hasBusiness && userMode === 'business';
-  const accentColor = isBizMode ? '#0F766E' : Palette.gradientStart;
+  const accentColor = isBizMode ? Colors.secondary : Colors.primary;
   const accentGradient: [string, string] = isBizMode
-    ? ['#0F766E', '#14B8A6']
+    ? [Colors.secondary, Colors.secondaryLight]
     : [Palette.gradientStart, Palette.gradientEnd];
-  const accentSoft = isBizMode ? 'rgba(15,118,110,0.08)' : Palette.accentSoft;
+  const accentSoft = isBizMode ? 'rgba(13, 79, 79, 0.12)' : Palette.accentSoft;
 
   const [userForm, setUserForm] = useState({
     name: '',

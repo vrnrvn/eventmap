@@ -59,17 +59,13 @@ const MAX_EVENT_DATE = new Date();
 MAX_EVENT_DATE.setFullYear(MAX_EVENT_DATE.getFullYear() + 10);
 
 const Palette = {
-  gradientStart: '#6366F1',
-  gradientEnd: '#8B5CF6',
-  cardBg: '#FFFFFF',
-  surfaceMuted: '#F8F9FC',
-  accentSoft: 'rgba(99,102,241,0.08)',
-  accentMedium: 'rgba(99,102,241,0.14)',
-  textOnGradient: '#FFFFFF',
-  textOnGradientMuted: 'rgba(255,255,255,0.75)',
-  separator: '#F0F0F5',
-  badge: '#6366F1',
-  errorSoft: 'rgba(239,68,68,0.08)',
+  gradientStart: Colors.primary,
+  gradientEnd: Colors.accent,
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  separator: Colors.border.light,
+  badge: Colors.primary,
 };
 
 export default function CreateScreen() {
@@ -264,7 +260,7 @@ export default function CreateScreen() {
     return (
       <View style={[styles.noBizContainer, { paddingTop: insets.top + 40 }]}>
         <View style={styles.noBizIconWrap}>
-          <Briefcase size={36} color={Palette.gradientStart} />
+          <Briefcase size={36} color={Colors.primary} />
         </View>
         <Text style={styles.noBizTitle}>Create Events</Text>
         <Text style={styles.noBizSubtitle}>
@@ -277,7 +273,7 @@ export default function CreateScreen() {
           activeOpacity={0.85}
         >
           <LinearGradient
-            colors={[Palette.gradientStart, Palette.gradientEnd]}
+            colors={[Colors.primary, Palette.gradientEnd]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={styles.noBizCtaGradient}
@@ -308,7 +304,7 @@ export default function CreateScreen() {
         {/* ── Page header ── */}
         <View style={styles.pageHeader}>
           <View style={styles.pageHeaderIcon}>
-            <CalendarPlus size={22} color={Palette.gradientStart} />
+            <CalendarPlus size={22} color={Colors.primary} />
           </View>
           <View>
             <Text style={styles.pageTitle}>Create Event</Text>
@@ -323,7 +319,7 @@ export default function CreateScreen() {
         <View style={styles.card}>
           <View style={styles.fieldRow}>
             <View style={styles.fieldIcon}>
-              <Type size={16} color={Palette.gradientStart} />
+              <Type size={16} color={Colors.primary} />
             </View>
             <View style={styles.fieldContent}>
               <Input
@@ -340,7 +336,7 @@ export default function CreateScreen() {
 
           <View style={styles.fieldRow}>
             <View style={styles.fieldIcon}>
-              <AlignLeft size={16} color={Palette.gradientStart} />
+              <AlignLeft size={16} color={Colors.primary} />
             </View>
             <View style={styles.fieldContent}>
               <Input
@@ -364,7 +360,7 @@ export default function CreateScreen() {
         <View style={styles.card}>
           <View style={styles.fieldRowNoPad}>
             <View style={[styles.fieldIcon, { marginTop: 14 }]}>
-              <Tag size={16} color={Palette.gradientStart} />
+              <Tag size={16} color={Colors.primary} />
             </View>
             <ScrollView
               horizontal
@@ -420,7 +416,7 @@ export default function CreateScreen() {
             }}
           >
             <View style={styles.fieldIcon}>
-              <Clock size={16} color={Palette.gradientStart} />
+              <Clock size={16} color={Colors.primary} />
             </View>
             <View style={styles.dateTextBlock}>
               <Text style={styles.dateLabel}>Starts</Text>
@@ -429,7 +425,7 @@ export default function CreateScreen() {
               </Text>
             </View>
             {showStartPicker ? (
-              <ChevronDown size={18} color={Palette.gradientStart} />
+              <ChevronDown size={18} color={Colors.primary} />
             ) : (
               <ChevronRight size={18} color={Colors.text.tertiary} />
             )}
@@ -477,7 +473,7 @@ export default function CreateScreen() {
               }}
             >
               <View style={styles.fieldIcon}>
-                <CalendarDays size={16} color={Palette.gradientStart} />
+                <CalendarDays size={16} color={Colors.primary} />
               </View>
               <View style={styles.dateTextBlock}>
                 <Text style={styles.dateLabel}>Ends</Text>
@@ -486,7 +482,7 @@ export default function CreateScreen() {
                 </Text>
               </View>
               {showEndPicker ? (
-                <ChevronDown size={18} color={Palette.gradientStart} />
+                <ChevronDown size={18} color={Colors.primary} />
               ) : (
                 <ChevronRight size={18} color={Colors.text.tertiary} />
               )}
@@ -550,7 +546,7 @@ export default function CreateScreen() {
               }}
             >
               <View style={styles.fieldIcon}>
-                <Repeat size={16} color={Palette.gradientStart} />
+                <Repeat size={16} color={Colors.primary} />
               </View>
               <View style={styles.dateTextBlock}>
                 <Text style={styles.dateLabel}>Repeat</Text>
@@ -569,7 +565,7 @@ export default function CreateScreen() {
         <View style={styles.card}>
           <View style={styles.fieldRow}>
             <View style={styles.fieldIcon}>
-              <MapPin size={16} color={Palette.gradientStart} />
+              <MapPin size={16} color={Colors.primary} />
             </View>
             <View style={styles.fieldContent}>
               <Text style={styles.locationNote}>
@@ -623,7 +619,7 @@ export default function CreateScreen() {
                 }}
               />
               <View style={styles.mapHintOverlay}>
-                <Navigation size={12} color={Palette.gradientStart} />
+                <Navigation size={12} color={Colors.primary} />
                 <Text style={styles.mapHintText}>
                   Tap to set location
                 </Text>
@@ -642,7 +638,7 @@ export default function CreateScreen() {
         <View style={styles.card}>
           <View style={styles.fieldRow}>
             <View style={styles.fieldIcon}>
-              <ImageIcon size={16} color={Palette.gradientStart} />
+              <ImageIcon size={16} color={Colors.primary} />
             </View>
             <View style={styles.fieldContent}>
               <Text style={styles.locationNote}>
@@ -668,7 +664,7 @@ export default function CreateScreen() {
             colors={
               loading
                 ? ['#A5B4FC', '#C4B5FD']
-                : [Palette.gradientStart, Palette.gradientEnd]
+                : [Colors.primary, Palette.gradientEnd]
             }
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
@@ -726,7 +722,7 @@ const styles = StyleSheet.create({
   },
   pageTitle: {
     fontSize: 24,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
   },
@@ -897,7 +893,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
+    color: Colors.primary,
   },
 
   /* ── Errors ── */
@@ -962,7 +958,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
+    color: Colors.primary,
   },
   coordText: {
     fontSize: 12,
@@ -979,7 +975,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     ...Platform.select({
       ios: {
-        shadowColor: Palette.gradientStart,
+        shadowColor: Colors.primary,
         shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.3,
         shadowRadius: 14,
@@ -1021,7 +1017,7 @@ const styles = StyleSheet.create({
   },
   noBizTitle: {
     fontSize: 22,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginBottom: 8,

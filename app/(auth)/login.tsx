@@ -25,16 +25,12 @@ import {
 } from 'lucide-react-native';
 
 const Palette = {
-  gradientStart: '#6366F1',
-  gradientEnd: '#8B5CF6',
-  cardBg: '#FFFFFF',
-  surfaceMuted: '#F8F9FC',
-  accentSoft: 'rgba(99,102,241,0.08)',
-  accentMedium: 'rgba(99,102,241,0.14)',
-  textOnGradient: '#FFFFFF',
-  textOnGradientMuted: 'rgba(255,255,255,0.75)',
-  separator: '#F0F0F5',
-  badge: '#6366F1',
+  gradientStart: Colors.primary,
+  gradientEnd: Colors.accent,
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  separator: Colors.border.light,
 };
 
 export default function LoginScreen() {
@@ -124,7 +120,7 @@ export default function LoginScreen() {
             {/* Email field */}
             <View style={styles.fieldRow}>
               <View style={styles.fieldIcon}>
-                <Mail size={16} color={Palette.gradientStart} />
+                <Mail size={16} color={Colors.primary} />
               </View>
               <View style={styles.fieldContent}>
                 <Input
@@ -144,7 +140,7 @@ export default function LoginScreen() {
             {/* Password field */}
             <View style={styles.fieldRow}>
               <View style={styles.fieldIcon}>
-                <Lock size={16} color={Palette.gradientStart} />
+                <Lock size={16} color={Colors.primary} />
               </View>
               <View style={styles.fieldContent}>
                 <Input
@@ -178,7 +174,7 @@ export default function LoginScreen() {
             <LinearGradient
               colors={
                 loading
-                  ? ['#A5B4FC', '#C4B5FD']
+                  ? [Colors.primaryLight, Colors.accentLight]
                   : [Palette.gradientStart, Palette.gradientEnd]
               }
               start={{ x: 0, y: 0 }}
@@ -265,7 +261,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     ...Platform.select({
       ios: {
-        shadowColor: Palette.gradientStart,
+        shadowColor: Colors.primary,
         shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.25,
         shadowRadius: 16,
@@ -282,7 +278,7 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     fontSize: 28,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginBottom: 6,
@@ -344,7 +340,7 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
+    color: Colors.primary,
   },
 
   /* ── Submit ── */
@@ -354,7 +350,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     ...Platform.select({
       ios: {
-        shadowColor: Palette.gradientStart,
+        shadowColor: Colors.primary,
         shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.3,
         shadowRadius: 14,
@@ -413,13 +409,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     borderRadius: 14,
     borderWidth: 1.5,
-    borderColor: Palette.gradientStart,
+    borderColor: Colors.primary,
     backgroundColor: Palette.accentSoft,
   },
   signUpBtnText: {
     fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
+    color: Colors.primary,
   },
 });

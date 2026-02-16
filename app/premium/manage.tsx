@@ -27,19 +27,19 @@ import { premiumService } from '@/services/premium';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 
 const Palette = {
-  gradientStart: '#6366F1',
-  gradientEnd: '#8B5CF6',
-  cardBg: '#FFFFFF',
-  surfaceMuted: '#F8F9FC',
-  accentSoft: 'rgba(99,102,241,0.08)',
-  separator: '#F0F0F5',
-  premiumGold: '#F59E0B',
-  success: '#22C55E',
-  successSoft: 'rgba(34,197,94,0.10)',
-  error: '#EF4444',
-  errorSoft: 'rgba(239,68,68,0.10)',
-  warn: '#F59E0B',
-  warnSoft: 'rgba(245,158,11,0.10)',
+  gradientStart: Colors.primary,
+  gradientEnd: Colors.accent,
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  separator: Colors.border.light,
+  premiumGold: Colors.accent,
+  success: Colors.success,
+  successSoft: 'rgba(45, 138, 110, 0.12)',
+  error: Colors.error,
+  errorSoft: 'rgba(196, 92, 62, 0.12)',
+  warn: Colors.warning,
+  warnSoft: 'rgba(212, 160, 23, 0.12)',
 };
 
 export default function ManageSubscriptionScreen() {

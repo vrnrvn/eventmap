@@ -41,22 +41,20 @@ import {
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const Palette = {
-  gradientStart: '#6366F1',
-  gradientEnd: '#8B5CF6',
-  cardBg: '#FFFFFF',
-  surfaceMuted: '#F8F9FC',
-  accentSoft: 'rgba(99,102,241,0.08)',
-  accentMedium: 'rgba(99,102,241,0.14)',
-  textOnGradient: '#FFFFFF',
-  separator: '#F0F0F5',
-  badge: '#6366F1',
-  unreadDot: '#6366F1',
-  successSoft: 'rgba(34,197,94,0.10)',
-  successDot: '#22C55E',
-  warnSoft: 'rgba(245,158,11,0.10)',
-  warnDot: '#F59E0B',
-  errorSoft: 'rgba(239,68,68,0.08)',
-  errorDot: '#EF4444',
+  gradientStart: Colors.primary,
+  gradientEnd: Colors.accent,
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  separator: Colors.border.light,
+  badge: Colors.primary,
+  unreadDot: Colors.primary,
+  successSoft: 'rgba(45, 138, 110, 0.12)',
+  successDot: Colors.success,
+  warnSoft: 'rgba(212, 160, 23, 0.12)',
+  warnDot: Colors.warning,
+  errorSoft: 'rgba(196, 92, 62, 0.12)',
+  errorDot: Colors.error,
 };
 
 /* ── Notification types (re-export from service for UI) ── */
@@ -290,7 +288,7 @@ export default function NotificationsScreen() {
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconWrap}>
-        <BellOff size={36} color={Palette.gradientStart} />
+        <BellOff size={36} color={Colors.primary} />
       </View>
       <Text style={styles.emptyTitle}>All Caught Up</Text>
       <Text style={styles.emptySubtitle}>
@@ -323,7 +321,7 @@ export default function NotificationsScreen() {
             onPress={markAllRead}
             activeOpacity={0.7}
           >
-            <CheckCheck size={16} color={Palette.gradientStart} />
+            <CheckCheck size={16} color={Colors.primary} />
             <Text style={styles.markAllText}>Read all</Text>
           </TouchableOpacity>
         )}
@@ -367,8 +365,8 @@ export default function NotificationsScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={Palette.gradientStart}
-            colors={[Palette.gradientStart]}
+            tintColor={Colors.primary}
+            colors={[Colors.primary]}
           />
         }
       />
@@ -411,7 +409,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 20,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
   },
@@ -434,7 +432,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
+    color: Colors.primary,
   },
 
   /* ── Unread bar ── */
@@ -596,7 +594,7 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: 20,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginBottom: 8,

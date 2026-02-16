@@ -16,7 +16,8 @@ import {
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
-import { Search, X, MapPin, Calendar } from 'lucide-react-native';
+import { X } from 'lucide-react-native';
+import { EventmapSearch, EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { useSearch, type SearchLocation } from '@/contexts/SearchContext';
 import { geocodingService } from '@/services/geocoding';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
@@ -191,7 +192,7 @@ export function SearchOverlay({
                             activeOpacity={0.7}
                           >
                             <View style={styles.resultIcon}>
-                              <MapPin size={20} color={Colors.text.secondary} />
+                              <EventmapMapPin size={20} color={Colors.text.secondary} />
                             </View>
                             <View style={styles.resultText}>
                               <Text style={styles.resultPrimary} numberOfLines={1}>
@@ -218,13 +219,13 @@ export function SearchOverlay({
                 style={styles.summaryRow}
                 onPress={() => setCurrentStep('where')}
               >
-                <MapPin size={20} color={Colors.text.tertiary} />
+                <EventmapMapPin size={20} color={Colors.text.tertiary} />
                 <Text style={styles.summaryLabel} numberOfLines={1}>
                   {summaryLabel}
                 </Text>
               </TouchableOpacity>
               <View style={styles.placeholderSection}>
-                <Calendar size={32} color={Colors.text.tertiary} />
+                <EventmapCalendar size={32} color={Colors.text.tertiary} />
                 <Text style={styles.placeholderText}>When section</Text>
                 <Text style={styles.placeholderSubtext}>Coming soon</Text>
               </View>
@@ -244,7 +245,7 @@ export function SearchOverlay({
             onPress={handleSearchPress}
             activeOpacity={0.9}
           >
-            <Search size={20} color={Colors.text.inverse} />
+            <EventmapSearch size={20} color={Colors.text.inverse} />
             <Text style={styles.searchButtonText}>Search</Text>
           </TouchableOpacity>
         </View>
@@ -262,7 +263,7 @@ type SearchBarCollapsedProps = {
 export function SearchBarCollapsed({ locationLabel, onPress }: SearchBarCollapsedProps) {
   return (
     <TouchableOpacity style={styles.collapsedBar} onPress={onPress} activeOpacity={0.9}>
-      <Search size={18} color={Colors.text.tertiary} />
+      <EventmapSearch size={18} color={Colors.text.tertiary} />
       <View style={styles.collapsedSegments}>
         <Text style={styles.collapsedSegment} numberOfLines={1}>
           {locationLabel ?? 'Where'}
@@ -304,7 +305,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.semibold,
+    fontFamily: Typography.displayFontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
   },
@@ -423,7 +424,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.sm,
-    backgroundColor: Colors.error,
+    backgroundColor: Colors.primary,
     paddingVertical: Spacing.md,
     borderRadius: BorderRadius.lg,
     ...Shadows.md,
@@ -442,7 +443,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.round,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
-    ...Shadows.lg,
+    ...Shadows.md,
   },
   collapsedSegments: {
     flex: 1,

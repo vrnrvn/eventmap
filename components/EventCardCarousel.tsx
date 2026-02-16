@@ -15,9 +15,11 @@ const DEFAULT_IMAGE_HEIGHT = 180;
 type EventCardCarouselProps = {
   imageUrls: string[];
   imageHeight?: number;
+  /** Optional: subtle skew on images for editorial feel (e.g. alternating cards) */
+  applySkew?: boolean;
 };
 
-export function EventCardCarousel({ imageUrls, imageHeight = DEFAULT_IMAGE_HEIGHT }: EventCardCarouselProps) {
+export function EventCardCarousel({ imageUrls, imageHeight = DEFAULT_IMAGE_HEIGHT, applySkew = false }: EventCardCarouselProps) {
   const scrollX = useSharedValue(0);
 
   const scrollHandler = useAnimatedScrollHandler({
@@ -49,6 +51,7 @@ export function EventCardCarousel({ imageUrls, imageHeight = DEFAULT_IMAGE_HEIGH
             scrollX={scrollX}
             isPlaceholder={isPlaceholder}
             imageHeight={imageHeight}
+            applySkew={applySkew}
           />
         )}
       />
@@ -62,12 +65,14 @@ function CarouselImage({
   scrollX,
   isPlaceholder,
   imageHeight = DEFAULT_IMAGE_HEIGHT,
+  applySkew = false,
 }: {
   uri: string;
   index: number;
   scrollX: ReturnType<typeof useSharedValue<number>>;
   isPlaceholder: boolean;
   imageHeight?: number;
+  applySkew?: boolean;
 }) {
   const animatedStyle = useAnimatedStyle(() => {
     const inputRange = [
@@ -81,7 +86,8 @@ function CarouselImage({
       [0.92, 1, 0.92],
       Extrapolation.CLAMP
     );
-    return { transform: [{ scale }] };
+    const skewStr = applySkew ? '-0.5deg' : '0deg';
+    return { transform: [{ scale }, { skewX: skewStr }] };
   });
 
   return (
@@ -104,7 +110,7 @@ const styles = StyleSheet.create({
   },
   imageWrapper: {
     overflow: 'hidden',
-    borderRadius: 12,
+    borderRadius: 18,
   },
   image: {
     width: '100%',

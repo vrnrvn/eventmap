@@ -34,17 +34,16 @@ import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const Palette = {
-  gradientStart: '#6366F1',
-  gradientEnd: '#8B5CF6',
-  cardBg: '#FFFFFF',
-  surfaceMuted: '#F8F9FC',
-  accentSoft: 'rgba(99,102,241,0.08)',
-  accentMedium: 'rgba(99,102,241,0.15)',
-  separator: '#F0F0F5',
-  premiumGold: '#F59E0B',
-  premiumGoldSoft: 'rgba(245,158,11,0.10)',
-  success: '#22C55E',
-  successSoft: 'rgba(34,197,94,0.10)',
+  gradientStart: Colors.primary,
+  gradientEnd: Colors.accent,
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  separator: Colors.border.light,
+  premiumGold: Colors.accent,
+  premiumGoldSoft: 'rgba(232, 168, 56, 0.12)',
+  success: Colors.success,
+  successSoft: 'rgba(45, 138, 110, 0.12)',
 };
 
 const FEATURE_ICONS: Record<string, any> = {
