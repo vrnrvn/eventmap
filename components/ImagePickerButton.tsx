@@ -9,6 +9,7 @@ import {
   Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { Plus, X } from 'lucide-react-native';
 import { Colors, Typography, Spacing } from '@/constants/theme';
 
@@ -30,7 +31,50 @@ type ImagePickerButtonProps = {
 
 const THUMB_SIZE = 100;
 
-export function ImagePickerButton({ images, onChange, maxImages = 5 }: ImagePickerButtonProps) {
+/**
+ * Checks if a URI or MIME type indicates HEIC/HEIF format
+ */
+function isHeic(uri: string, mimeType?: string | null): boolean {
+  const lower = (mimeType || '').toLowerCase();
+  const ext = uri.split('.').pop()?.toLowerCase()?.split('?')[0] || '';
+  return (
+    lower.includes('heic') ||
+    lower.includes('heif') ||
+    ext === 'heic' ||
+    ext === 'heif'
+  );
+}
+
+/**
+ * Converts any image to JPEG using expo-image-manipulator.
+ * This guarantees the output is a proper JPEG file regardless of input format.
+ */
+async function convertToJpeg(uri: string): Promise<string> {
+  const result = await ImageManipulator.manipulateAsync(
+    uri,
+    [], // no transforms, just re-encode
+    {
+      compress: 0.8,
+      format: ImageManipulator.SaveFormat.JPEG,
+    }
+  );
+  return result.uri;
+}
+
+/**
+ * Generates a safe file name with .jpg extension
+ */
+function generateFileName(): string {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 9);
+  return `photo-${timestamp}-${random}.jpg`;
+}
+
+export function ImagePickerButton({
+  images,
+  onChange,
+  maxImages = 5,
+}: ImagePickerButtonProps) {
   const handleAdd = async () => {
     if (images.length >= maxImages) {
       Alert.alert('Limit reached', `You can upload up to ${maxImages} images.`);
@@ -48,14 +92,25 @@ export function ImagePickerButton({ images, onChange, maxImages = 5 }: ImagePick
 
     if (result.canceled || !result.assets?.length) return;
 
-    const newAssets: ImageAsset[] = result.assets.map((asset) => {
-      const ext = asset.uri.split('.').pop() || 'jpg';
-      return {
-        uri: asset.uri,
-        name: `photo-${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`,
-        type: asset.mimeType || `image/${ext}`,
-      };
-    });
+    const newAssets: ImageAsset[] = [];
+
+    for (const asset of result.assets) {
+      let uri = asset.uri;
+
+      // Always convert to JPEG to avoid HEIC/unsupported format issues
+      // This also normalizes PNGs and other formats for consistency
+      try {
+        uri = await convertToJpeg(uri);
+      } catch (err) {
+        console.warn('Image conversion failed, using original:', err);
+      }
+
+      newAssets.push({
+        uri,
+        name: generateFileName(),
+        type: 'image/jpeg',
+      });
+    }
 
     onChange([...images, ...newAssets].slice(0, maxImages));
   };
@@ -70,7 +125,10 @@ export function ImagePickerButton({ images, onChange, maxImages = 5 }: ImagePick
     <View style={styles.container}>
       {images.map((img, index) => (
         <View key={img.uri} style={styles.thumbWrapper}>
-          <Image source={{ uri: img.remoteUrl || img.uri }} style={styles.thumb} />
+          <Image
+            source={{ uri: img.remoteUrl || img.uri }}
+            style={styles.thumb}
+          />
           {index === 0 && (
             <View style={styles.coverBadge}>
               <Text style={styles.coverBadgeText}>Cover</Text>
@@ -87,7 +145,11 @@ export function ImagePickerButton({ images, onChange, maxImages = 5 }: ImagePick
       ))}
 
       {images.length < maxImages && (
-        <TouchableOpacity style={styles.addButton} onPress={handleAdd} activeOpacity={0.7}>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={handleAdd}
+          activeOpacity={0.7}
+        >
           <Plus size={24} color={Colors.text.tertiary} />
           <Text style={styles.addText}>Add</Text>
         </TouchableOpacity>
