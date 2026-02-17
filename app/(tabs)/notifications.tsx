@@ -9,6 +9,7 @@ import {
   Animated,
   Platform,
   Dimensions,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -288,7 +289,11 @@ export default function NotificationsScreen() {
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconWrap}>
-        <BellOff size={36} color={Colors.primary} />
+        <Image
+          source={require('@/assets/images/EMlogo.png')}
+          style={styles.emptyLogo}
+          resizeMode="contain"
+        />
       </View>
       <Text style={styles.emptyTitle}>All Caught Up</Text>
       <Text style={styles.emptySubtitle}>
@@ -303,9 +308,12 @@ export default function NotificationsScreen() {
       {/* ── Header ── */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <View style={styles.headerIconWrap}>
-            <Bell size={20} color={Palette.gradientStart} />
-          </View>
+          {/* Logo replaces the old Bell icon */}
+          <Image
+            source={require('@/assets/images/EMlogo.png')}
+            style={styles.headerLogo}
+            resizeMode="contain"
+          />
           <View>
             <Text style={styles.headerTitle}>Notifications</Text>
             <Text style={styles.headerSubtitle}>
@@ -406,6 +414,11 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  headerLogo: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
   },
   headerTitle: {
     fontSize: 20,
@@ -591,6 +604,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
+  },
+  emptyLogo: {
+    width: 48,
+    height: 48,
   },
   emptyTitle: {
     fontSize: 20,

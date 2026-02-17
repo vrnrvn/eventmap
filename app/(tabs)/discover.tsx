@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Dimensions,
   Platform,
+  Image,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
@@ -66,13 +67,9 @@ export default function DiscoverScreen() {
   const lastViewedIndexRef = useRef<number>(0);
   const hasInitializedMapRef = useRef(false);
 
-  // ─── NEW: guard flag to suppress region-change reloads during
-  //          programmatic map moves (marker tap, list scroll, etc.) ───
   const isProgrammaticMoveRef = useRef(false);
   const programmaticMoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /** Call this before any programmatic animateTo / center change so that
-   *  the subsequent onRegionChange events are ignored. */
   const beginProgrammaticMove = useCallback((durationMs = 800) => {
     isProgrammaticMoveRef.current = true;
     if (programmaticMoveTimerRef.current) {
@@ -140,7 +137,7 @@ export default function DiscoverScreen() {
         const loc = { lat: fetchLat, lng: fetchLng };
         setCenter(loc);
         setMapCenter(loc);
-        beginProgrammaticMove(1200); // suppress region-change during init
+        beginProgrammaticMove(1200);
         setExplicitMoveTrigger((t) => t + 1);
         hasInitializedMapRef.current = true;
         await loadEventsWithCenter(fetchLat, fetchLng);
@@ -212,18 +209,15 @@ export default function DiscoverScreen() {
     [userLocation, beginProgrammaticMove]
   );
 
-  // ─── FIX: ignore region changes that result from programmatic moves ───
   const handleRegionChange = useCallback(
     (region: {
       lat: number;
       lng: number;
       bounds?: { ne: { lat: number; lng: number }; sw: { lat: number; lng: number } };
     }) => {
-      // Always keep bounds up-to-date (cheap, no flicker)
       setMapCenter({ lat: region.lat, lng: region.lng });
       if (region.bounds) setMapBounds(region.bounds);
 
-      // Skip reload when the map was moved programmatically or hasn't initialized
       if (!hasInitializedMapRef.current) return;
       if (isProgrammaticMoveRef.current) return;
 
@@ -232,13 +226,12 @@ export default function DiscoverScreen() {
       }
       debounceTimerRef.current = setTimeout(() => {
         debounceTimerRef.current = null;
-        // Double-check the flag again after debounce
         if (isProgrammaticMoveRef.current) return;
         setCenter({ lat: region.lat, lng: region.lng });
         loadEventsWithCenterRef.current(region.lat, region.lng);
       }, REGION_DEBOUNCE_MS);
     },
-    [/* stable – no deps needed */]
+    []
   );
 
   const isInBounds = (
@@ -256,7 +249,6 @@ export default function DiscoverScreen() {
     return events.filter((e) => isInBounds(e.lat, e.lng, mapBounds));
   }, [events, mapBounds]);
 
-  // ─── FIX: set programmatic-move guard before animating ───
   const handleMarkerPress = useCallback(
     (eventId: string) => {
       setActiveMarkerId(eventId);
@@ -277,12 +269,10 @@ export default function DiscoverScreen() {
     [visibleEvents, beginProgrammaticMove]
   );
 
-  // ─── Stable ref-based viewability handler (FlatList forbids changing this on the fly) ───
   const viewabilityCallbackRef = useRef<
     (info: { viewableItems: Array<{ item: RankedEvent; index: number | null }> }) => void
   >(() => {});
 
-  // Keep the ref updated with latest logic + dependencies
   useEffect(() => {
     viewabilityCallbackRef.current = ({ viewableItems }) => {
       if (isScrollingFromMapRef.current || viewableItems.length === 0) return;
@@ -297,7 +287,6 @@ export default function DiscoverScreen() {
     };
   }, [beginProgrammaticMove]);
 
-  // Stable handler that never changes identity — just delegates to the ref
   const handleViewableItemsChanged = useRef(
     (info: { viewableItems: Array<{ item: RankedEvent; index: number | null }> }) => {
       viewabilityCallbackRef.current(info);
@@ -318,11 +307,9 @@ export default function DiscoverScreen() {
     });
   };
 
-  // ─── FIX: decouple centerForMap from markerIdsKey so new event data
-  //          doesn't force a map re-center ───
   const centerForMap = useMemo(
     () => mapCenter,
-    [explicitMoveTrigger]            // ← removed markerIdsKey
+    [explicitMoveTrigger]
   );
 
   const mapMarkers = useMemo(
@@ -350,59 +337,59 @@ export default function DiscoverScreen() {
         onPress={() => router.push(`/event/${item.id}` as never)}
         activeOpacity={0.92}
       >
-      <EventCardCarousel
-        imageUrls={item.cover_image_url ? [item.cover_image_url] : []}
-        applySkew={index % 2 === 1}
-      />
-      <View style={styles.eventContent}>
-        <View style={styles.eventHeader}>
-          <Text style={styles.eventTitle} numberOfLines={2}>
-            {item.title}
-          </Text>
-          {item.is_premium && (
-            <View style={styles.premiumBadge}>
-              <Text style={styles.premiumText}>★</Text>
-            </View>
-          )}
-        </View>
-        <View style={styles.eventMeta}>
-          <View style={styles.metaRow}>
-            <EventmapCalendar size={14} color={Colors.text.secondary} />
-            <Text style={styles.metaText}>{formatDate(item.start_datetime)}</Text>
-            {item.is_recurring && (
-              <Repeat size={14} color={Colors.text.tertiary} style={{ marginLeft: Spacing.xs }} />
+        <EventCardCarousel
+          imageUrls={item.cover_image_url ? [item.cover_image_url] : []}
+          applySkew={index % 2 === 1}
+        />
+        <View style={styles.eventContent}>
+          <View style={styles.eventHeader}>
+            <Text style={styles.eventTitle} numberOfLines={2}>
+              {item.title}
+            </Text>
+            {item.is_premium && (
+              <View style={styles.premiumBadge}>
+                <Text style={styles.premiumText}>★</Text>
+              </View>
             )}
           </View>
-          <View style={styles.metaRow}>
-            <EventmapMapPin size={14} color={Colors.text.secondary} />
-            <Text style={styles.metaText}>
-              {item.distance_km.toFixed(1)} km from you
-            </Text>
-          </View>
-          {item.rsvp_count > 0 && (
+          <View style={styles.eventMeta}>
             <View style={styles.metaRow}>
-              <Users size={14} color={Colors.text.secondary} />
-              <Text style={styles.metaText}>{item.rsvp_count} going</Text>
+              <EventmapCalendar size={14} color={Colors.text.secondary} />
+              <Text style={styles.metaText}>{formatDate(item.start_datetime)}</Text>
+              {item.is_recurring && (
+                <Repeat size={14} color={Colors.text.tertiary} style={{ marginLeft: Spacing.xs }} />
+              )}
             </View>
-          )}
+            <View style={styles.metaRow}>
+              <EventmapMapPin size={14} color={Colors.text.secondary} />
+              <Text style={styles.metaText}>
+                {item.distance_km.toFixed(1)} km from you
+              </Text>
+            </View>
+            {item.rsvp_count > 0 && (
+              <View style={styles.metaRow}>
+                <Users size={14} color={Colors.text.secondary} />
+                <Text style={styles.metaText}>{item.rsvp_count} going</Text>
+              </View>
+            )}
+          </View>
+          <View style={styles.categoryBadge}>
+            <Text style={styles.categoryText}>{item.category_label}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.businessRow}
+            onPress={() => router.push(`/business/${item.business_id}` as never)}
+            activeOpacity={0.7}
+          >
+            <Avatar
+              imageUrl={item.business_logo_url}
+              name={item.business_name}
+              size={24}
+            />
+            <Text style={styles.businessName}>{item.business_name}</Text>
+          </TouchableOpacity>
         </View>
-        <View style={styles.categoryBadge}>
-          <Text style={styles.categoryText}>{item.category_label}</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.businessRow}
-          onPress={() => router.push(`/business/${item.business_id}` as never)}
-          activeOpacity={0.7}
-        >
-          <Avatar
-            imageUrl={item.business_logo_url}
-            name={item.business_name}
-            size={24}
-          />
-          <Text style={styles.businessName}>{item.business_name}</Text>
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
     </Animated.View>
   );
 
@@ -452,8 +439,14 @@ export default function DiscoverScreen() {
         />
       </View>
 
+      {/* ── Search Island with Logo ── */}
       <View style={[styles.searchIslandWrapper, { top: insets.top + Spacing.md }]}>
         <BlurView intensity={Platform.OS === 'ios' ? 60 : 80} tint="light" style={styles.searchIsland}>
+          <Image
+            source={require('@/assets/images/EMlogo.png')}
+            style={styles.searchIslandLogo}
+            resizeMode="contain"
+          />
           <SearchBarCollapsed
             locationLabel={searchLocation?.label ?? null}
             onPress={() => setShowSearchOverlay(true)}
@@ -485,48 +478,46 @@ export default function DiscoverScreen() {
           style={[styles.filtersDropdown, { top: insets.top + Spacing.md + 56 }]}
         >
           <BlurView intensity={Platform.OS === 'ios' ? 60 : 80} tint="light" style={styles.filtersBlur}>
-          <View style={styles.filtersHeader}>
-            <Text style={styles.filtersTitle}>Categories</Text>
-            {selectedCategories.length > 0 && (
-              <TouchableOpacity onPress={clearFilters}>
-                <Text style={styles.clearText}>Clear all</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-          <View style={styles.categoriesGrid}>
-            {categories.map((category) => {
-              const isSelected = selectedCategories.includes(category.id);
-              const categoryColor = getCategoryColor(category.slug);
-              return (
-                <TouchableOpacity
-                  key={category.id}
-                  style={[
-                    styles.categoryChip,
-                    isSelected && {
-                      backgroundColor: categoryColor,
-                      borderColor: categoryColor,
-                    },
-                  ]}
-                  onPress={() => toggleCategory(category.id)}
-                >
-                  <Text
-                    style={[
-                      styles.categoryChipText,
-                      isSelected && styles.categoryChipTextSelected,
-                    ]}
-                  >
-                    {category.label}
-                  </Text>
+            <View style={styles.filtersHeader}>
+              <Text style={styles.filtersTitle}>Categories</Text>
+              {selectedCategories.length > 0 && (
+                <TouchableOpacity onPress={clearFilters}>
+                  <Text style={styles.clearText}>Clear all</Text>
                 </TouchableOpacity>
-              );
-            })}
-          </View>
+              )}
+            </View>
+            <View style={styles.categoriesGrid}>
+              {categories.map((category) => {
+                const isSelected = selectedCategories.includes(category.id);
+                const categoryColor = getCategoryColor(category.slug);
+                return (
+                  <TouchableOpacity
+                    key={category.id}
+                    style={[
+                      styles.categoryChip,
+                      isSelected && {
+                        backgroundColor: categoryColor,
+                        borderColor: categoryColor,
+                      },
+                    ]}
+                    onPress={() => toggleCategory(category.id)}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryChipText,
+                        isSelected && styles.categoryChipTextSelected,
+                      ]}
+                    >
+                      {category.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </BlurView>
         </Animated.View>
       )}
 
-      {/* ─── FIX: only show "Searching" overlay on *initial* load, not on
-           every refetch, to avoid the flash ─── */}
       {loading && events.length === 0 && (
         <View style={styles.mapSearchingOverlay}>
           <ActivityIndicator size="small" color={Colors.primary} />
@@ -562,7 +553,13 @@ export default function DiscoverScreen() {
               </View>
             ) : (
               <View style={styles.emptyState}>
-                <EventmapMapPin size={48} color={Colors.text.tertiary} />
+                <View style={styles.emptyLogoWrap}>
+                  <Image
+                    source={require('@/assets/images/EMlogo.png')}
+                    style={styles.emptyLogo}
+                    resizeMode="contain"
+                  />
+                </View>
                 <Text style={styles.emptyTitle}>Event not found</Text>
                 <Text style={styles.emptySubtitle}>
                   No events in this area. Try moving the map or adjusting your filters
@@ -638,6 +635,11 @@ const styles = StyleSheet.create({
       },
       android: { elevation: 8 },
     }),
+  },
+  searchIslandLogo: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
   },
   searchBar: {
     flex: 1,
@@ -949,6 +951,19 @@ const styles = StyleSheet.create({
   emptyState: {
     alignItems: 'center',
     paddingVertical: Spacing.xxl,
+  },
+  emptyLogoWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 24,
+    backgroundColor: 'rgba(196, 92, 62, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.md,
+  },
+  emptyLogo: {
+    width: 48,
+    height: 48,
   },
   emptyTitle: {
     fontSize: Typography.sizes.lg,

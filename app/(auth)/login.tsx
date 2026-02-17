@@ -9,6 +9,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -100,14 +101,15 @@ export default function LoginScreen() {
           {/* ── Hero area ── */}
           <View style={styles.heroSection}>
             <View style={styles.logoWrap}>
-              <LinearGradient
-                colors={[Palette.gradientStart, Palette.gradientEnd]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.logoGradient}
-              >
-                <Sparkles size={28} color="#FFFFFF" />
-              </LinearGradient>
+              <View style={styles.logoOuter}>
+                <View style={styles.logoInner}>
+                  <Image
+                    source={require('@/assets/images/EMlogo.png')}
+                    style={styles.heroLogo}
+                    resizeMode="contain"
+                  />
+                </View>
+              </View>
             </View>
             <Text style={styles.heroTitle}>Welcome Back</Text>
             <Text style={styles.heroSubtitle}>
@@ -269,12 +271,26 @@ const styles = StyleSheet.create({
       android: { elevation: 8 },
     }),
   },
-  logoGradient: {
+  logoOuter: {
+    width: 88,
+    height: 88,
+    borderRadius: 28,
+    backgroundColor: Palette.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoInner: {
     width: 72,
     height: 72,
     borderRadius: 22,
+    backgroundColor: Palette.cardBg,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  heroLogo: {
+    width: 56,
+    height: 56,
   },
   heroTitle: {
     fontSize: 28,

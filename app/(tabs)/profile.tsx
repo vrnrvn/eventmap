@@ -8,6 +8,7 @@ import {
   Alert,
   Dimensions,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -39,6 +40,9 @@ import {
 } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// Transparent PNG version of the logo
+const EMlogo = require('@/assets/images/EMlogo.png');
 
 const Palette = {
   gradientStart: Colors.primary,
@@ -182,7 +186,6 @@ export default function ProfileScreen() {
     setUploadingAvatar(true);
     try {
       if (isBizMode && userBusiness) {
-        // Upload business logo
         const publicUrl = await eventsService.uploadEventImage(
           {
             uri: asset.uri,
@@ -194,7 +197,6 @@ export default function ProfileScreen() {
         await businessesService.updateBusiness(userBusiness.id, { logo_url: publicUrl });
         await refreshBusiness();
       } else {
-        // Upload personal avatar
         const publicUrl = await profilesService.uploadAvatar({
           uri: asset.uri,
           name: `avatar.${ext}`,
@@ -210,7 +212,6 @@ export default function ProfileScreen() {
     }
   };
 
-  // ── Derive header values based on mode ──
   const headerAvatarUrl = isBizMode ? userBusiness?.logo_url : profile?.avatar_url;
   const headerName = isBizMode ? (userBusiness?.name || 'Business') : (profile?.name || 'User');
   const headerSubtitle = isBizMode
@@ -235,8 +236,17 @@ export default function ProfileScreen() {
           }
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={[styles.headerGradient, { paddingTop: insets.top + Spacing.xl }]}
+          style={[styles.headerGradient, { paddingTop: insets.top + Spacing.md }]}
         >
+          {/* ── App Logo ── */}
+          <View style={styles.appLogoContainer}>
+            <Image
+              source={EMlogo}
+              style={[styles.appLogo, { tintColor: Palette.textOnGradient }]}
+              resizeMode="contain"
+            />
+          </View>
+
           <View style={styles.avatarRing}>
             {uploadingAvatar ? (
               <View style={styles.avatarInner}>
@@ -349,7 +359,6 @@ export default function ProfileScreen() {
         {/* ── Menu sections ── */}
         {isBizMode ? (
           <>
-            {/* Upgrade to Premium CTA for business profiles */}
             {!isPremium && userBusiness && (
               <View style={styles.sectionPadding}>
                 <TouchableOpacity
@@ -588,6 +597,19 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 28,
     borderBottomRightRadius: 28,
   },
+
+  /* ── App Logo ── */
+  appLogoContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.md,
+  },
+  appLogo: {
+    width: 170,
+    height: 70,
+    backgroundColor: 'transparent',
+  },
+
   avatarRing: {
     width: 92,
     height: 92,

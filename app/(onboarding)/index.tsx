@@ -9,6 +9,7 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -241,7 +242,11 @@ function WelcomePage({
 
         <View style={styles.logoOuter}>
           <View style={styles.logoInner}>
-            <Sparkles size={36} color={Colors.primary} />
+            <Image
+              source={require('@/assets/images/EMlogo.png')}
+              style={styles.welcomeLogo}
+              resizeMode="contain"
+            />
           </View>
         </View>
 
@@ -323,6 +328,11 @@ function CategoriesPage({
         <TouchableOpacity style={styles.backBtn} onPress={onBack} activeOpacity={0.7}>
           <ChevronLeft size={22} color={Colors.text.primary} />
         </TouchableOpacity>
+        <Image
+          source={require('@/assets/images/EMlogo.png')}
+          style={styles.headerLogo}
+          resizeMode="contain"
+        />
         <TouchableOpacity onPress={onNext} activeOpacity={0.7}>
           <Text style={styles.skipText}>Skip</Text>
         </TouchableOpacity>
@@ -413,6 +423,11 @@ function PermissionsPage({
         <TouchableOpacity style={styles.backBtn} onPress={onBack} activeOpacity={0.7}>
           <ChevronLeft size={22} color={Colors.text.primary} />
         </TouchableOpacity>
+        <Image
+          source={require('@/assets/images/EMlogo.png')}
+          style={styles.headerLogo}
+          resizeMode="contain"
+        />
         <TouchableOpacity onPress={onNext} activeOpacity={0.7}>
           <Text style={styles.skipText}>Skip</Text>
         </TouchableOpacity>
@@ -518,7 +533,12 @@ function TutorialPage({
         <TouchableOpacity style={styles.backBtn} onPress={onBack} activeOpacity={0.7}>
           <ChevronLeft size={22} color={Colors.text.primary} />
         </TouchableOpacity>
-        <View />
+        <Image
+          source={require('@/assets/images/EMlogo.png')}
+          style={styles.headerLogo}
+          resizeMode="contain"
+        />
+        <View style={styles.headerLogoSpacer} />
       </View>
 
       <View style={styles.pageContent}>
@@ -627,7 +647,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border.medium,
   },
 
-  /* ── Page header (back + skip) ── */
+  /* ── Page header (back + logo + skip) ── */
   pageHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -646,6 +666,14 @@ const styles = StyleSheet.create({
       ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8 },
       android: { elevation: 3 },
     }),
+  },
+  headerLogo: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+  },
+  headerLogoSpacer: {
+    width: 44,
   },
   skipText: {
     fontSize: Typography.sizes.md,
@@ -751,6 +779,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  welcomeLogo: {
+    width: 56,
+    height: 56,
   },
   welcomeTitle: {
     fontSize: 32,
