@@ -11,6 +11,7 @@ import {
   Alert,
   Dimensions,
   TouchableOpacity,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -260,7 +261,11 @@ export default function CreateScreen() {
     return (
       <View style={[styles.noBizContainer, { paddingTop: insets.top + 40 }]}>
         <View style={styles.noBizIconWrap}>
-          <Briefcase size={36} color={Colors.primary} />
+          <Image
+            source={require('@/assets/images/EMlogo.png')}
+            style={styles.noBizLogo}
+            resizeMode="contain"
+          />
         </View>
         <Text style={styles.noBizTitle}>Create Events</Text>
         <Text style={styles.noBizSubtitle}>
@@ -303,9 +308,11 @@ export default function CreateScreen() {
       >
         {/* ── Page header ── */}
         <View style={styles.pageHeader}>
-          <View style={styles.pageHeaderIcon}>
-            <CalendarPlus size={22} color={Colors.primary} />
-          </View>
+          <Image
+            source={require('@/assets/images/EMlogo.png')}
+            style={styles.pageHeaderLogo}
+            resizeMode="contain"
+          />
           <View>
             <Text style={styles.pageTitle}>Create Event</Text>
             <Text style={styles.pageSubtitle}>
@@ -720,6 +727,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  pageHeaderLogo: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+  },
   pageTitle: {
     fontSize: 24,
     fontFamily: Typography.displayFontFamilies.bold,
@@ -1014,6 +1026,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24,
+  },
+  noBizLogo: {
+    width: 48,
+    height: 48,
   },
   noBizTitle: {
     fontSize: 22,

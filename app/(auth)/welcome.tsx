@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   Platform,
   Dimensions,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -62,7 +63,11 @@ export default function WelcomeScreen() {
         <View style={styles.logoContainer}>
           <View style={styles.logoOuter}>
             <View style={styles.logoInner}>
-              <Sparkles size={32} color={Colors.primary} />
+              <Image
+                source={require('@/assets/images/EMlogo.png')}
+                style={styles.heroLogo}
+                resizeMode="contain"
+              />
             </View>
           </View>
         </View>
@@ -227,6 +232,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  heroLogo: {
+    width: 52,
+    height: 52,
   },
   heroTitle: {
     fontSize: 36,

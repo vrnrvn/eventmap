@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Modal,
   Pressable,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -126,7 +127,11 @@ export default function SignupScreen() {
         <Pressable style={styles.popupOverlay} onPress={handleEmailPopupDismiss}>
           <Pressable style={styles.popupCard} onPress={(e) => e.stopPropagation()}>
             <View style={styles.popupIconWrap}>
-              <Mail size={40} color={Colors.primary} />
+              <Image
+                source={require('@/assets/images/EMlogo.png')}
+                style={styles.popupLogo}
+                resizeMode="contain"
+              />
             </View>
             <Text style={styles.popupTitle}>
               {emailPopupVariant === 'existing' ? 'Email Already Registered' : 'Check Your Email'}
@@ -177,14 +182,15 @@ export default function SignupScreen() {
           {/* ── Hero area ── */}
           <View style={styles.heroSection}>
             <View style={styles.logoWrap}>
-              <LinearGradient
-                colors={[Palette.gradientStart, Palette.gradientEnd]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.logoGradient}
-              >
-                <Sparkles size={28} color="#FFFFFF" />
-              </LinearGradient>
+              <View style={styles.logoOuter}>
+                <View style={styles.logoInner}>
+                  <Image
+                    source={require('@/assets/images/EMlogo.png')}
+                    style={styles.heroLogo}
+                    resizeMode="contain"
+                  />
+                </View>
+              </View>
             </View>
             <Text style={styles.heroTitle}>Create Account</Text>
             <Text style={styles.heroSubtitle}>
@@ -394,12 +400,26 @@ const styles = StyleSheet.create({
       android: { elevation: 8 },
     }),
   },
-  logoGradient: {
+  logoOuter: {
+    width: 88,
+    height: 88,
+    borderRadius: 28,
+    backgroundColor: Palette.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoInner: {
     width: 72,
     height: 72,
     borderRadius: 22,
+    backgroundColor: Palette.cardBg,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  heroLogo: {
+    width: 56,
+    height: 56,
   },
   heroTitle: {
     fontSize: 28,
@@ -584,6 +604,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
+    overflow: 'hidden',
+  },
+  popupLogo: {
+    width: 44,
+    height: 44,
   },
   popupTitle: {
     fontSize: 20,
