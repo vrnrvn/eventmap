@@ -24,6 +24,7 @@ import { Business, Event } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { Avatar } from '@/components/Avatar';
 import { CategoryIcon } from '@/components/CategoryIcon';
+import { getCategorySlug } from '@/constants/categoryIcons';
 import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ReviewCard } from '@/components/ReviewCard';
 import { GoogleMapView } from '@/components/GoogleMapView';
@@ -37,6 +38,7 @@ import {
   Calendar,
   Flag,
 } from 'lucide-react-native';
+import { FacebookIcon, InstagramIcon } from '@/components/icons/BrandIcons';
 import { complaintsService } from '@/services/complaints';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -46,9 +48,18 @@ function buildGoogleSearchUrl(business: Business): string {
   return `https://www.google.com/maps/search/?api=1&query=${query}`;
 }
 
-function buildGoogleReviewsUrl(business: Business): string {
-  const query = encodeURIComponent(`${business.name} ${business.address} reviews`);
-  return `https://www.google.com/search?q=${query}`;
+function buildInstagramUrl(handle: string): string {
+  const clean = handle.replace(/^@/, '').trim();
+  return `https://instagram.com/${clean}`;
+}
+
+function buildFacebookUrl(handle: string): string {
+  const clean = handle.trim();
+  if (clean.startsWith('http')) return clean;
+  if (clean.startsWith('facebook.com/') || clean.startsWith('fb.com/')) {
+    return `https://${clean}`;
+  }
+  return `https://facebook.com/${clean}`;
 }
 
 export default function BusinessDetail() {
@@ -175,11 +186,15 @@ export default function BusinessDetail() {
     );
   }
 
-  const allLinks = [
+  const allLinks: Array<{ id: string; label: string | null; url: string }> = [
     ...links,
     { id: 'google-maps', label: 'View on Google Maps', url: buildGoogleSearchUrl(business) },
-    { id: 'google-reviews', label: 'Google Reviews', url: buildGoogleReviewsUrl(business) },
+    ...(business.google_reviews_url?.trim()
+      ? [{ id: 'google-reviews', label: 'Google Reviews', url: business.google_reviews_url.trim() }]
+      : []),
   ];
+
+  const socialHandles = (business.social_handles as { instagram?: string; facebook?: string } | null) ?? {};
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -262,6 +277,33 @@ export default function BusinessDetail() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>About</Text>
             <Text style={styles.description}>{business.description}</Text>
+          </View>
+        ) : null}
+
+        {/* Connect - Instagram / Facebook */}
+        {(socialHandles.instagram || socialHandles.facebook) ? (
+          <View style={styles.socialsSection}>
+            <Text style={styles.socialsLabel}>Connect</Text>
+            <View style={styles.socials}>
+              {socialHandles.instagram ? (
+                <TouchableOpacity
+                  style={styles.socialBtn}
+                  onPress={() => Linking.openURL(buildInstagramUrl(socialHandles.instagram!))}
+                  activeOpacity={0.7}
+                >
+                  <InstagramIcon size={24} />
+                </TouchableOpacity>
+              ) : null}
+              {socialHandles.facebook ? (
+                <TouchableOpacity
+                  style={styles.socialBtn}
+                  onPress={() => Linking.openURL(buildFacebookUrl(socialHandles.facebook!))}
+                  activeOpacity={0.7}
+                >
+                  <FacebookIcon size={24} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
           </View>
         ) : null}
 
@@ -548,6 +590,30 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily,
     color: Colors.text.primary,
     lineHeight: 24,
+  },
+  socialsSection: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    backgroundColor: Colors.background.primary,
+    marginTop: Spacing.sm,
+    alignItems: 'center',
+  },
+  socialsLabel: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: Spacing.sm,
+  },
+  socials: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: Spacing.lg,
+  },
+  socialBtn: {
+    padding: Spacing.sm,
   },
   addressRow: {
     flexDirection: 'row',

@@ -1,6 +1,10 @@
 import { supabase } from './supabase';
 import { Profile } from '@/types/database';
 
+export type PublicProfileResult =
+  | { isPrivate: true }
+  | { isPrivate: false; profile: Profile };
+
 export const profilesService = {
   async ensureProfileExists(userId: string, name?: string): Promise<void> {
     const { error } = await supabase.rpc('ensure_profile_exists', {
@@ -28,6 +32,35 @@ export const profilesService = {
     if (!user) return null;
 
     return this.getProfile(user.id);
+  },
+
+  async getPublicProfile(userId: string): Promise<PublicProfileResult | null> {
+    const { data: check, error: checkErr } = await supabase
+      .from('profiles')
+      .select('id, is_profile_private, show_future_events')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (checkErr) throw checkErr;
+    if (!check) return null;
+
+    if (check.is_profile_private) {
+      return { isPrivate: true };
+    }
+
+    const { data: full, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!full) return null;
+
+    return {
+      isPrivate: false,
+      profile: full as Profile,
+    };
   },
 
   async updateProfile(

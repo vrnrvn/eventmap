@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { RsvpStatus, Rsvp, Save, Follow, RankedEvent } from '@/types/database';
+import { RsvpStatus, Rsvp, Save, Follow, RankedEvent, PublicAttendee } from '@/types/database';
 import { eventsService } from './events';
 
 export const socialService = {
@@ -56,6 +56,29 @@ export const socialService = {
 
     if (error) throw error;
     return data?.status || null;
+  },
+
+  async getEventAttendees(eventId: string): Promise<PublicAttendee[]> {
+    const { data, error } = await supabase.rpc('get_event_attendees_public', {
+      event_uuid: eventId,
+    });
+
+    if (error) throw error;
+    return (data as PublicAttendee[]) || [];
+  },
+
+  async getUserUpcomingEvents(userId: string): Promise<RankedEvent[]> {
+    const { data, error } = await supabase.rpc('get_user_upcoming_events', {
+      user_id_param: userId,
+    });
+
+    if (error) throw error;
+    const raw = (data as any[]) || [];
+    return raw.map((e) => ({
+      ...e,
+      distance_km: 0,
+      is_premium: false,
+    })) as RankedEvent[];
   },
 
   async getUserRsvps(): Promise<Rsvp[]> {
