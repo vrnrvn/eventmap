@@ -33,8 +33,7 @@ export function EventCardCarousel({ imageUrls, imageHeight = DEFAULT_IMAGE_HEIGH
 
   return (
     <View style={[styles.container, { height: imageHeight }]}>
-      <Animated.FlatList
-        data={images}
+      <Animated.ScrollView
         horizontal
         pagingEnabled={images.length > 1}
         snapToInterval={CARD_WIDTH}
@@ -43,18 +42,19 @@ export function EventCardCarousel({ imageUrls, imageHeight = DEFAULT_IMAGE_HEIGH
         showsHorizontalScrollIndicator={false}
         onScroll={scrollHandler}
         scrollEventThrottle={16}
-        keyExtractor={(_, i) => `img-${i}`}
-        renderItem={({ item, index }) => (
+      >
+        {images.map((uri, index) => (
           <CarouselImage
-            uri={item}
+            key={`img-${index}`}
+            uri={uri}
             index={index}
             scrollX={scrollX}
             isPlaceholder={isPlaceholder}
             imageHeight={imageHeight}
             applySkew={applySkew}
           />
-        )}
-      />
+        ))}
+      </Animated.ScrollView>
     </View>
   );
 }

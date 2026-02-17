@@ -1,7 +1,14 @@
+export type SocialHandles = {
+  instagram?: string;
+  facebook?: string;
+};
+
 export type Profile = {
   id: string;
   name: string;
   avatar_url: string | null;
+  bio: string | null;
+  social_handles: SocialHandles | null;
   city: string | null;
   lat: number | null;
   lng: number | null;
@@ -9,10 +16,25 @@ export type Profile = {
   has_completed_onboarding?: boolean;
   preferred_categories?: string[];
   is_admin?: boolean;
+  is_profile_private?: boolean;
+  show_attendance_publicly?: boolean;
+  show_future_events?: boolean;
   created_at: string;
 };
 
+export type PublicAttendee = {
+  id: string;
+  name: string;
+  avatar_url: string | null;
+  bio: string | null;
+};
+
 export type SubscriptionTier = 'free' | 'premium';
+
+export type BusinessSocialHandles = {
+  instagram?: string;
+  facebook?: string;
+};
 
 export type Business = {
   id: string;
@@ -25,6 +47,8 @@ export type Business = {
   lng: number;
   logo_url: string | null;
   contact_email: string | null;
+  google_reviews_url: string | null;
+  social_handles: BusinessSocialHandles | null;
   verified: boolean;
   subscription_tier: SubscriptionTier;
   subscription_expires_at: string | null;

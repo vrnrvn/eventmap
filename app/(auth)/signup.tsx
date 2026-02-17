@@ -11,24 +11,22 @@ import {
   Modal,
   Pressable,
   Image,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/Input';
-import { AddressSearchInput } from '@/components/AddressSearchInput';
-import { profilesService } from '@/services/profiles';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import {
   ArrowLeft,
   User,
   Mail,
   Lock,
-  MapPin,
   UserPlus,
-  Sparkles,
 } from 'lucide-react-native';
+import { GoogleIcon, FacebookIcon } from '@/components/icons/BrandIcons';
 
 const Palette = {
   gradientStart: Colors.primary,
@@ -41,13 +39,11 @@ const Palette = {
 
 export default function SignupScreen() {
   const insets = useSafeAreaInsets();
-  const { signUp, refreshProfile } = useAuth();
+  const { signUp, signInWithOAuth } = useAuth();
+  const [selectedMethod, setSelectedMethod] = useState<'select' | 'email'>('select');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [city, setCity] = useState('');
-  const [cityLat, setCityLat] = useState<number | null>(null);
-  const [cityLng, setCityLng] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{
     name?: string;
@@ -56,6 +52,7 @@ export default function SignupScreen() {
   }>({});
   const [showEmailPopup, setShowEmailPopup] = useState(false);
   const [emailPopupVariant, setEmailPopupVariant] = useState<'new' | 'existing'>('new');
+  const [oauthLoading, setOauthLoading] = useState<'google' | 'facebook' | null>(null);
 
   const validateForm = () => {
     const newErrors: { name?: string; email?: string; password?: string } = {};
@@ -85,15 +82,7 @@ export default function SignupScreen() {
 
     setLoading(true);
     try {
-      const data = await signUp(email, password, name);
-      if (data?.user && city.trim() && cityLat != null && cityLng != null) {
-        await profilesService.updateProfile(data.user.id, {
-          city,
-          lat: cityLat,
-          lng: cityLng,
-        });
-        await refreshProfile();
-      }
+      await signUp(email, password, name);
       setEmailPopupVariant('new');
       setShowEmailPopup(true);
     } catch (error: unknown) {
@@ -114,6 +103,22 @@ export default function SignupScreen() {
   const handleEmailPopupDismiss = () => {
     setShowEmailPopup(false);
     router.replace('/');
+  };
+
+  const handleOAuthSignIn = async (provider: 'google' | 'facebook') => {
+    setOauthLoading(provider);
+    try {
+      await signInWithOAuth(provider);
+      router.replace('/');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      Alert.alert(
+        provider === 'google' ? 'Google Sign In' : 'Facebook Sign In',
+        msg.includes('cancelled') ? 'Sign in was cancelled.' : msg
+      );
+    } finally {
+      setOauthLoading(null);
+    }
   };
 
   return (
@@ -173,7 +178,9 @@ export default function SignupScreen() {
           {/* ── Back button ── */}
           <TouchableOpacity
             style={styles.backBtn}
-            onPress={() => router.back()}
+            onPress={() =>
+              selectedMethod === 'email' ? setSelectedMethod('select') : router.back()
+            }
             activeOpacity={0.7}
           >
             <ArrowLeft size={22} color={Colors.text.primary} />
@@ -194,153 +201,195 @@ export default function SignupScreen() {
             </View>
             <Text style={styles.heroTitle}>Create Account</Text>
             <Text style={styles.heroSubtitle}>
-              Join to discover and share local events
+              {selectedMethod === 'select'
+                ? 'Choose how you want to sign up'
+                : 'Join to discover and share local events'}
             </Text>
           </View>
 
-          {/* ── Form card ── */}
-          <View style={styles.formCard}>
-            {/* Name */}
-            <View style={styles.fieldRow}>
-              <View style={styles.fieldIcon}>
-                <User size={16} color={Colors.primary} />
-              </View>
-              <View style={styles.fieldContent}>
-                <Input
-                  label="Name"
-                  value={name}
-                  onChangeText={setName}
-                  placeholder="Your name"
-                  error={errors.name}
-                />
-              </View>
+          {selectedMethod === 'select' ? (
+            /* ── Method selection cards ── */
+            <View style={styles.methodCards}>
+              <TouchableOpacity
+                style={styles.methodCard}
+                onPress={() => setSelectedMethod('email')}
+                activeOpacity={0.85}
+              >
+                <View style={styles.methodIcon}>
+                  <Mail size={24} color={Colors.primary} />
+                </View>
+                <View style={styles.methodText}>
+                  <Text style={styles.methodLabel}>Email</Text>
+                  <Text style={styles.methodHint}>Sign up with your email</Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.methodCard}
+                onPress={() => handleOAuthSignIn('google')}
+                disabled={oauthLoading !== null}
+                activeOpacity={0.85}
+              >
+                <View style={[styles.methodIcon, styles.methodIconBrand]}>
+                  <GoogleIcon size={24} />
+                </View>
+                <View style={styles.methodText}>
+                  <Text style={styles.methodLabel}>Gmail</Text>
+                  <Text style={styles.methodHint}>Sign up with Google</Text>
+                </View>
+                {oauthLoading === 'google' && (
+                  <ActivityIndicator size="small" color={Colors.primary} style={styles.methodSpinner} />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.methodCard}
+                onPress={() => handleOAuthSignIn('facebook')}
+                disabled={oauthLoading !== null}
+                activeOpacity={0.85}
+              >
+                <View style={[styles.methodIcon, styles.methodIconBrand]}>
+                  <FacebookIcon size={24} />
+                </View>
+                <View style={styles.methodText}>
+                  <Text style={styles.methodLabel}>Facebook</Text>
+                  <Text style={styles.methodHint}>Sign up with Facebook</Text>
+                </View>
+                {oauthLoading === 'facebook' && (
+                  <ActivityIndicator size="small" color={Colors.primary} style={styles.methodSpinner} />
+                )}
+              </TouchableOpacity>
             </View>
+          ) : null}
 
-            <View style={styles.fieldSeparator} />
-
-            {/* Email */}
-            <View style={styles.fieldRow}>
-              <View style={styles.fieldIcon}>
-                <Mail size={16} color={Colors.primary} />
-              </View>
-              <View style={styles.fieldContent}>
-                <Input
-                  label="Email"
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder="your@email.com"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  error={errors.email}
-                />
-              </View>
+          {selectedMethod === 'select' ? (
+            <View style={[styles.footer, { marginTop: 24 }]}>
+              <Text style={styles.footerText}>Already have an account?</Text>
+              <TouchableOpacity
+                style={styles.signInBtn}
+                onPress={() => router.push('/(auth)/login')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.signInBtnText}>Sign In</Text>
+              </TouchableOpacity>
             </View>
+          ) : null}
 
-            <View style={styles.fieldSeparator} />
+          {selectedMethod === 'email' ? (
+            <>
+              {/* ── Form card ── */}
+              <View style={styles.formCard}>
+                {/* Name */}
+                <View style={styles.fieldRow}>
+                  <View style={styles.fieldIcon}>
+                    <User size={16} color={Colors.primary} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Input
+                      label="Name"
+                      value={name}
+                      onChangeText={setName}
+                      placeholder="Your name"
+                      error={errors.name}
+                    />
+                  </View>
+                </View>
 
-            {/* Password */}
-            <View style={styles.fieldRow}>
-              <View style={styles.fieldIcon}>
-                <Lock size={16} color={Colors.primary} />
+                <View style={styles.fieldSeparator} />
+
+                {/* Email */}
+                <View style={styles.fieldRow}>
+                  <View style={styles.fieldIcon}>
+                    <Mail size={16} color={Colors.primary} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Input
+                      label="Email"
+                      value={email}
+                      onChangeText={setEmail}
+                      placeholder="your@email.com"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      error={errors.email}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.fieldSeparator} />
+
+                {/* Password */}
+                <View style={styles.fieldRow}>
+                  <View style={styles.fieldIcon}>
+                    <Lock size={16} color={Colors.primary} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Input
+                      label="Password"
+                      value={password}
+                      onChangeText={setPassword}
+                      placeholder="At least 6 characters"
+                      secureTextEntry
+                      error={errors.password}
+                    />
+                  </View>
+                </View>
               </View>
-              <View style={styles.fieldContent}>
-                <Input
-                  label="Password"
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="At least 6 characters"
-                  secureTextEntry
-                  error={errors.password}
-                />
+
+              {/* ── Create account button ── */}
+              <TouchableOpacity
+                style={styles.submitWrap}
+                onPress={handleSignUp}
+                disabled={loading}
+                activeOpacity={0.85}
+              >
+                <LinearGradient
+                  colors={
+                    loading
+                      ? [Colors.primaryLight, Colors.accentLight]
+                      : [Palette.gradientStart, Palette.gradientEnd]
+                  }
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.submitGradient}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <UserPlus size={18} color="#FFFFFF" />
+                      <Text style={styles.submitText}>Create Account</Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {/* ── Terms hint ── */}
+              <Text style={styles.termsText}>
+                By creating an account, you agree to our{' '}
+                <Text style={styles.termsLink}>Terms of Service</Text> and{' '}
+                <Text style={styles.termsLink}>Privacy Policy</Text>
+              </Text>
+
+              {/* ── Divider ── */}
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>or</Text>
+                <View style={styles.dividerLine} />
               </View>
-            </View>
 
-            <View style={styles.fieldSeparator} />
-
-            {/* Location */}
-            <View style={styles.fieldRow}>
-              <View style={styles.fieldIcon}>
-                <MapPin size={16} color={Colors.primary} />
+              {/* ── Footer ── */}
+              <View style={styles.footer}>
+                <Text style={styles.footerText}>Already have an account?</Text>
+                <TouchableOpacity
+                  style={styles.signInBtn}
+                  onPress={() => router.push('/(auth)/login')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.signInBtnText}>Sign In</Text>
+                </TouchableOpacity>
               </View>
-              <View style={styles.fieldContent}>
-                <AddressSearchInput
-                  label="City or area (optional)"
-                  value={city}
-                  onChangeText={(text) => {
-                    setCity(text);
-                    if (!text.trim()) {
-                      setCityLat(null);
-                      setCityLng(null);
-                    }
-                  }}
-                  onSelect={(result) => {
-                    setCity(result.formattedAddress);
-                    setCityLat(result.lat);
-                    setCityLng(result.lng);
-                  }}
-                  placeholder="e.g. San Francisco, Bay Area"
-                  approximate
-                />
-                <Text style={styles.locationHint}>
-                  Helps us show events near you
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* ── Create account button ── */}
-          <TouchableOpacity
-            style={styles.submitWrap}
-            onPress={handleSignUp}
-            disabled={loading}
-            activeOpacity={0.85}
-          >
-            <LinearGradient
-              colors={
-                loading
-                  ? [Colors.primaryLight, Colors.accentLight]
-                  : [Palette.gradientStart, Palette.gradientEnd]
-              }
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.submitGradient}
-            >
-              {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <>
-                  <UserPlus size={18} color="#FFFFFF" />
-                  <Text style={styles.submitText}>Create Account</Text>
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
-
-          {/* ── Terms hint ── */}
-          <Text style={styles.termsText}>
-            By creating an account, you agree to our{' '}
-            <Text style={styles.termsLink}>Terms of Service</Text> and{' '}
-            <Text style={styles.termsLink}>Privacy Policy</Text>
-          </Text>
-
-          {/* ── Divider ── */}
-          <View style={styles.dividerRow}>
-            <View style={styles.dividerLine} />
-            <Text style={styles.dividerText}>or</Text>
-            <View style={styles.dividerLine} />
-          </View>
-
-          {/* ── Footer ── */}
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>Already have an account?</Text>
-            <TouchableOpacity
-              style={styles.signInBtn}
-              onPress={() => router.push('/(auth)/login')}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.signInBtnText}>Sign In</Text>
-            </TouchableOpacity>
-          </View>
+            </>
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -472,11 +521,60 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.separator,
     marginLeft: 70,
   },
-  locationHint: {
+
+  /* ── Method selection ── */
+  methodCards: {
+    gap: 12,
+    marginTop: 8,
+  },
+  methodCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Palette.cardBg,
+    borderRadius: 16,
+    padding: 18,
+    gap: 16,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+      },
+      android: { elevation: 3 },
+    }),
+  },
+  methodIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: Palette.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  methodIconBrand: {
+    backgroundColor: 'rgba(0,0,0,0.04)',
+  },
+  methodSpinner: {
+    marginLeft: 8,
+  },
+  methodText: {
+    flex: 1,
+  },
+  methodLabel: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.text.primary,
+  },
+  methodLabelMuted: {
+    color: Colors.text.tertiary,
+  },
+  methodHint: {
     fontSize: Typography.sizes.xs,
     fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
-    marginTop: 4,
+    marginTop: 2,
   },
 
   /* ── Submit ── */
