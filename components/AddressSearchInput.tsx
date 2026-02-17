@@ -9,7 +9,7 @@ import {
   Keyboard,
   ActivityIndicator,
 } from 'react-native';
-import { MapPin } from 'lucide-react-native';
+import { MapPin, X } from 'lucide-react-native';
 import {
   placesService,
   AutocompletePrediction,
@@ -36,8 +36,10 @@ type AddressSearchInputProps = {
   error?: string;
   approximate?: boolean;
   showSetButton?: boolean;
-  /** 'street' = addresses only; 'full' = addresses + business/condo names */
-  addressPrecision?: 'street' | 'full' | 'any';
+  /** 'street' = addresses only; 'full' = addresses + business names; 'business' = Google Maps–like (businesses + addresses), uses Place Details for coordinates */
+  addressPrecision?: 'street' | 'full' | 'any' | 'business';
+  /** Show X icon to clear the input when it has value */
+  showClearButton?: boolean;
   style?: object;
 };
 
@@ -50,6 +52,7 @@ export function AddressSearchInput({
   error,
   approximate = false,
   showSetButton = false,
+  showClearButton = false,
   addressPrecision = 'any',
   style,
 }: AddressSearchInputProps) {
@@ -65,8 +68,10 @@ export function AddressSearchInput({
     };
   }, []);
 
-  const autocompleteTypes: AutocompleteTypes =
-    addressPrecision === 'street' ? 'address' : 'geocode';
+  const autocompleteOpts =
+    addressPrecision === 'business'
+      ? { allTypes: true as const }
+      : { types: (addressPrecision === 'street' ? 'address' : 'geocode') as AutocompleteTypes };
 
   const fetchSuggestions = useCallback(
     async (query: string) => {
@@ -76,9 +81,7 @@ export function AddressSearchInput({
         return;
       }
       try {
-        const results = await placesService.autocomplete(query, {
-          types: autocompleteTypes,
-        });
+        const results = await placesService.autocomplete(query, autocompleteOpts);
         setSuggestions(results);
         setSuggestionsVisible(results.length > 0);
       } catch {
@@ -86,7 +89,7 @@ export function AddressSearchInput({
         setSuggestionsVisible(false);
       }
     },
-    [autocompleteTypes]
+    [addressPrecision]
   );
 
   const handleInputChange = useCallback(
@@ -106,13 +109,24 @@ export function AddressSearchInput({
       setSuggestions([]);
       Keyboard.dismiss();
       try {
-        const result = await geocodingService.getFirst(prediction.description);
-        if (result) {
-          onSelect({
-            formattedAddress: result.formattedAddress,
-            lat: approximate ? roundApprox(result.lat) : result.lat,
-            lng: approximate ? roundApprox(result.lng) : result.lng,
-          });
+        if (addressPrecision === 'business') {
+          const result = await placesService.getPlaceDetails(prediction.placeId);
+          if (result) {
+            onSelect({
+              formattedAddress: result.formattedAddress,
+              lat: result.lat,
+              lng: result.lng,
+            });
+          }
+        } else {
+          const result = await geocodingService.getFirst(prediction.description);
+          if (result) {
+            onSelect({
+              formattedAddress: result.formattedAddress,
+              lat: approximate ? roundApprox(result.lat) : result.lat,
+              lng: approximate ? roundApprox(result.lng) : result.lng,
+            });
+          }
         }
       } catch {
         // Silently fail - user can retry
@@ -120,7 +134,7 @@ export function AddressSearchInput({
         selectingRef.current = false;
       }
     },
-    [onChangeText, onSelect, approximate]
+    [onChangeText, onSelect, approximate, addressPrecision]
   );
 
   const handleSetLocation = useCallback(async () => {
@@ -150,26 +164,42 @@ export function AddressSearchInput({
       {label && <Text style={styles.label}>{label}</Text>}
       <View style={styles.inputRow}>
         <View style={styles.inputWrapper}>
-          <TextInput
-            style={[styles.input, error && styles.inputError]}
-            placeholder={placeholder}
-            placeholderTextColor={Colors.text.tertiary}
-            value={value}
-            onChangeText={handleInputChange}
-            onFocus={() => value.trim() && fetchSuggestions(value)}
-            onBlur={() => {
-              setTimeout(() => {
-                if (!selectingRef.current) setSuggestionsVisible(false);
-              }, 300);
-            }}
-            keyboardShouldPersistTaps="handled"
-          />
+          <View style={styles.inputInner}>
+            <TextInput
+              style={[styles.input, error && styles.inputError, showClearButton && value && styles.inputWithClear]}
+              placeholder={placeholder}
+              placeholderTextColor={Colors.text.tertiary}
+              value={value}
+              onChangeText={handleInputChange}
+              onFocus={() => value.trim() && fetchSuggestions(value)}
+              onBlur={() => {
+                setTimeout(() => {
+                  if (!selectingRef.current) setSuggestionsVisible(false);
+                }, 300);
+              }}
+              keyboardShouldPersistTaps="handled"
+            />
+            {showClearButton && value ? (
+              <TouchableOpacity
+                style={styles.clearBtn}
+                onPress={() => {
+                  onChangeText('');
+                  setSuggestions([]);
+                  setSuggestionsVisible(false);
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <X size={18} color={Colors.text.tertiary} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
           {suggestionsVisible && suggestions.length > 0 && (
             <ScrollView
               style={styles.suggestionsDropdown}
               keyboardShouldPersistTaps="handled"
               nestedScrollEnabled
-              scrollEventThrottle={16}
+              showsVerticalScrollIndicator
+              bounces={false}
             >
               {suggestions.map((item) => (
                 <TouchableOpacity
@@ -242,6 +272,17 @@ const styles = StyleSheet.create({
   },
   inputError: {
     borderColor: Colors.error,
+  },
+  inputWithClear: {
+    paddingRight: 40,
+  },
+  clearBtn: {
+    position: 'absolute',
+    right: 12,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    zIndex: 2,
   },
   suggestionsDropdown: {
     position: 'absolute',

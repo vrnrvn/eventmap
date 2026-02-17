@@ -7,7 +7,7 @@ import { CATEGORY_COLORS, DEFAULT_CATEGORY_COLOR } from '@/constants/categories'
 const MAP_HTML_VERSION = 3;
 
 export type GoogleMapHandle = {
-  animateTo: (lat: number, lng: number) => void;
+  animateTo: (lat: number, lng: number, zoom?: number) => void;
 };
 
 type MapMarker = {
@@ -273,9 +273,10 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
     }
   }, []);
 
-  const animateTo = (lat: number, lng: number) => {
+  const animateTo = (lat: number, lng: number, zoom?: number) => {
+    const zoomPart = typeof zoom === 'number' ? `m.setZoom(${zoom});` : '';
     webViewRef.current?.injectJavaScript(
-      `(function(){var m=window.__map;if(m){m.panTo({lat:${lat},lng:${lng}});}})();true;`
+      `(function(){var m=window.__map;if(m){m.panTo({lat:${lat},lng:${lng}});${zoomPart}}})();true;`
     );
   };
 

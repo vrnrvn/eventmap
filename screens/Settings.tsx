@@ -1,16 +1,17 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useFocusEffect } from 'expo-router';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Switch,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -22,6 +23,7 @@ import { businessesService } from '@/services/businesses';
 import { eventsService } from '@/services/events';
 import { Input } from '@/components/Input';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
+import { businessLocationStore } from '@/stores/businessLocationStore';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
@@ -36,9 +38,10 @@ import {
   Tag,
   AtSign,
   Navigation,
-  Save,
   Check,
   Image as ImageIcon,
+  Shield,
+  FileText,
 } from 'lucide-react-native';
 
 const Palette = {
@@ -85,10 +88,19 @@ export default function SettingsScreen() {
 
   const [userForm, setUserForm] = useState({
     name: '',
+    bio: '',
     hobbies: '',
+    instagram: '',
+    facebook: '',
     city: '',
     lat: null as number | null,
     lng: null as number | null,
+  });
+
+  const [privacyForm, setPrivacyForm] = useState({
+    showProfileToOthers: true,
+    showAttendancePublicly: true,
+    showFutureEvents: true,
   });
 
   const [businessForm, setBusinessForm] = useState({
@@ -98,20 +110,46 @@ export default function SettingsScreen() {
     address: '',
     lat: 0,
     lng: 0,
+    googleReviewsUrl: '',
+    instagram: '',
+    facebook: '',
     venuePhotos: [] as ImageAsset[],
   });
   const originalVenuePhotoIds = useRef<string[]>([]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  useFocusEffect(
+    useCallback(() => {
+      const result = businessLocationStore.consume();
+      if (result) {
+        setBusinessForm((p) => ({
+          ...p,
+          address: result.formattedAddress,
+          lat: result.lat,
+          lng: result.lng,
+        }));
+      }
+    }, [])
+  );
+
   useEffect(() => {
     if (profile) {
+      const handles = (profile.social_handles as { instagram?: string; facebook?: string } | null) ?? {};
       setUserForm({
         name: profile.name ?? '',
+        bio: profile.bio ?? '',
         hobbies: profile.hobbies ?? '',
+        instagram: handles.instagram ?? '',
+        facebook: handles.facebook ?? '',
         city: profile.city ?? '',
         lat: profile.lat ?? null,
         lng: profile.lng ?? null,
+      });
+      setPrivacyForm({
+        showProfileToOthers: !(profile.is_profile_private ?? false),
+        showAttendancePublicly: profile.show_attendance_publicly ?? true,
+        showFutureEvents: profile.show_future_events ?? true,
       });
     }
   }, [profile]);
@@ -134,6 +172,7 @@ export default function SettingsScreen() {
         originalVenuePhotoIds.current = venuePhotos
           .map((img) => img.photoId)
           .filter(Boolean) as string[];
+        const handles = (userBusiness.social_handles as { instagram?: string; facebook?: string } | null) ?? {};
         setBusinessForm({
           name: userBusiness.name ?? '',
           category: userBusiness.category ?? '',
@@ -141,6 +180,9 @@ export default function SettingsScreen() {
           address: userBusiness.address ?? '',
           lat: userBusiness.lat ?? 0,
           lng: userBusiness.lng ?? 0,
+          googleReviewsUrl: userBusiness.google_reviews_url ?? '',
+          instagram: handles.instagram ?? '',
+          facebook: handles.facebook ?? '',
           venuePhotos,
         });
       };
@@ -174,7 +216,12 @@ export default function SettingsScreen() {
     try {
       await profilesService.updateProfile(user.id, {
         name: userForm.name.trim(),
+        bio: userForm.bio.trim() || null,
         hobbies: userForm.hobbies.trim() || null,
+        social_handles: {
+          instagram: userForm.instagram.trim() || undefined,
+          facebook: userForm.facebook.trim() || undefined,
+        },
         city: userForm.city.trim() || null,
         lat: userForm.lat,
         lng: userForm.lng,
@@ -199,6 +246,11 @@ export default function SettingsScreen() {
         address: businessForm.address.trim(),
         lat: businessForm.lat,
         lng: businessForm.lng,
+        google_reviews_url: businessForm.googleReviewsUrl.trim() || null,
+        social_handles: {
+          instagram: businessForm.instagram.trim() || undefined,
+          facebook: businessForm.facebook.trim() || undefined,
+        },
       });
 
       const { venuePhotos } = businessForm;
@@ -247,6 +299,73 @@ export default function SettingsScreen() {
       setSaving(null);
     }
   };
+
+  const handlePrivacyToggle = async (
+    field: 'showProfileToOthers' | 'showAttendancePublicly' | 'showFutureEvents',
+    value: boolean
+  ) => {
+    if (!user) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const next = { ...privacyForm, [field]: value };
+    setPrivacyForm(next);
+    try {
+      await profilesService.updateProfile(user.id, {
+        is_profile_private: !next.showProfileToOthers,
+        show_attendance_publicly: next.showAttendancePublicly,
+        show_future_events: next.showFutureEvents,
+      });
+      await refreshProfile();
+      if (field === 'showProfileToOthers' && !value) {
+        Alert.alert(
+          'Profile is now private',
+          "Others won't be able to see your profile or find you in search."
+        );
+      }
+    } catch (e) {
+      setPrivacyForm(privacyForm);
+      Alert.alert('Error', 'Failed to update privacy settings. Please try again.');
+    }
+  };
+
+  const userFormDirty = useMemo(() => {
+    if (!profile) return false;
+    const handles = (profile.social_handles as { instagram?: string; facebook?: string } | null) ?? {};
+    return (
+      (userForm.name ?? '') !== (profile.name ?? '') ||
+      (userForm.bio ?? '') !== (profile.bio ?? '') ||
+      (userForm.hobbies ?? '') !== (profile.hobbies ?? '') ||
+      (userForm.instagram ?? '') !== (handles.instagram ?? '') ||
+      (userForm.facebook ?? '') !== (handles.facebook ?? '') ||
+      (userForm.city ?? '') !== (profile.city ?? '') ||
+      userForm.lat !== (profile.lat ?? null) ||
+      userForm.lng !== (profile.lng ?? null)
+    );
+  }, [profile, userForm]);
+
+  const businessFormDirty = useMemo(() => {
+    if (!userBusiness) return false;
+    const handles = (userBusiness.social_handles as { instagram?: string; facebook?: string } | null) ?? {};
+    const currentPhotoIds = businessForm.venuePhotos
+      .map((img) => img.photoId)
+      .filter(Boolean) as string[];
+    const originalIds = originalVenuePhotoIds.current;
+    const photosChanged =
+      currentPhotoIds.length !== originalIds.length ||
+      currentPhotoIds.some((id) => !originalIds.includes(id)) ||
+      originalIds.some((id) => !currentPhotoIds.includes(id));
+    return (
+      (businessForm.name ?? '') !== (userBusiness.name ?? '') ||
+      (businessForm.category ?? '') !== (userBusiness.category ?? '') ||
+      (businessForm.contactEmail ?? '') !== (userBusiness.contact_email ?? '') ||
+      (businessForm.address ?? '') !== (userBusiness.address ?? '') ||
+      businessForm.lat !== (userBusiness.lat ?? 0) ||
+      businessForm.lng !== (userBusiness.lng ?? 0) ||
+      (businessForm.googleReviewsUrl ?? '') !== (userBusiness.google_reviews_url ?? '') ||
+      (businessForm.instagram ?? '') !== (handles.instagram ?? '') ||
+      (businessForm.facebook ?? '') !== (handles.facebook ?? '') ||
+      photosChanged
+    );
+  }, [userBusiness, businessForm]);
 
   const handleUnsubscribePremium = async () => {
     if (!userBusiness || !isPremium) return;
@@ -298,7 +417,43 @@ export default function SettingsScreen() {
             {isBizMode ? 'Business Settings' : 'Settings'}
           </Text>
         </View>
-        <View style={styles.headerSpacer} />
+        {isBizMode && userBusiness ? (
+          <TouchableOpacity
+            onPress={handleSaveBusiness}
+            disabled={saving !== null || !businessFormDirty}
+            activeOpacity={0.7}
+            style={styles.headerSaveWrap}
+          >
+            <Text
+              style={[
+                styles.headerSaveText,
+                {
+                  color: businessFormDirty && saving === null ? accentColor : Colors.text.tertiary,
+                },
+              ]}
+            >
+              {saving === 'business' ? '...' : 'Save'}
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            onPress={handleSaveUser}
+            disabled={saving !== null || !userFormDirty}
+            activeOpacity={0.7}
+            style={styles.headerSaveWrap}
+          >
+            <Text
+              style={[
+                styles.headerSaveText,
+                {
+                  color: userFormDirty && saving === null ? accentColor : Colors.text.tertiary,
+                },
+              ]}
+            >
+              {saving === 'user' ? '...' : 'Save'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <KeyboardAvoidingView
@@ -416,29 +571,108 @@ export default function SettingsScreen() {
 
                 <View style={styles.fieldSeparator} />
 
+                {/* Google Reviews URL */}
+                <View style={styles.fieldRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <FileText size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Input
+                      label="Google Reviews URL"
+                      value={businessForm.googleReviewsUrl}
+                      onChangeText={(t) =>
+                        setBusinessForm((p) => ({ ...p, googleReviewsUrl: t }))
+                      }
+                      placeholder="https://g.page/your-business/review"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.fieldSeparator} />
+
+                {/* Instagram */}
+                <View style={styles.fieldRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <AtSign size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Input
+                      label="Instagram"
+                      value={businessForm.instagram}
+                      onChangeText={(t) =>
+                        setBusinessForm((p) => ({ ...p, instagram: t }))
+                      }
+                      placeholder="@username or username"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.fieldSeparator} />
+
+                {/* Facebook */}
+                <View style={styles.fieldRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <AtSign size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Input
+                      label="Facebook"
+                      value={businessForm.facebook}
+                      onChangeText={(t) =>
+                        setBusinessForm((p) => ({ ...p, facebook: t }))
+                      }
+                      placeholder="Username or page URL"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.fieldSeparator} />
+
                 {/* Business Address */}
                 <View style={styles.fieldRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
                     <Navigation size={16} color={accentColor} />
                   </View>
                   <View style={styles.fieldContent}>
-                    <AddressSearchInput
-                      label="Business Location"
-                      value={businessForm.address}
-                      onChangeText={(t) =>
-                        setBusinessForm((p) => ({ ...p, address: t }))
+                    <Text style={styles.addressLabel}>Business Location</Text>
+                    <TouchableOpacity
+                      style={styles.addressTouchable}
+                      onPress={() =>
+                        router.push({
+                          pathname: '/business-location',
+                          params: {
+                            address: businessForm.address,
+                            lat: String(businessForm.lat),
+                            lng: String(businessForm.lng),
+                          },
+                        })
                       }
-                      onSelect={(r) =>
-                        setBusinessForm((p) => ({
-                          ...p,
-                          address: r.formattedAddress,
-                          lat: r.lat,
-                          lng: r.lng,
-                        }))
-                      }
-                      placeholder="Full business address"
-                      addressPrecision="full"
-                    />
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.addressTouchableRow}>
+                        <MapPin size={18} color={Colors.text.tertiary} />
+                        <Text
+                          style={[
+                            styles.addressTouchableText,
+                            !businessForm.address && styles.addressPlaceholder,
+                          ]}
+                          numberOfLines={2}
+                        >
+                          {businessForm.address || 'Tap to set location on map'}
+                        </Text>
+                      </View>
+                      {(businessForm.lat !== 0 || businessForm.lng !== 0) && (
+                        <Text style={styles.addressCoords}>
+                          {businessForm.lat.toFixed(4)}, {businessForm.lng.toFixed(4)}
+                        </Text>
+                      )}
+                    </TouchableOpacity>
                   </View>
                 </View>
 
@@ -464,34 +698,6 @@ export default function SettingsScreen() {
                   </View>
                 </View>
               </View>
-
-              {/* Save business */}
-              <TouchableOpacity
-                style={styles.saveWrap}
-                onPress={handleSaveBusiness}
-                disabled={saving !== null}
-                activeOpacity={0.85}
-              >
-                <LinearGradient
-                  colors={
-                    saving === 'business'
-                      ? ['#5EEAD4', '#99F6E4']
-                      : accentGradient
-                  }
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.saveGradient}
-                >
-                  {saving === 'business' ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <>
-                      <Save size={16} color="#FFFFFF" />
-                      <Text style={styles.saveText}>Save Business</Text>
-                    </>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
 
               {/* Unsubscribe from premium – only for premium business users */}
               {isBizMode && userBusiness && isPremium && (
@@ -536,6 +742,25 @@ export default function SettingsScreen() {
 
                 <View style={styles.fieldSeparator} />
 
+                {/* About me */}
+                <View style={styles.fieldRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <FileText size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Input
+                      label="About me"
+                      value={userForm.bio}
+                      onChangeText={(t) => setUserForm((p) => ({ ...p, bio: t }))}
+                      placeholder="A short bio about yourself"
+                      multiline
+                      numberOfLines={3}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.fieldSeparator} />
+
                 {/* Hobbies */}
                 <View style={styles.fieldRow}>
                   <View style={styles.fieldIcon}>
@@ -550,6 +775,44 @@ export default function SettingsScreen() {
                       }
                       placeholder="e.g. hiking, music, cooking"
                       error={errors.hobbies}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.fieldSeparator} />
+
+                {/* Instagram */}
+                <View style={styles.fieldRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <AtSign size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Input
+                      label="Instagram"
+                      value={userForm.instagram}
+                      onChangeText={(t) => setUserForm((p) => ({ ...p, instagram: t }))}
+                      placeholder="@username or username"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.fieldSeparator} />
+
+                {/* Facebook */}
+                <View style={styles.fieldRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <AtSign size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Input
+                      label="Facebook"
+                      value={userForm.facebook}
+                      onChangeText={(t) => setUserForm((p) => ({ ...p, facebook: t }))}
+                      placeholder="Username or profile URL"
+                      autoCapitalize="none"
+                      autoCorrect={false}
                     />
                   </View>
                 </View>
@@ -600,33 +863,73 @@ export default function SettingsScreen() {
                 </View>
               </View>
 
-              {/* Save user */}
-              <TouchableOpacity
-                style={styles.saveWrap}
-                onPress={handleSaveUser}
-                disabled={saving !== null}
-                activeOpacity={0.85}
-              >
-                <LinearGradient
-                  colors={
-                    saving === 'user'
-                      ? ['#A5B4FC', '#C4B5FD']
-                      : accentGradient
-                  }
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.saveGradient}
-                >
-                  {saving === 'user' ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <>
-                      <Save size={16} color="#FFFFFF" />
-                      <Text style={styles.saveText}>Save Profile</Text>
-                    </>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
+              {/* ── Privacy & Visibility Section ── */}
+              <View style={[styles.sectionLabelRow, { marginTop: 32 }]}>
+                <Text style={styles.sectionLabel}>Privacy & Visibility</Text>
+              </View>
+              <View style={styles.card}>
+                <View style={styles.privacyRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Shield size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Show my profile to others</Text>
+                    <Text style={styles.privacyDesc}>
+                      Let others view your profile, bio, and social links
+                    </Text>
+                  </View>
+                  <Switch
+                    value={privacyForm.showProfileToOthers}
+                    onValueChange={(v) => handlePrivacyToggle('showProfileToOthers', v)}
+                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    thumbColor={
+                      privacyForm.showProfileToOthers ? Colors.primary : Colors.background.secondary
+                    }
+                  />
+                </View>
+                <View style={styles.fieldSeparator} />
+                <View style={styles.privacyRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Shield size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Allow others to see which events I attend?</Text>
+                    <Text style={styles.privacyDesc}>
+                      Show your name in the "Who's Going" list when you RSVP
+                    </Text>
+                  </View>
+                  <Switch
+                    value={privacyForm.showAttendancePublicly}
+                    onValueChange={(v) => handlePrivacyToggle('showAttendancePublicly', v)}
+                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    thumbColor={
+                      privacyForm.showAttendancePublicly
+                        ? Colors.primary
+                        : Colors.background.secondary
+                    }
+                  />
+                </View>
+                <View style={styles.fieldSeparator} />
+                <View style={styles.privacyRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Shield size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Show my upcoming events on my profile?</Text>
+                    <Text style={styles.privacyDesc}>
+                      Display events you're planning to attend on your public profile
+                    </Text>
+                  </View>
+                  <Switch
+                    value={privacyForm.showFutureEvents}
+                    onValueChange={(v) => handlePrivacyToggle('showFutureEvents', v)}
+                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    thumbColor={
+                      privacyForm.showFutureEvents ? Colors.primary : Colors.background.secondary
+                    }
+                  />
+                </View>
+              </View>
             </>
           )}
         </ScrollView>
@@ -681,8 +984,16 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
   },
-  headerSpacer: {
-    width: 40,
+  headerSaveWrap: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    minWidth: 48,
+    alignItems: 'flex-end',
+  },
+  headerSaveText: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
   },
 
   keyboardView: {
@@ -777,6 +1088,31 @@ const styles = StyleSheet.create({
     marginLeft: 66,
   },
 
+  /* ── Privacy rows ── */
+  privacyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 14,
+  },
+  privacyContent: {
+    flex: 1,
+  },
+  privacyTitle: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.text.primary,
+    marginBottom: 2,
+  },
+  privacyDesc: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+    lineHeight: 18,
+  },
+
   /* ── Category chips ── */
   catContainer: {
     flex: 1,
@@ -837,6 +1173,42 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.semibold,
   },
 
+  /* ── Address touchable ── */
+  addressLabel: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.text.primary,
+    marginBottom: Spacing.xs,
+  },
+  addressTouchable: {
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 4,
+    backgroundColor: Colors.background.primary,
+  },
+  addressTouchableRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+  },
+  addressTouchableText: {
+    fontSize: Typography.sizes.md,
+    color: Colors.text.primary,
+    flex: 1,
+  },
+  addressPlaceholder: {
+    color: Colors.text.tertiary,
+  },
+  addressCoords: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamilies.mono,
+    color: Colors.text.tertiary,
+    marginTop: 4,
+  },
+
   /* ── Error ── */
   errorText: {
     fontSize: Typography.sizes.xs,
@@ -844,36 +1216,6 @@ const styles = StyleSheet.create({
     color: Colors.error,
     marginTop: 4,
     marginLeft: 4,
-  },
-
-  /* ── Save button ── */
-  saveWrap: {
-    marginTop: 16,
-    borderRadius: 16,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: Palette.gradientStart,
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.25,
-        shadowRadius: 14,
-      },
-      android: { elevation: 6 },
-    }),
-  },
-  saveGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 16,
-  },
-  saveText: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: '#FFFFFF',
-    letterSpacing: 0.3,
   },
 
   unsubscribeWrap: {
