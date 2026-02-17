@@ -27,6 +27,7 @@
     "@teovilla/react-native-web-maps": "^0.9.5",
     "base64-arraybuffer": "^1.0.2",
     "expo": "^54.0.10",
+    "expo-auth-session": "~7.0.10",
     "expo-blur": "~15.0.7",
     "expo-camera": "~17.0.8",
     "expo-constants": "~18.0.9",
@@ -64,6 +65,7 @@
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "~19.1.10",
+    "baseline-browser-mapping": "^2.9.19",
     "typescript": "~5.9.2"
   }
 }

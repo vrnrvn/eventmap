@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,11 @@ import { EventDetails } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { ImageViewer } from '@/components/ImageViewer';
 import { Avatar } from '@/components/Avatar';
+import {
+  AttendeesBottomSheet,
+  type AttendeesBottomSheetHandle,
+} from '@/components/AttendeesBottomSheet';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ReviewCard } from '@/components/ReviewCard';
 import { ReviewForm } from '@/components/ReviewForm';
@@ -56,6 +61,7 @@ export default function EventDetail() {
   const [averageRating, setAverageRating] = useState({ average: 0, count: 0 });
   const [userReview, setUserReview] = useState<{ rating: number; text: string } | null>(null);
   const [showReviewForm, setShowReviewForm] = useState(false);
+  const attendeesSheetRef = useRef<AttendeesBottomSheetHandle>(null);
 
   const isOwner = userBusiness && details?.event.business_id === userBusiness.id;
 
@@ -362,6 +368,7 @@ export default function EventDetail() {
         <View style={styles.content}>
           <Text style={styles.title}>{event.title}</Text>
           <View style={styles.categoryBadge}>
+            <CategoryIcon category={category.slug} size="sm" variant="pill" />
             <Text style={styles.categoryText}>{category.label}</Text>
           </View>
 
@@ -557,10 +564,29 @@ export default function EventDetail() {
           )}
 
           <View style={styles.statsRow}>
-            <View style={styles.stat}>
-              <Users size={16} color={Colors.text.tertiary} />
-              <Text style={styles.statText}>{details.rsvp_count} going</Text>
-            </View>
+            <TouchableOpacity
+              style={[
+                styles.stat,
+                details.rsvp_count > 0 && styles.statActionable,
+              ]}
+              onPress={() => attendeesSheetRef.current?.present()}
+              activeOpacity={0.7}
+            >
+              <Users
+                size={16}
+                color={details.rsvp_count > 0 ? Colors.primary : Colors.text.tertiary}
+              />
+              <Text
+                style={[
+                  styles.statText,
+                  details.rsvp_count > 0 && styles.statTextActionable,
+                ]}
+              >
+                {details.rsvp_count > 0
+                  ? `See who's going (${details.rsvp_count})`
+                  : `${details.rsvp_count} going`}
+              </Text>
+            </TouchableOpacity>
             <View style={styles.stat}>
               <Heart size={16} color={Colors.text.tertiary} />
               <Text style={styles.statText}>{details.save_count} saved</Text>
@@ -632,6 +658,13 @@ export default function EventDetail() {
           </View>
         </View>
       </ScrollView>
+      {id && (
+        <AttendeesBottomSheet
+          ref={attendeesSheetRef}
+          eventId={id}
+          rsvpCount={details.rsvp_count}
+        />
+      )}
     </View>
   );
 }
@@ -721,7 +754,10 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   categoryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     alignSelf: 'flex-start',
+    gap: Spacing.sm,
     backgroundColor: Colors.background.secondary,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.xs,
@@ -928,9 +964,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.xs,
   },
+  statActionable: {
+    backgroundColor: Colors.primary + '18',
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.primary + '40',
+  },
   statText: {
     fontSize: Typography.sizes.sm,
     color: Colors.text.tertiary,
+  },
+  statTextActionable: {
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
   },
   reviewsSection: {
     marginTop: Spacing.xl,

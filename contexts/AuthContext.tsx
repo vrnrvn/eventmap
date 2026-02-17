@@ -14,6 +14,7 @@ type AuthContextType = {
   isBanned: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, name: string) => Promise<{ user: User } | null>;
+  signInWithOAuth: (provider: 'google' | 'facebook') => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 };
@@ -89,6 +90,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return null;
   };
 
+  const signInWithOAuth = async (provider: 'google' | 'facebook') => {
+    const data = await authService.signInWithOAuth(provider);
+    setSession(data.session);
+    setUser(data.user);
+    if (data.user) {
+      const name =
+        data.user.user_metadata?.full_name ??
+        data.user.user_metadata?.name ??
+        data.user.email?.split('@')[0] ??
+        '';
+      await profilesService.ensureProfileExists(data.user.id, name);
+      await loadProfile(data.user.id);
+    }
+  };
+
   const signOut = async () => {
     await authService.signOut();
     setSession(null);
@@ -116,6 +132,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isBanned,
         signIn,
         signUp,
+        signInWithOAuth,
         signOut,
         refreshProfile,
       }}
