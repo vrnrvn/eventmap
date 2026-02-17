@@ -76,13 +76,14 @@ export const BorderRadius = {
   round: 9999,
 };
 
-/** Syne – headings, display, editorial */
-export const SyneFont = {
-  regular: 'Syne_400Regular',
-  medium: 'Syne_500Medium',
-  semibold: 'Syne_600SemiBold',
-  bold: 'Syne_700Bold',
-  extrabold: 'Syne_800ExtraBold',
+
+/** Plus Jakarta Sans – headings, display (modern, neutral) */
+export const PlusJakartaSansFont = {
+  regular: 'PlusJakartaSans_400Regular',
+  medium: 'PlusJakartaSans_500Medium',
+  semibold: 'PlusJakartaSans_600SemiBold',
+  bold: 'PlusJakartaSans_700Bold',
+  extrabold: 'PlusJakartaSans_800ExtraBold',
 } as const;
 
 /** DM Sans – body, UI, readable */
@@ -96,8 +97,8 @@ export const DMSansFont = {
 export const Typography = {
   fontFamily: DMSansFont.regular,
   fontFamilies: DMSansFont,
-  displayFont: SyneFont.bold,
-  displayFontFamilies: SyneFont,
+  displayFont: PlusJakartaSansFont.bold,
+  displayFontFamilies: PlusJakartaSansFont,
   sizes: {
     xs: 12,
     sm: 14,

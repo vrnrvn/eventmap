@@ -5,12 +5,12 @@ import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import {
   useFonts,
-  Syne_400Regular,
-  Syne_500Medium,
-  Syne_600SemiBold,
-  Syne_700Bold,
-  Syne_800ExtraBold,
-} from '@expo-google-fonts/syne';
+  PlusJakartaSans_400Regular,
+  PlusJakartaSans_500Medium,
+  PlusJakartaSans_600SemiBold,
+  PlusJakartaSans_700Bold,
+  PlusJakartaSans_800ExtraBold,
+} from '@expo-google-fonts/plus-jakarta-sans';
 import {
   DMSans_400Regular,
   DMSans_500Medium,
@@ -35,11 +35,11 @@ export default function RootLayout() {
   useFrameworkReady();
 
   const [fontsLoaded, fontError] = useFonts({
-    Syne_400Regular,
-    Syne_500Medium,
-    Syne_600SemiBold,
-    Syne_700Bold,
-    Syne_800ExtraBold,
+    PlusJakartaSans_400Regular,
+    PlusJakartaSans_500Medium,
+    PlusJakartaSans_600SemiBold,
+    PlusJakartaSans_700Bold,
+    PlusJakartaSans_800ExtraBold,
     DMSans_400Regular,
     DMSans_500Medium,
     DMSans_600SemiBold,
