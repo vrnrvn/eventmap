@@ -385,11 +385,11 @@ export default function DiscoverScreen() {
             <Text style={styles.eventTitle} numberOfLines={2}>
               {item.title}
             </Text>
-            {item.is_premium && (
+            {/* {item.is_premium && (
               <View style={styles.premiumBadge}>
                 <Text style={styles.premiumText}>★</Text>
               </View>
-            )}
+            )} */}
           </View>
           <View style={styles.eventMeta}>
             <View style={styles.metaRow}>

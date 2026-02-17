@@ -44,7 +44,7 @@ export const AttendeesBottomSheet = forwardRef<
     ? attendees.filter(
         (a) =>
           a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (a.bio && a.bio.toLowerCase().includes(searchQuery.toLowerCase()))
+          (!a.is_anonymous && a.bio && a.bio.toLowerCase().includes(searchQuery.toLowerCase()))
       )
     : attendees;
 
@@ -79,15 +79,16 @@ export const AttendeesBottomSheet = forwardRef<
   const renderItem = ({ item }: { item: PublicAttendee }) => (
     <TouchableOpacity
       style={styles.row}
-      onPress={() => handleAttendeePress(item.id)}
-      activeOpacity={0.7}
+      onPress={() => !item.is_anonymous && handleAttendeePress(item.id)}
+      activeOpacity={item.is_anonymous ? 1 : 0.7}
+      disabled={item.is_anonymous}
     >
       <Avatar imageUrl={item.avatar_url} name={item.name} size={44} />
       <View style={styles.rowText}>
         <Text style={styles.name} numberOfLines={1}>
           {item.name}
         </Text>
-        {item.bio ? (
+        {item.bio && !item.is_anonymous ? (
           <Text style={styles.bio}>{item.bio}</Text>
         ) : null}
       </View>
@@ -107,17 +108,6 @@ export const AttendeesBottomSheet = forwardRef<
       return (
         <View style={styles.centerState}>
           <Text style={styles.errorText}>{error}</Text>
-        </View>
-      );
-    }
-    if (rsvpCount > 0 && attendees.length === 0) {
-      return (
-        <View style={styles.centerState}>
-          <Users size={48} color={Colors.text.tertiary} />
-          <Text style={styles.emptyTitle}>
-            {rsvpCount} {rsvpCount === 1 ? 'person is' : 'people are'} going
-          </Text>
-          <Text style={styles.emptySubtitle}>(staying private)</Text>
         </View>
       );
     }

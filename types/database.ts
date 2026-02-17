@@ -27,6 +27,8 @@ export type PublicAttendee = {
   name: string;
   avatar_url: string | null;
   bio: string | null;
+  /** When true, user chose to hide; shown as "Anonymous", not tappable */
+  is_anonymous?: boolean;
 };
 
 export type SubscriptionTier = 'free' | 'premium';

@@ -42,9 +42,11 @@ import {
   CheckCircle2,
   Star,
   Flag,
+  Repeat,
 } from 'lucide-react-native';
 import { EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { complaintsService } from '@/services/complaints';
+import { getNextOccurrences, getRecurrenceLabel } from '@/utils/recurrence';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -242,8 +244,15 @@ export default function EventDetail() {
 
   const formatDate = (dateString: string) =>
     new Date(dateString).toLocaleDateString('en-US', {
-      weekday: 'long',
-      month: 'long',
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  const formatDateTime = (dateString: string) =>
+    new Date(dateString).toLocaleString('en-US', {
+      weekday: 'short',
+      month: 'short',
       day: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
@@ -411,6 +420,22 @@ export default function EventDetail() {
               {event.end_datetime && ` – ${formatDate(event.end_datetime)}`}
             </Text>
           </View>
+
+          {event.is_recurring && event.recurrence_pattern && (
+            <View style={styles.recurrenceSection}>
+              <View style={styles.recurrenceHeader}>
+                <Repeat size={18} color={Colors.primary} />
+                <Text style={styles.recurrenceSectionTitle}>
+                  {getRecurrenceLabel(event.recurrence_pattern)} – Happens again
+                </Text>
+              </View>
+              {getNextOccurrences(event, 5).map((d, i) => (
+                <Text key={i} style={styles.recurrenceDate}>
+                  {formatDateTime(d.toISOString())}
+                </Text>
+              ))}
+            </View>
+          )}
 
           {event.address && (
             <View style={styles.metaRow}>
@@ -810,6 +835,33 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: Typography.sizes.md,
     color: Colors.text.primary,
+  },
+  recurrenceSection: {
+    marginBottom: Spacing.lg,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    backgroundColor: Colors.background.secondary,
+    borderRadius: BorderRadius.md,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.primary,
+  },
+  recurrenceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  recurrenceSectionTitle: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.text.primary,
+  },
+  recurrenceDate: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.text.secondary,
+    marginTop: Spacing.xs,
+    marginLeft: 26,
   },
   description: {
     fontSize: Typography.sizes.md,
