@@ -39,6 +39,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { router } from 'expo-router';
 import { Input } from '@/components/Input';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { GoogleMapView } from '@/components/GoogleMapView';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import {
@@ -386,6 +387,7 @@ export default function CreateScreen() {
                     }
                     activeOpacity={0.7}
                   >
+                    <CategoryIcon category={c.slug} size="sm" variant="pill" />
                     <Text
                       style={[
                         styles.catChipText,
@@ -820,6 +822,9 @@ const styles = StyleSheet.create({
     paddingRight: 16,
   },
   catChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 9,
     borderRadius: 20,

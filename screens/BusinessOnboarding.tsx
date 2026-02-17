@@ -18,6 +18,7 @@ import { geocodingService } from '@/services/geocoding';
 import { useApp } from '@/contexts/AppContext';
 import { Input } from '@/components/Input';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { GoogleMapView } from '@/components/GoogleMapView';
 import { Avatar } from '@/components/Avatar';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
@@ -209,6 +210,7 @@ export default function BusinessOnboarding() {
                       setFormData({ ...formData, category })
                     }
                   >
+                    <CategoryIcon category={category} size="sm" variant="pill" />
                     <Text
                       style={[
                         styles.categoryChipText,
@@ -405,6 +407,9 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.round,

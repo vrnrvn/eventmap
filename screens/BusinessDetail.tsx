@@ -23,6 +23,7 @@ import { reviewsService, type ReviewWithProfile } from '@/services/reviews';
 import { Business, Event } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { Avatar } from '@/components/Avatar';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ReviewCard } from '@/components/ReviewCard';
 import { GoogleMapView } from '@/components/GoogleMapView';
@@ -34,7 +35,6 @@ import {
   ExternalLink,
   Heart,
   Calendar,
-  Building2,
   Flag,
 } from 'lucide-react-native';
 import { complaintsService } from '@/services/complaints';
@@ -235,7 +235,7 @@ export default function BusinessDetail() {
           <Avatar imageUrl={business.logo_url} name={business.name} size={100} />
           <Text style={styles.businessName}>{business.name}</Text>
           <View style={styles.categoryBadge}>
-            <Building2 size={14} color={Colors.primary} />
+            <CategoryIcon category={business.category} size="sm" variant="pill" />
             <Text style={styles.categoryText}>{business.category}</Text>
           </View>
           {!isOwner && user && (
@@ -282,6 +282,7 @@ export default function BusinessDetail() {
                   lat: business.lat,
                   lng: business.lng,
                   title: business.name,
+                  categorySlug: getCategorySlug(business.category) ?? undefined,
                 },
               ]}
             />

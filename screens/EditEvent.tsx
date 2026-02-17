@@ -22,6 +22,7 @@ import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButt
 import { geocodingService } from '@/services/geocoding';
 import { eventsService } from '@/services/events';
 import { categoriesService } from '@/services/categories';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { Category, EventPhoto } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 
@@ -300,6 +301,7 @@ export default function EditEvent() {
               ]}
               onPress={() => setFormData((f) => ({ ...f, categoryId: c.id }))}
             >
+              <CategoryIcon category={c.slug} size="sm" variant="pill" />
               <Text
                 style={[
                   styles.categoryChipText,
@@ -502,6 +504,9 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.xs,
   },
   categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.round,

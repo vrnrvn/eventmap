@@ -1,6 +1,44 @@
+import * as WebBrowser from 'expo-web-browser';
+import * as AuthSession from 'expo-auth-session';
+import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import { supabase } from './supabase';
 
 export const authService = {
+  async signInWithOAuth(provider: 'google' | 'facebook') {
+    const redirectTo = AuthSession.makeRedirectUri();
+
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo,
+        skipBrowserRedirect: true,
+      },
+    });
+
+    if (error) throw error;
+    if (!data?.url) throw new Error('No OAuth URL returned');
+
+    const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+
+    if (result.type !== 'success' || !result.url) {
+      throw new Error('OAuth was cancelled or failed');
+    }
+
+    const { params, errorCode } = QueryParams.getQueryParams(result.url);
+
+    if (errorCode) throw new Error(errorCode);
+
+    const { access_token, refresh_token } = params;
+
+    if (!access_token) throw new Error('No access token in redirect');
+
+    const { data: sessionData, error: setError } =
+      await supabase.auth.setSession({ access_token, refresh_token });
+
+    if (setError) throw setError;
+    return sessionData;
+  },
+
   async signUp(email: string, password: string, name: string) {
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,

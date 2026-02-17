@@ -130,7 +130,7 @@ export function SearchOverlay({
   return (
     <Modal
       visible={visible}
-      animationType="fade"
+      animationType="none"
       transparent
       onRequestClose={handleClose}
     >

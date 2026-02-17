@@ -4,12 +4,14 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  Pressable,
   ActivityIndicator,
   Dimensions,
   Platform,
   Image,
+  ScrollView,
+  Modal,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 import { router } from 'expo-router';
 import * as Location from 'expo-location';
@@ -21,21 +23,28 @@ import { eventsService } from '@/services/events';
 import { categoriesService } from '@/services/categories';
 import { RankedEvent, Category } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
-import { getCategoryColor } from '@/constants/categories';
-import { Users, List, Repeat } from 'lucide-react-native';
+import { getCategoryIconColor } from '@/constants/categoryIcons';
+import { CategoryIcon } from '@/components/CategoryIcon';
+import { Users, List, Repeat, X, Heart } from 'lucide-react-native';
 import { EventmapFilter, EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView';
 import { EventCardCarousel } from '@/components/EventCardCarousel';
 import { Avatar } from '@/components/Avatar';
-import { SearchOverlay, SearchBarCollapsed } from '@/components/SearchOverlay';
+import { SearchOverlay } from '@/components/SearchOverlay';
 import { filterEventsByDateRange } from '@/utils/recurrence';
 import { bannersService, type AppBanner } from '@/services/banners';
+import { socialService } from '@/services/social';
 import { AppBannerCarousel } from '@/components/AppBannerCarousel';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const DEFAULT_CENTER = { lat: 37.7749, lng: -122.4194 };
-const SNAP_POINTS = ['12%', '50%', '95%'];
 const REGION_DEBOUNCE_MS = 500;
+const HEADER_HEIGHT_PX = SCREEN_HEIGHT * 0.15;
+
+function truncateText(text: string, limit = 50): string {
+  if (!text || text.length <= limit) return text;
+  return text.slice(0, limit).trim() + '...';
+}
 
 export default function DiscoverScreen() {
   const insets = useSafeAreaInsets();
@@ -46,8 +55,8 @@ export default function DiscoverScreen() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [showFilters, setShowFilters] = useState(false);
   const [showSearchOverlay, setShowSearchOverlay] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
   const [center, setCenter] = useState(DEFAULT_CENTER);
   const [mapCenter, setMapCenter] = useState(DEFAULT_CENTER);
   const [mapBounds, setMapBounds] = useState<{
@@ -57,6 +66,8 @@ export default function DiscoverScreen() {
   const [explicitMoveTrigger, setExplicitMoveTrigger] = useState(0);
   const [sheetIndex, setSheetIndex] = useState(0);
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
+  const [showFloatingCard, setShowFloatingCard] = useState(false);
+  const [savedEventIds, setSavedEventIds] = useState<Set<string>>(new Set());
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [banners, setBanners] = useState<AppBanner[]>([]);
 
@@ -249,24 +260,38 @@ export default function DiscoverScreen() {
     return events.filter((e) => isInBounds(e.lat, e.lng, mapBounds));
   }, [events, mapBounds]);
 
+  const activeEvent = useMemo(
+    () => (activeMarkerId ? visibleEvents.find((e) => e.id === activeMarkerId) ?? null : null),
+    [activeMarkerId, visibleEvents]
+  );
+
+  const handleSaveEvent = useCallback(async (eventId: string) => {
+    if (!profile) return;
+    const isSaved = savedEventIds.has(eventId);
+    try {
+      if (isSaved) {
+        await socialService.unsaveEvent(eventId);
+        setSavedEventIds((prev) => {
+          const next = new Set(prev);
+          next.delete(eventId);
+          return next;
+        });
+      } else {
+        await socialService.saveEvent(eventId);
+        setSavedEventIds((prev) => new Set(prev).add(eventId));
+      }
+    } catch {
+      // Ignore - user may need to sign in
+    }
+  }, [profile, savedEventIds]);
+
   const handleMarkerPress = useCallback(
     (eventId: string) => {
       setActiveMarkerId(eventId);
-      const index = visibleEvents.findIndex((e) => e.id === eventId);
-      if (index >= 0) {
-        isScrollingFromMapRef.current = true;
-        beginProgrammaticMove(1000);
-        flatListRef.current?.scrollToIndex({
-          index,
-          animated: true,
-          viewPosition: 0.5,
-        });
-        setTimeout(() => {
-          isScrollingFromMapRef.current = false;
-        }, 400);
-      }
+      setShowFloatingCard(true);
+      beginProgrammaticMove(1000);
     },
-    [visibleEvents, beginProgrammaticMove]
+    [beginProgrammaticMove]
   );
 
   const viewabilityCallbackRef = useRef<
@@ -281,6 +306,7 @@ export default function DiscoverScreen() {
         lastViewedIndexRef.current = first.index;
         const event = first.item;
         setActiveMarkerId(event.id);
+        setShowFloatingCard(false);
         beginProgrammaticMove(800);
         mapRef.current?.animateTo(event.lat, event.lng);
       }
@@ -306,6 +332,19 @@ export default function DiscoverScreen() {
       minute: '2-digit',
     });
   };
+
+  const headerHeight = useMemo(
+    () => HEADER_HEIGHT_PX,
+    []
+  );
+
+  const snapPoints = useMemo(
+    () => [
+      SCREEN_HEIGHT * 0.07,
+      SCREEN_HEIGHT - headerHeight,
+    ],
+    [headerHeight]
+  );
 
   const centerForMap = useMemo(
     () => mapCenter,
@@ -373,8 +412,11 @@ export default function DiscoverScreen() {
               </View>
             )}
           </View>
-          <View style={styles.categoryBadge}>
-            <Text style={styles.categoryText}>{item.category_label}</Text>
+          <View style={[styles.categoryBadge, { backgroundColor: `${getCategoryIconColor(item.category_slug)}18` }]}>
+            <CategoryIcon category={item.category_slug} size="sm" variant="minimal" />
+            <Text style={[styles.categoryText, { color: getCategoryIconColor(item.category_slug) }]}>
+              {item.category_label}
+            </Text>
           </View>
           <TouchableOpacity
             style={styles.businessRow}
@@ -393,34 +435,36 @@ export default function DiscoverScreen() {
     </Animated.View>
   );
 
+  const eventCountLabel = loading
+    ? 'Finding events near you...'
+    : visibleEvents.length > 100
+      ? '100+ events'
+      : `${visibleEvents.length} event${visibleEvents.length !== 1 ? 's' : ''}`;
+
   const renderListHeader = () => (
-    <>
-      <AppBannerCarousel banners={banners} />
-      <View style={styles.sheetHeader}>
-        {sheetIndex === 0 ? (
-          <TouchableOpacity
-            style={styles.pullUpPill}
-            onPress={() => bottomSheetRef.current?.snapToIndex(1)}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.pullUpText}>Pull up for events</Text>
-          </TouchableOpacity>
-        ) : (
+    <View style={styles.sheetHeader}>
+      {sheetIndex === 0 ? (
+        <TouchableOpacity
+          style={styles.pullUpPill}
+          onPress={() => bottomSheetRef.current?.snapToIndex(1)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.pullUpText}>{eventCountLabel}</Text>
+        </TouchableOpacity>
+      ) : (
+        <>
+          <AppBannerCarousel banners={banners} />
           <TouchableOpacity
             style={styles.showListRow}
-            onPress={() => bottomSheetRef.current?.snapToIndex(1)}
+            onPress={() => bottomSheetRef.current?.snapToIndex(0)}
             activeOpacity={0.7}
           >
             <List size={20} color={Colors.primary} />
-            <Text style={styles.sheetSummary}>
-              {loading
-                ? 'Finding events near you...'
-                : `${visibleEvents.length} event${visibleEvents.length !== 1 ? 's' : ''} in view`}
-            </Text>
+            <Text style={styles.sheetSummary}>{eventCountLabel}</Text>
           </TouchableOpacity>
-        )}
-      </View>
-    </>
+        </>
+      )}
+    </View>
   );
 
   return (
@@ -439,57 +483,152 @@ export default function DiscoverScreen() {
         />
       </View>
 
-      {/* ── Search Island with Logo ── */}
-      <View style={[styles.searchIslandWrapper, { top: insets.top + Spacing.md }]}>
-        <BlurView intensity={Platform.OS === 'ios' ? 60 : 80} tint="light" style={styles.searchIsland}>
-          <Image
-            source={require('@/assets/images/EMlogo.png')}
-            style={styles.searchIslandLogo}
-            resizeMode="contain"
+      {activeEvent && showFloatingCard && (
+        <>
+          <Pressable
+            style={styles.floatingCardBackdrop}
+            onPress={() => {
+              setActiveMarkerId(null);
+              setShowFloatingCard(false);
+            }}
           />
-          <SearchBarCollapsed
-            locationLabel={searchLocation?.label ?? null}
-            onPress={() => setShowSearchOverlay(true)}
-          />
-          <TouchableOpacity
-            style={styles.filterButton}
-            onPress={() => setShowFilters(!showFilters)}
+          <View
+            style={[styles.floatingCardWrapper, { bottom: insets.bottom + 20 }]}
+            pointerEvents="box-none"
           >
-            <EventmapFilter size={20} color={Colors.primary} />
+          <TouchableOpacity
+            style={styles.floatingCard}
+            onPress={() => router.push(`/event/${activeEvent.id}` as never)}
+            activeOpacity={1}
+          >
+            <View style={styles.floatingCardImageSection}>
+              {activeEvent.cover_image_url ? (
+                <Image
+                  source={{ uri: activeEvent.cover_image_url }}
+                  style={styles.floatingCardImage}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View style={[styles.floatingCardImage, styles.floatingCardPlaceholder]}>
+                  <Image
+                    source={require('@/assets/images/EMlogo.png')}
+                    style={styles.floatingCardPlaceholderLogo}
+                    resizeMode="contain"
+                  />
+                </View>
+              )}
+              <View style={styles.floatingCardActionsOverlay}>
+                <View style={styles.floatingCardBadge}>
+                  <Text style={styles.floatingCardBadgeText}>
+                    🔥 {activeEvent.rsvp_count} Going
+                  </Text>
+                </View>
+                <View style={styles.floatingCardActionPill}>
+                  <TouchableOpacity
+                    style={styles.floatingCardActionBtn}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleSaveEvent(activeEvent.id);
+                    }}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  >
+                    <Heart
+                      size={20}
+                      color={savedEventIds.has(activeEvent.id) ? Colors.primary : '#1a1a1a'}
+                      fill={savedEventIds.has(activeEvent.id) ? Colors.primary : 'transparent'}
+                    />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.floatingCardActionBtn}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setActiveMarkerId(null);
+                      setShowFloatingCard(false);
+                    }}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  >
+                    <X size={22} color="#1a1a1a" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+            <View style={styles.floatingCardWhitePanel}>
+              <View style={styles.floatingCardCategoryRow}>
+                <CategoryIcon category={activeEvent.category_slug} size="sm" />
+                <Text style={styles.floatingCardTitle} numberOfLines={2}>
+                  {activeEvent.title}
+                </Text>
+              </View>
+              <Text style={styles.floatingCardDescription} numberOfLines={1}>
+                {truncateText(activeEvent.description ?? '')}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+        </>
+      )}
+
+      {/* ── Fixed Header (Layer 3 - Control Center) ── */}
+      <View style={[styles.fixedHeader, { height: headerHeight, paddingTop: insets.top }]}>
+        <View style={styles.headerRow}>
+          <TouchableOpacity
+            style={styles.searchPill}
+            onPress={() => setShowSearchOverlay(true)}
+            activeOpacity={0.9}
+          >
+            <Text style={styles.searchPillText} numberOfLines={1}>
+              Events in area
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.filterIconButton}
+            onPress={() => setShowFilters(!showFilters)}
+            activeOpacity={0.8}
+          >
+            <EventmapFilter size={22} color={Colors.primary} />
             {selectedCategories.length > 0 && (
-              <View style={styles.filterBadge}>
-                <Text style={styles.filterBadgeText}>{selectedCategories.length}</Text>
+              <View style={styles.filterButtonBadge}>
+                <Text style={styles.filterButtonBadgeText}>{selectedCategories.length}</Text>
               </View>
             )}
           </TouchableOpacity>
-        </BlurView>
+        </View>
       </View>
 
-      <SearchOverlay
-        visible={showSearchOverlay}
-        onClose={() => setShowSearchOverlay(false)}
-        onSearch={handleSearchFromOverlay}
-        userLocation={userLocation}
-      />
-
-      {showFilters && (
-        <Animated.View
-          entering={FadeInDown.duration(220).springify().damping(18)}
-          style={[styles.filtersDropdown, { top: insets.top + Spacing.md + 56 }]}
-        >
-          <BlurView intensity={Platform.OS === 'ios' ? 60 : 80} tint="light" style={styles.filtersBlur}>
-            <View style={styles.filtersHeader}>
-              <Text style={styles.filtersTitle}>Categories</Text>
-              {selectedCategories.length > 0 && (
-                <TouchableOpacity onPress={clearFilters}>
-                  <Text style={styles.clearText}>Clear all</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+      <Modal
+        visible={showFilters}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowFilters(false)}
+      >
+        <View style={[styles.filtersPage, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+          <View style={styles.filtersPageHeader}>
+            <TouchableOpacity
+              onPress={() => setShowFilters(false)}
+              style={styles.filtersPageClose}
+              hitSlop={12}
+            >
+              <X size={24} color={Colors.text.primary} />
+            </TouchableOpacity>
+            <Text style={styles.filtersPageTitle}>Filters</Text>
+            {selectedCategories.length > 0 ? (
+              <TouchableOpacity onPress={clearFilters}>
+                <Text style={styles.clearText}>Clear all</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.filtersPageClose} />
+            )}
+          </View>
+          <ScrollView
+            style={styles.filtersPageContent}
+            contentContainerStyle={styles.filtersPageContentInner}
+            showsVerticalScrollIndicator={false}
+          >
+            <Text style={styles.filtersSectionTitle}>Categories</Text>
             <View style={styles.categoriesGrid}>
               {categories.map((category) => {
                 const isSelected = selectedCategories.includes(category.id);
-                const categoryColor = getCategoryColor(category.slug);
+                const categoryColor = getCategoryIconColor(category.slug);
                 return (
                   <TouchableOpacity
                     key={category.id}
@@ -502,6 +641,7 @@ export default function DiscoverScreen() {
                     ]}
                     onPress={() => toggleCategory(category.id)}
                   >
+                    <CategoryIcon category={category.slug} size="sm" />
                     <Text
                       style={[
                         styles.categoryChipText,
@@ -514,9 +654,16 @@ export default function DiscoverScreen() {
                 );
               })}
             </View>
-          </BlurView>
-        </Animated.View>
-      )}
+          </ScrollView>
+        </View>
+      </Modal>
+
+      <SearchOverlay
+        visible={showSearchOverlay}
+        onClose={() => setShowSearchOverlay(false)}
+        onSearch={handleSearchFromOverlay}
+        userLocation={userLocation}
+      />
 
       {loading && events.length === 0 && (
         <View style={styles.mapSearchingOverlay}>
@@ -525,27 +672,29 @@ export default function DiscoverScreen() {
         </View>
       )}
 
-      {sheetIndex === 2 && (
+      {sheetIndex === 1 && (
         <View style={styles.mapDimOverlay} pointerEvents="box-only" />
       )}
 
+      {!(activeEvent && showFloatingCard) && (
       <BottomSheet
         ref={bottomSheetRef}
         index={0}
-        snapPoints={SNAP_POINTS}
+        snapPoints={snapPoints}
+        topInset={headerHeight}
         enablePanDownToClose={false}
         handleIndicatorStyle={styles.handleIndicator}
         backgroundStyle={styles.sheetBackground}
         style={styles.sheetContainer}
         onChange={setSheetIndex}
       >
-        <BottomSheetFlatList
-          ref={flatListRef}
-          data={visibleEvents}
-          keyExtractor={(item: RankedEvent) => item.id}
-          renderItem={renderEventCard}
-          ListHeaderComponent={renderListHeader}
-          ListEmptyComponent={
+          <BottomSheetFlatList
+            ref={flatListRef}
+            data={visibleEvents}
+            keyExtractor={(item: RankedEvent) => item.id}
+            renderItem={renderEventCard}
+            ListHeaderComponent={renderListHeader}
+            ListEmptyComponent={
             loading ? (
               <View style={styles.loadingRow}>
                 <ActivityIndicator size="large" color={Colors.primary} />
@@ -591,6 +740,7 @@ export default function DiscoverScreen() {
           }}
         />
       </BottomSheet>
+      )}
     </View>
   );
 }
@@ -612,59 +762,52 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(28,28,28,0.25)',
     pointerEvents: 'box-only',
   },
-  searchIslandWrapper: {
+  fixedHeader: {
     position: 'absolute',
-    left: Spacing.md,
-    right: Spacing.md,
+    top: 0,
+    left: 0,
+    right: 0,
     zIndex: 30,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: Spacing.md,
+    paddingBottom: Spacing.md,
+    justifyContent: 'flex-end',
+    ...Shadows.sm,
   },
-  searchIsland: {
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
-    borderRadius: BorderRadius.round,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#1C1C1C',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.12,
-        shadowRadius: 16,
-      },
-      android: { elevation: 8 },
-    }),
   },
-  searchIslandLogo: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-  },
-  searchBar: {
+  searchPill: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.background.primary,
-    borderRadius: BorderRadius.round,
-    paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
-    ...Shadows.lg,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.background.secondary,
+    justifyContent: 'center',
+    minWidth: 0,
+    ...Shadows.sm,
   },
-  filterButton: {
+  searchPillText: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.secondary,
+  },
+  filterIconButton: {
     width: 44,
     height: 44,
     borderRadius: BorderRadius.lg,
-    backgroundColor: 'rgba(250,248,245,0.6)',
+    backgroundColor: Colors.background.secondary,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
     ...Shadows.sm,
   },
-  filterBadge: {
+  filterButtonBadge: {
     position: 'absolute',
-    top: 6,
-    right: 6,
+    top: 4,
+    right: 4,
     minWidth: 18,
     height: 18,
     borderRadius: 9,
@@ -673,33 +816,50 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
-  filterBadgeText: {
+  filterButtonBadgeText: {
     fontSize: 10,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.inverse,
   },
-  filtersDropdown: {
-    position: 'absolute',
-    left: Spacing.md,
-    right: Spacing.md,
-    zIndex: 20,
-    borderRadius: BorderRadius.xl,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#1C1C1C',
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.14,
-        shadowRadius: 20,
-      },
-      android: { elevation: 12 },
-    }),
+  filtersPage: {
+    flex: 1,
+    backgroundColor: Colors.background.primary,
   },
-  filtersBlur: {
-    borderRadius: BorderRadius.xl,
+  filtersPageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border.light,
+    backgroundColor: '#FFFFFF',
+  },
+  filtersPageTitle: {
+    fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.text.primary,
+  },
+  filtersPageClose: {
+    width: 40,
+    alignItems: 'flex-start',
+  },
+  filtersPageContent: {
+    flex: 1,
+  },
+  filtersPageContentInner: {
     padding: Spacing.lg,
-    overflow: 'hidden',
+    paddingBottom: Spacing.xxl,
+  },
+  filtersSectionTitle: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.text.secondary,
+    marginBottom: Spacing.md,
+    textTransform: 'uppercase',
   },
   mapSearchingOverlay: {
     position: 'absolute',
@@ -720,13 +880,12 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
   },
   sheetContainer: {
-    marginHorizontal: 12,
     overflow: 'visible',
   },
   sheetBackground: {
-    backgroundColor: 'rgba(250,248,245,0.85)',
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     overflow: 'hidden',
     ...Platform.select({
       ios: {
@@ -742,18 +901,126 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border.medium,
     width: 48,
   },
-  sheetHeader: {
+  floatingCardBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 99,
+  },
+  floatingCardWrapper: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    zIndex: 100,
+  },
+  floatingCard: {
+    height: SCREEN_HEIGHT * 0.35,
+    flexDirection: 'column',
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#1C1C1C',
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.3,
+        shadowRadius: 24,
+      },
+      android: { elevation: 20 },
+    }),
+  },
+  floatingCardImageSection: {
+    flex: 7,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  floatingCardImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
+  },
+  floatingCardPlaceholder: {
+    backgroundColor: Colors.background.tertiary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  floatingCardPlaceholderLogo: {
+    width: 64,
+    height: 64,
+    opacity: 0.5,
+  },
+  floatingCardActionsOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: Spacing.md,
+  },
+  floatingCardBadge: {
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.sm,
+    borderRadius: BorderRadius.round,
+  },
+  floatingCardBadgeText: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.text.primary,
+  },
+  floatingCardActionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  floatingCardActionBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.95)',
+  },
+  floatingCardWhitePanel: {
+    flex: 3,
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.md,
-    paddingBottom: Spacing.lg,
-    borderBottomWidth: 1,
+    paddingVertical: Spacing.md,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+  },
+  floatingCardCategoryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.xs,
+  },
+  floatingCardTitle: {
+    fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: Colors.text.primary,
+    marginBottom: Spacing.xs,
+  },
+  floatingCardDescription: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.secondary,
+  },
+  sheetHeader: {
+    width: '100%',
+    alignSelf: 'stretch',
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.sm,
+    borderBottomWidth: 0,
     borderBottomColor: Colors.border.light,
   },
   pullUpPill: {
     alignSelf: 'center',
     paddingVertical: Spacing.sm,
     paddingHorizontal: Spacing.lg,
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.sm,
   },
   pullUpText: {
     fontSize: Typography.sizes.sm,
@@ -830,6 +1097,9 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.lg,
@@ -913,8 +1183,10 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
   },
   categoryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(13, 79, 79, 0.1)',
     paddingHorizontal: Spacing.sm,
     paddingVertical: Spacing.xs,
     borderRadius: BorderRadius.sm,
