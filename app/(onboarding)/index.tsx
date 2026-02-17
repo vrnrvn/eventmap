@@ -32,12 +32,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { categoriesService } from '@/services/categories';
 import { profilesService } from '@/services/profiles';
 import { geocodingService } from '@/services/geocoding';
+import { AddressSearchInput } from '@/components/AddressSearchInput';
 import { Category } from '@/types/database';
 import { getCategoryColor } from '@/constants/categories';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const TOTAL_PAGES = 4;
+const TOTAL_PAGES = 5;
 
 const Palette = {
   gradientStart: Colors.primary,
@@ -65,6 +66,9 @@ export default function OnboardingScreen() {
   const [notificationGranted, setNotificationGranted] = useState(false);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [userCity, setUserCity] = useState<string | null>(null);
+  const [cityArea, setCityArea] = useState('');
+  const [cityAreaLat, setCityAreaLat] = useState<number | null>(null);
+  const [cityAreaLng, setCityAreaLng] = useState<number | null>(null);
   const [completing, setCompleting] = useState(false);
 
   useEffect(() => {
@@ -82,6 +86,14 @@ export default function OnboardingScreen() {
 
   const goNext = useCallback(() => goToPage(currentPage + 1), [currentPage, goToPage]);
   const goBack = useCallback(() => goToPage(currentPage - 1), [currentPage, goToPage]);
+
+  useEffect(() => {
+    if (currentPage === 3 && !cityArea && userCity && userCoords) {
+      setCityArea(userCity);
+      setCityAreaLat(userCoords.lat);
+      setCityAreaLng(userCoords.lng);
+    }
+  }, [currentPage, cityArea, userCity, userCoords]);
 
   const toggleCategory = (id: string) => {
     setSelectedCategories((prev) =>
@@ -130,12 +142,14 @@ export default function OnboardingScreen() {
         has_completed_onboarding: true,
         preferred_categories: selectedCategories,
       };
-      if (userCoords) {
+      if (cityArea.trim() && cityAreaLat != null && cityAreaLng != null) {
+        updates.city = cityArea;
+        updates.lat = cityAreaLat;
+        updates.lng = cityAreaLng;
+      } else if (userCoords) {
         updates.lat = userCoords.lat;
         updates.lng = userCoords.lng;
-      }
-      if (userCity) {
-        updates.city = userCity;
+        if (userCity) updates.city = userCity;
       }
       await profilesService.updateProfile(user.id, updates);
       await refreshProfile();
@@ -176,6 +190,27 @@ export default function OnboardingScreen() {
         );
       case 3:
         return (
+          <CityOrAreaPage
+            insets={insets}
+            city={cityArea}
+            onCityChange={(text) => {
+              setCityArea(text);
+              if (!text.trim()) {
+                setCityAreaLat(null);
+                setCityAreaLng(null);
+              }
+            }}
+            onSelect={(result) => {
+              setCityArea(result.formattedAddress);
+              setCityAreaLat(result.lat);
+              setCityAreaLng(result.lng);
+            }}
+            onNext={goNext}
+            onBack={goBack}
+          />
+        );
+      case 4:
+        return (
           <TutorialPage
             insets={insets}
             onComplete={handleComplete}
@@ -192,7 +227,7 @@ export default function OnboardingScreen() {
     <View style={styles.root}>
       <FlatList
         ref={flatListRef}
-        data={[0, 1, 2, 3]}
+        data={[0, 1, 2, 3, 4]}
         renderItem={renderPage}
         keyExtractor={(item) => String(item)}
         horizontal
@@ -514,7 +549,75 @@ function PermissionCard({
   );
 }
 
-/* ─── Page 4: Tutorial ─── */
+/* ─── Page 4: City or Area ─── */
+
+function CityOrAreaPage({
+  insets,
+  city,
+  onCityChange,
+  onSelect,
+  onNext,
+  onBack,
+}: {
+  insets: { top: number; bottom: number };
+  city: string;
+  onCityChange: (text: string) => void;
+  onSelect: (result: { formattedAddress: string; lat: number; lng: number }) => void;
+  onNext: () => void;
+  onBack: () => void;
+}) {
+  return (
+    <View style={[styles.page, { paddingTop: insets.top + 16 }]}>
+      <View style={styles.pageHeader}>
+        <TouchableOpacity style={styles.backBtn} onPress={onBack} activeOpacity={0.7}>
+          <ChevronLeft size={22} color={Colors.text.primary} />
+        </TouchableOpacity>
+        <Image
+          source={require('@/assets/images/EMlogo.png')}
+          style={styles.headerLogo}
+          resizeMode="contain"
+        />
+        <TouchableOpacity onPress={onNext} activeOpacity={0.7}>
+          <Text style={styles.skipText}>Skip</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.pageContent}>
+        <Text style={styles.pageTitle}>City or area</Text>
+        <Text style={styles.pageSubtitle}>
+          Helps us show events near you. You can skip if you prefer.
+        </Text>
+
+        <View style={styles.cityInputCard}>
+          <AddressSearchInput
+            label="City or area (optional)"
+            value={city}
+            onChangeText={onCityChange}
+            onSelect={onSelect}
+            placeholder="e.g. San Francisco, Bay Area"
+            approximate
+          />
+        </View>
+      </View>
+
+      <View style={[styles.pageFooter, { paddingBottom: insets.bottom + 56 }]}>
+        <TouchableOpacity style={styles.primaryBtnWrap} onPress={onNext} activeOpacity={0.85}>
+          <LinearGradient
+            colors={[Palette.gradientStart, Palette.gradientEnd]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.primaryBtnGradient}
+          >
+            <Text style={styles.primaryBtnText}>Continue</Text>
+            <ChevronRight size={20} color="#FFFFFF" />
+          </LinearGradient>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+/* ─── Page 5: Tutorial ─── */
 
 function TutorialPage({
   insets,
@@ -927,6 +1030,15 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.primary,
+  },
+
+  /* ─── City or Area page ─── */
+  cityInputCard: {
+    marginTop: 20,
+    backgroundColor: Palette.cardBg,
+    borderRadius: 18,
+    padding: 18,
+    ...Shadows.sm,
   },
 
   /* ─── Tutorial page ─── */

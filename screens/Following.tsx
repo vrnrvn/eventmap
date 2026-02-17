@@ -16,8 +16,9 @@ import { socialService } from '@/services/social';
 import { businessesService } from '@/services/businesses';
 import { Business } from '@/types/database';
 import { Colors, Typography } from '@/constants/theme';
-import { ArrowLeft, Heart, HeartOff, ChevronRight, Building2 } from 'lucide-react-native';
+import { ArrowLeft, Heart, HeartOff, ChevronRight } from 'lucide-react-native';
 import { Avatar } from '@/components/Avatar';
+import { CategoryIcon } from '@/components/CategoryIcon';
 
 const Palette = {
   gradientStart: Colors.primary,
@@ -202,7 +203,7 @@ export default function Following() {
                         {business.name}
                       </Text>
                       <View style={styles.categoryRow}>
-                        <Building2 size={12} color={Colors.text.tertiary} />
+                        <CategoryIcon category={business.category} size="sm" variant="pill" />
                         <Text style={styles.categoryText}>{business.category}</Text>
                       </View>
                       {followerCounts[business.id] !== undefined && (

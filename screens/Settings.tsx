@@ -22,6 +22,7 @@ import { businessesService } from '@/services/businesses';
 import { eventsService } from '@/services/events';
 import { Input } from '@/components/Input';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import {
@@ -373,6 +374,7 @@ export default function SettingsScreen() {
                             }
                             activeOpacity={0.7}
                           >
+                            <CategoryIcon category={cat} size="sm" variant="pill" />
                             <Text
                               style={[
                                 styles.catChipText,
@@ -809,6 +811,9 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   catChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,

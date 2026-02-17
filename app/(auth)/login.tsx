@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -22,7 +22,8 @@ import {
   Mail,
   Lock,
   LogIn,
-  Sparkles,
+  Eye,
+  EyeOff,
 } from 'lucide-react-native';
 
 const Palette = {
@@ -37,8 +38,10 @@ const Palette = {
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const { signIn } = useAuth();
+  const scrollRef = useRef<ScrollView>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>(
     {}
@@ -75,13 +78,19 @@ export default function LoginScreen() {
     }
   };
 
+  const scrollToForm = () => {
+    scrollRef.current?.scrollTo({ y: 180, animated: true });
+  };
+
   return (
     <View style={styles.root}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={[
             styles.scrollContent,
             { paddingTop: insets.top, paddingBottom: insets.bottom + 32 },
@@ -150,8 +159,22 @@ export default function LoginScreen() {
                   value={password}
                   onChangeText={setPassword}
                   placeholder="Enter your password"
-                  secureTextEntry
+                  secureTextEntry={!showPassword}
+                  onFocus={scrollToForm}
                   error={errors.password}
+                  rightAdornment={
+                    <TouchableOpacity
+                      onPress={() => setShowPassword((p) => !p)}
+                      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                      activeOpacity={0.7}
+                    >
+                      {showPassword ? (
+                        <EyeOff size={20} color={Colors.text.tertiary} />
+                      ) : (
+                        <Eye size={20} color={Colors.text.tertiary} />
+                      )}
+                    </TouchableOpacity>
+                  }
                 />
               </View>
             </View>
@@ -241,7 +264,7 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.cardBg,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 12,
+    marginTop: 8,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -256,11 +279,11 @@ const styles = StyleSheet.create({
   /* ── Hero ── */
   heroSection: {
     alignItems: 'center',
-    marginTop: 36,
-    marginBottom: 36,
+    marginTop: 16,
+    marginBottom: 20,
   },
   logoWrap: {
-    marginBottom: 20,
+    marginBottom: 12,
     ...Platform.select({
       ios: {
         shadowColor: Colors.primary,
@@ -272,32 +295,32 @@ const styles = StyleSheet.create({
     }),
   },
   logoOuter: {
-    width: 88,
-    height: 88,
-    borderRadius: 28,
+    width: 72,
+    height: 72,
+    borderRadius: 22,
     backgroundColor: Palette.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   logoInner: {
-    width: 72,
-    height: 72,
-    borderRadius: 22,
+    width: 60,
+    height: 60,
+    borderRadius: 18,
     backgroundColor: Palette.cardBg,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
   heroLogo: {
-    width: 56,
-    height: 56,
+    width: 44,
+    height: 44,
   },
   heroTitle: {
-    fontSize: 28,
+    fontSize: 24,
     fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   heroSubtitle: {
     fontSize: Typography.sizes.md,
@@ -324,7 +347,7 @@ const styles = StyleSheet.create({
   fieldRow: {
     flexDirection: 'row',
     paddingHorizontal: 18,
-    paddingVertical: 16,
+    paddingVertical: 12,
     gap: 14,
   },
   fieldIcon: {
@@ -347,8 +370,8 @@ const styles = StyleSheet.create({
   /* ── Forgot password ── */
   forgotRow: {
     alignSelf: 'flex-end',
-    marginTop: 14,
-    marginBottom: 8,
+    marginTop: 8,
+    marginBottom: 4,
     paddingVertical: 4,
     paddingHorizontal: 4,
   },
@@ -361,7 +384,7 @@ const styles = StyleSheet.create({
 
   /* ── Submit ── */
   submitWrap: {
-    marginTop: 20,
+    marginTop: 12,
     borderRadius: 16,
     overflow: 'hidden',
     ...Platform.select({
@@ -379,7 +402,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    paddingVertical: 17,
+    paddingVertical: 14,
   },
   submitText: {
     fontSize: Typography.sizes.lg,
@@ -393,8 +416,8 @@ const styles = StyleSheet.create({
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 28,
-    marginBottom: 24,
+    marginTop: 18,
+    marginBottom: 14,
     gap: 14,
   },
   dividerLine: {
@@ -413,7 +436,7 @@ const styles = StyleSheet.create({
   /* ── Footer ── */
   footer: {
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
   },
   footerText: {
     fontSize: Typography.sizes.md,
@@ -421,8 +444,8 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
   },
   signUpBtn: {
-    paddingVertical: 13,
-    paddingHorizontal: 32,
+    paddingVertical: 10,
+    paddingHorizontal: 28,
     borderRadius: 14,
     borderWidth: 1.5,
     borderColor: Colors.primary,

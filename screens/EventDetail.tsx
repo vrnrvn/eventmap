@@ -23,6 +23,7 @@ import { EventDetails } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { ImageViewer } from '@/components/ImageViewer';
 import { Avatar } from '@/components/Avatar';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ReviewCard } from '@/components/ReviewCard';
 import { ReviewForm } from '@/components/ReviewForm';
@@ -362,6 +363,7 @@ export default function EventDetail() {
         <View style={styles.content}>
           <Text style={styles.title}>{event.title}</Text>
           <View style={styles.categoryBadge}>
+            <CategoryIcon category={category.slug} size="sm" variant="pill" />
             <Text style={styles.categoryText}>{category.label}</Text>
           </View>
 
@@ -721,7 +723,10 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   categoryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     alignSelf: 'flex-start',
+    gap: Spacing.sm,
     backgroundColor: Colors.background.secondary,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.xs,
