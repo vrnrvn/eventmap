@@ -90,8 +90,10 @@ export default function SignupScreen() {
       const isExistingUser =
         /already registered|user already exists|email already|already been registered/i.test(msg);
       if (isExistingUser) {
-        setEmailPopupVariant('existing');
-        setShowEmailPopup(true);
+        router.replace({
+          pathname: '/(auth)/login',
+          params: { email },
+        });
       } else {
         setErrors({ email: msg || 'Please try again' });
       }

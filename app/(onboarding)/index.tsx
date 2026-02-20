@@ -33,7 +33,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { categoriesService } from '@/services/categories';
 import { profilesService } from '@/services/profiles';
 import { geocodingService } from '@/services/geocoding';
-import { AddressSearchInput } from '@/components/AddressSearchInput';
+import { useFocusEffect } from '@react-navigation/native';
+import { onboardingLocationStore } from '@/stores/onboardingLocationStore';
 import { Category } from '@/types/database';
 import { getCategoryColor } from '@/constants/categories';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
@@ -98,6 +99,18 @@ export default function OnboardingScreen() {
       setCityAreaLng(userCoords.lng);
     }
   }, [currentPage, cityArea, userCity, userCoords]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (currentPage !== 3) return;
+      const result = onboardingLocationStore.consume();
+      if (result) {
+        setCityArea(result.formattedAddress);
+        setCityAreaLat(result.lat);
+        setCityAreaLng(result.lng);
+      }
+    }, [currentPage])
+  );
 
   const toggleCategory = (id: string) => {
     setSelectedCategories((prev) =>
@@ -200,18 +213,8 @@ export default function OnboardingScreen() {
           <CityOrAreaPage
             insets={insets}
             city={cityArea}
-            onCityChange={(text) => {
-              setCityArea(text);
-              if (!text.trim()) {
-                setCityAreaLat(null);
-                setCityAreaLng(null);
-              }
-            }}
-            onSelect={(result) => {
-              setCityArea(result.formattedAddress);
-              setCityAreaLat(result.lat);
-              setCityAreaLng(result.lng);
-            }}
+            lat={cityAreaLat}
+            lng={cityAreaLng}
             onNext={goNext}
             onBack={goBack}
           />
@@ -696,18 +699,19 @@ function PrivacySetupPage({
 function CityOrAreaPage({
   insets,
   city,
-  onCityChange,
-  onSelect,
+  lat,
+  lng,
   onNext,
   onBack,
 }: {
   insets: { top: number; bottom: number };
   city: string;
-  onCityChange: (text: string) => void;
-  onSelect: (result: { formattedAddress: string; lat: number; lng: number }) => void;
+  lat: number | null;
+  lng: number | null;
   onNext: () => void;
   onBack: () => void;
 }) {
+  const hasLocation = city.trim() && lat != null && lng != null;
   return (
     <View style={[styles.page, { paddingTop: insets.top + 16 }]}>
       <View style={styles.pageHeader}>
@@ -731,14 +735,40 @@ function CityOrAreaPage({
         </Text>
 
         <View style={styles.cityInputCard}>
-          <AddressSearchInput
-            label="City or area (optional)"
-            value={city}
-            onChangeText={onCityChange}
-            onSelect={onSelect}
-            placeholder="e.g. San Francisco, Bay Area"
-            approximate
-          />
+          <Text style={styles.addressLabel}>Your Location</Text>
+          <TouchableOpacity
+            style={styles.addressTouchable}
+            onPress={() =>
+              router.push({
+                pathname: '/business-location',
+                params: {
+                  context: 'onboarding',
+                  address: city,
+                  lat: lat != null ? String(lat) : '',
+                  lng: lng != null ? String(lng) : '',
+                },
+              })
+            }
+            activeOpacity={0.7}
+          >
+            <View style={styles.addressTouchableRow}>
+              <MapPin size={18} color={Colors.text.tertiary} />
+              <Text
+                style={[
+                  styles.addressTouchableText,
+                  !city && styles.addressPlaceholder,
+                ]}
+                numberOfLines={2}
+              >
+                {city || 'Tap to set location on map'}
+              </Text>
+            </View>
+            {hasLocation && (
+              <Text style={styles.addressCoords}>
+                {lat!.toFixed(4)}, {lng!.toFixed(4)}
+              </Text>
+            )}
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -1211,6 +1241,40 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 18,
     ...Shadows.sm,
+  },
+  addressLabel: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.text.primary,
+    marginBottom: Spacing.xs,
+  },
+  addressTouchable: {
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 4,
+    backgroundColor: Colors.background.primary,
+  },
+  addressTouchableRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+  },
+  addressTouchableText: {
+    fontSize: Typography.sizes.md,
+    color: Colors.text.primary,
+    flex: 1,
+  },
+  addressPlaceholder: {
+    color: Colors.text.tertiary,
+  },
+  addressCoords: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamilies.mono,
+    color: Colors.text.tertiary,
+    marginTop: 4,
   },
 
   /* ─── Tutorial page ─── */

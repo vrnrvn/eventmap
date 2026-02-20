@@ -1,4 +1,4 @@
-package com.shalommeoded.boltexponativewind
+package com.eventmap.app
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build
