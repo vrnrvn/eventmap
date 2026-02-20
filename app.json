@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.shalommeoded.boltexponativewind"
+      "bundleIdentifier": "com.eventmap.app"
     },
     "web": {
       "bundler": "metro",
@@ -20,13 +20,25 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.000000000000000000000"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
     },
     "android": {
-      "package": "com.shalommeoded.boltexponativewind"
+      "package": "com.eventmap.app"
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "a7da7dc4-919f-4d29-981b-777798915b54"
+      }
     }
   }
 }
