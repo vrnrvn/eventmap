@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,8 +13,9 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { GoogleIcon, FacebookIcon } from '@/components/icons/BrandIcons';
 import { Input } from '@/components/Input';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import {
@@ -37,15 +38,22 @@ const Palette = {
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
-  const { signIn } = useAuth();
+  const { email: emailParam } = useLocalSearchParams<{ email?: string }>();
+  const { signIn, signInWithOAuth } = useAuth();
   const scrollRef = useRef<ScrollView>(null);
   const [email, setEmail] = useState('');
+
+  useEffect(() => {
+    const value = Array.isArray(emailParam) ? emailParam[0] : emailParam;
+    if (value) setEmail(value);
+  }, [emailParam]);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>(
     {}
   );
+  const [oauthLoading, setOauthLoading] = useState<'google' | 'facebook' | null>(null);
 
   const validateForm = () => {
     const newErrors: { email?: string; password?: string } = {};
@@ -80,6 +88,22 @@ export default function LoginScreen() {
 
   const scrollToForm = () => {
     scrollRef.current?.scrollTo({ y: 180, animated: true });
+  };
+
+  const handleOAuthSignIn = async (provider: 'google' | 'facebook') => {
+    setOauthLoading(provider);
+    try {
+      await signInWithOAuth(provider);
+      router.replace('/');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      Alert.alert(
+        provider === 'google' ? 'Google Sign In' : 'Facebook Sign In',
+        msg.includes('cancelled') ? 'Sign in was cancelled.' : msg
+      );
+    } finally {
+      setOauthLoading(null);
+    }
   };
 
   return (
@@ -216,6 +240,38 @@ export default function LoginScreen() {
               )}
             </LinearGradient>
           </TouchableOpacity>
+
+          {/* ── OAuth buttons ── */}
+          <View style={styles.oauthRow}>
+            <TouchableOpacity
+              style={[styles.oauthBtn, oauthLoading !== null && styles.oauthBtnDisabled]}
+              onPress={() => handleOAuthSignIn('google')}
+              disabled={oauthLoading !== null}
+              activeOpacity={0.85}
+            >
+              <GoogleIcon size={20} />
+              <Text style={styles.oauthBtnText}>
+                {oauthLoading === 'google' ? 'Signing in…' : 'Continue with Google'}
+              </Text>
+              {oauthLoading === 'google' && (
+                <ActivityIndicator size="small" color={Colors.primary} style={styles.oauthSpinner} />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.oauthBtn, oauthLoading !== null && styles.oauthBtnDisabled]}
+              onPress={() => handleOAuthSignIn('facebook')}
+              disabled={oauthLoading !== null}
+              activeOpacity={0.85}
+            >
+              <FacebookIcon size={20} />
+              <Text style={styles.oauthBtnText}>
+                {oauthLoading === 'facebook' ? 'Signing in…' : 'Continue with Facebook'}
+              </Text>
+              {oauthLoading === 'facebook' && (
+                <ActivityIndicator size="small" color={Colors.primary} style={styles.oauthSpinner} />
+              )}
+            </TouchableOpacity>
+          </View>
 
           {/* ── Divider ── */}
           <View style={styles.dividerRow}>
@@ -410,6 +466,45 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.bold,
     color: '#FFFFFF',
     letterSpacing: 0.3,
+  },
+
+  /* ── OAuth ── */
+  oauthRow: {
+    gap: 12,
+    marginTop: 18,
+  },
+  oauthBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 16,
+    backgroundColor: Palette.cardBg,
+    borderWidth: 1.5,
+    borderColor: Palette.separator,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+      },
+      android: { elevation: 2 },
+    }),
+  },
+  oauthBtnDisabled: {
+    opacity: 0.7,
+  },
+  oauthBtnText: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.text.primary,
+  },
+  oauthSpinner: {
+    marginLeft: 4,
   },
 
   /* ── Divider ── */

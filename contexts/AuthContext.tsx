@@ -42,21 +42,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    authService.getSession().then((currentSession) => {
+    authService.getSession().then(async (currentSession) => {
       setSession(currentSession);
       setUser(currentSession?.user ?? null);
       if (currentSession?.user) {
-        loadProfile(currentSession.user.id);
+        await loadProfile(currentSession.user.id);
       }
       setLoading(false);
     });
 
     const { data: authListener } = authService.onAuthStateChange(
-      (newSession) => {
+      async (newSession) => {
+        if (newSession?.user) {
+          setLoading(true);
+        }
         setSession(newSession);
         setUser(newSession?.user ?? null);
         if (newSession?.user) {
-          loadProfile(newSession.user.id);
+          await loadProfile(newSession.user.id);
         } else {
           setProfile(null);
           setIsBanned(false);
