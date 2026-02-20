@@ -19,6 +19,7 @@ import {
 } from '@expo-google-fonts/dm-sans';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { AuthRedirectHandler } from '@/components/AuthRedirectHandler';
 import { AppProvider } from '@/contexts/AppContext';
 import { SearchProvider } from '@/contexts/SearchContext';
 import { PremiumProvider } from '@/contexts/PremiumContext';
@@ -67,6 +68,7 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
+          <AuthRedirectHandler />
           <AppProvider>
             <PremiumProvider>
               <SearchProvider>

@@ -1,10 +1,67 @@
+import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import { supabase } from './supabase';
 
+const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim() || '';
+
+const isExpoGo = Constants.appOwnership === 'expo';
+
 export const authService = {
   async signInWithOAuth(provider: 'google' | 'facebook') {
+    const useNativeGoogle =
+      provider === 'google' &&
+      Platform.OS === 'android' &&
+      GOOGLE_WEB_CLIENT_ID &&
+      !isExpoGo;
+    if (useNativeGoogle) {
+      return authService.signInWithGoogleNative();
+    }
+    return authService.signInWithOAuthWeb(provider);
+  },
+
+  async signInWithGoogleNative() {
+    const { GoogleSignin, statusCodes } = await import(
+      '@react-native-google-signin/google-signin'
+    );
+    GoogleSignin.configure({ webClientId: GOOGLE_WEB_CLIENT_ID });
+
+    try {
+      await GoogleSignin.hasPlayServices();
+      const response = await GoogleSignin.signIn();
+
+      if (response.type !== 'success' || !response.data?.idToken) {
+        throw new Error('OAuth was cancelled or failed');
+      }
+
+      const { data, error } = await supabase.auth.signInWithIdToken({
+        provider: 'google',
+        token: response.data.idToken,
+      });
+
+      if (error) throw error;
+      if (!data.user) throw new Error('No user data returned');
+      return data;
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'code' in err) {
+        const code = (err as { code: string }).code;
+        if (code === statusCodes.SIGN_IN_CANCELLED) {
+          throw new Error('OAuth was cancelled or failed');
+        }
+        if (code === statusCodes.IN_PROGRESS) {
+          throw new Error('Sign in already in progress');
+        }
+        if (code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+          throw new Error('Google Play Services not available');
+        }
+      }
+      throw err;
+    }
+  },
+
+  async signInWithOAuthWeb(provider: 'google' | 'facebook') {
     const redirectTo = AuthSession.makeRedirectUri();
 
     const { data, error } = await supabase.auth.signInWithOAuth({

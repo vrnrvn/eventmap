@@ -18,6 +18,7 @@ import { AddressSearchInput } from '@/components/AddressSearchInput';
 import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView';
 import { geocodingService } from '@/services/geocoding';
 import { businessLocationStore } from '@/stores/businessLocationStore';
+import { onboardingLocationStore } from '@/stores/onboardingLocationStore';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -30,7 +31,9 @@ export default function BusinessLocationScreen() {
     address?: string;
     lat?: string;
     lng?: string;
+    context?: 'business' | 'onboarding';
   }>();
+  const isOnboarding = params.context === 'onboarding';
   const insets = useSafeAreaInsets();
   const mapRef = useRef<GoogleMapHandle>(null);
 
@@ -92,9 +95,14 @@ export default function BusinessLocationScreen() {
   }, []);
 
   const handleConfirm = useCallback(() => {
-    businessLocationStore.setPending({ formattedAddress: address, lat, lng });
+    const result = { formattedAddress: address, lat, lng };
+    if (isOnboarding) {
+      onboardingLocationStore.setPending(result);
+    } else {
+      businessLocationStore.setPending(result);
+    }
     router.back();
-  }, [address, lat, lng]);
+  }, [address, lat, lng, isOnboarding]);
 
   const handleBack = useCallback(() => {
     router.back();
@@ -106,7 +114,9 @@ export default function BusinessLocationScreen() {
         <TouchableOpacity style={styles.backBtn} onPress={handleBack} activeOpacity={0.7}>
           <ArrowLeft size={22} color={Colors.text.primary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Business Location</Text>
+        <Text style={styles.headerTitle}>
+          {isOnboarding ? 'Your Location' : 'Business Location'}
+        </Text>
         <TouchableOpacity
           style={styles.confirmHeaderBtn}
           onPress={handleConfirm}
@@ -129,11 +139,15 @@ export default function BusinessLocationScreen() {
         >
           <View style={styles.searchSection}>
             <AddressSearchInput
-              label="Search address or business"
+              label={isOnboarding ? 'Search city or address' : 'Search address or business'}
               value={searchValue}
               onChangeText={setSearchValue}
               onSelect={handleSelectFromSearch}
-              placeholder="Search business name or address..."
+              placeholder={
+                isOnboarding
+                  ? 'Search city, area or address...'
+                  : 'Search business name or address...'
+              }
               addressPrecision="business"
               showClearButton
             />
