@@ -34,6 +34,15 @@ export const eventsService = {
     return data as EventDetails | null;
   },
 
+  async trackEventView(eventId: string): Promise<void> {
+    const { error } = await (supabase as any).rpc('track_event_view', {
+      event_uuid: eventId,
+    });
+    if (error) {
+      throw error;
+    }
+  },
+
   async createEvent(eventData: {
     businessId: string;
     title: string;

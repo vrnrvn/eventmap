@@ -86,6 +86,9 @@ export default function EventDetail() {
       try {
         const data = await eventsService.getEventDetails(id);
         setDetails(data);
+        if (data) {
+          eventsService.trackEventView(id).catch(() => {});
+        }
       } catch {
         setDetails(null);
       } finally {
