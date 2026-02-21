@@ -17,6 +17,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import { usePremium } from '@/contexts/PremiumContext';
 import { premiumService } from '@/services/premium';
+import { analyticsService } from '@/services/analytics';
 import { profilesService } from '@/services/profiles';
 import { businessesService } from '@/services/businesses';
 import { eventsService } from '@/services/events';
@@ -59,7 +60,7 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { profile, signOut, refreshProfile, user } = useAuth();
   const { hasBusiness, userMode, setUserMode, userBusiness, refreshBusiness } = useApp();
-  const { isPremium, currentPlan, refreshSubscription } = usePremium();
+  const { isPremium, currentPlan, canUse, refreshSubscription } = usePremium();
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [stats, setStats] = useState<{
     events: string;
@@ -78,9 +79,13 @@ export default function ProfileScreen() {
     const loadStats = async () => {
       try {
         if (isBizMode && userBusiness) {
-          const [eventCount, followerCount] = await Promise.all([
+          const shouldLoadAnalytics = isPremium && canUse('analytics');
+          const [eventCount, followerCount, analyticsSummary] = await Promise.all([
             eventsService.getBusinessEventsCount(userBusiness.id),
             businessesService.getFollowerCount(userBusiness.id),
+            shouldLoadAnalytics
+              ? analyticsService.getBusinessAnalytics(userBusiness.id, 30)
+              : Promise.resolve(null),
           ]);
           if (!cancelled) {
             setStats({
@@ -88,7 +93,7 @@ export default function ProfileScreen() {
               followers: String(followerCount),
               following: '—',
               saved: '—',
-              views: '—',
+              views: analyticsSummary ? String(analyticsSummary.totalViews) : '—',
             });
           }
         } else {
@@ -116,7 +121,7 @@ export default function ProfileScreen() {
     return () => {
       cancelled = true;
     };
-  }, [isBizMode, userBusiness?.id]);
+  }, [isBizMode, userBusiness?.id, isPremium, canUse]);
 
   const handleSignOut = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -406,9 +411,7 @@ export default function ProfileScreen() {
                   icon={<BarChart3 size={20} color={Colors.secondary} />}
                   label="Analytics"
                   sublabel="Views, saves & engagement"
-                  onPress={() =>
-                    Alert.alert('Coming Soon', 'Analytics will be available soon')
-                  }
+                  onPress={() => router.push('/profile-analytics' as any)}
                   isLast
                 />
               </View>
