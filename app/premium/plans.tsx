@@ -6,8 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Platform,
-  Dimensions,
   Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,43 +16,27 @@ import {
   Crown,
   Check,
   Sparkles,
-  TrendingUp,
-  MapPin,
-  BarChart3,
-  Image as ImageIcon,
-  Repeat,
-  Zap,
-  Star,
 } from 'lucide-react-native';
 import { usePremium } from '@/contexts/PremiumContext';
 import { useApp } from '@/contexts/AppContext';
 import { premiumService, PremiumPlan } from '@/services/premium';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
 const Palette = {
   gradientStart: Colors.primary,
   gradientEnd: Colors.accent,
   cardBg: Colors.background.primary,
-  surfaceMuted: Colors.background.primary,
-  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  surface: Colors.background.primary,
+  accentSoft: 'rgba(196, 92, 62, 0.08)',
   separator: Colors.border.light,
   premiumGold: Colors.accent,
-  premiumGoldSoft: 'rgba(232, 168, 56, 0.12)',
+  premiumGoldSoft: 'rgba(232, 168, 56, 0.10)',
   success: Colors.success,
-  successSoft: 'rgba(45, 138, 110, 0.12)',
+  successSoft: 'rgba(45, 138, 110, 0.08)',
 };
 
-const FEATURE_ICONS: Record<string, any> = {
-  events: TrendingUp,
-  photos: ImageIcon,
-  recurring: Repeat,
-  analytics: BarChart3,
-  markers: MapPin,
-  boost: Zap,
-  support: Star,
-};
+const PRO_MONTHLY = 699;
+const PRO_YEARLY = 6999;
 
 export default function PremiumPlansScreen() {
   const insets = useSafeAreaInsets();
@@ -70,11 +52,13 @@ export default function PremiumPlansScreen() {
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [subscribingPlanId, setSubscribingPlanId] = useState<string | null>(null);
 
+  const freePlan = allPlans.find((p) => p.slug === 'free');
+  const proPlan = allPlans.find((p) => p.slug === 'pro');
+  const currentPlanSlug = currentPlan?.slug ?? 'free';
+
   const handleSubscribe = useCallback(
     async (plan: PremiumPlan) => {
-      if (plan.slug === 'free') return;
-      if (subscribingPlanId) return;
-
+      if (plan.slug === 'free' || subscribingPlanId) return;
       setSubscribingPlanId(plan.id);
       try {
         if (!userBusiness?.id) {
@@ -97,29 +81,22 @@ export default function PremiumPlansScreen() {
         setSubscribingPlanId(null);
       }
     },
-    [billingCycle, refreshBusiness, refreshSubscription, subscribingPlanId]
+    [billingCycle, refreshBusiness, refreshSubscription, subscribingPlanId, userBusiness]
   );
 
-  const formatPrice = (cents: number) => {
-    if (cents === 0) return 'Free';
-    const dollars = cents / 100;
-    return `$${dollars.toFixed(2)}`;
-  };
+  const price = billingCycle === 'monthly' ? PRO_MONTHLY : PRO_YEARLY;
+  const savingsPercent = Math.round(
+    ((PRO_MONTHLY * 12 - PRO_YEARLY) / (PRO_MONTHLY * 12)) * 100
+  );
+  const monthlyEquivalent = (PRO_YEARLY / 100 / 12).toFixed(2);
 
-  const getSavingsPercent = (plan: PremiumPlan) => {
-    if (plan.price_yearly === 0) return 0;
-    const monthlyTotal = plan.price_monthly * 12;
-    const savings = monthlyTotal - plan.price_yearly;
-    return Math.round((savings / monthlyTotal) * 100);
-  };
-
-  const paidPlans = allPlans.filter((p) => p.slug !== 'free');
-  const currentPlanSlug = currentPlan?.slug ?? 'free';
+  const fmt = (cents: number) =>
+    cents === 0 ? 'Free' : `$${(cents / 100).toFixed(2)}`;
 
   if (contextLoading) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
-        <View style={styles.loadingContainer}>
+        <View style={styles.center}>
           <ActivityIndicator size="large" color={Palette.gradientStart} />
         </View>
       </View>
@@ -128,311 +105,178 @@ export default function PremiumPlansScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-          activeOpacity={0.7}
-        >
-          <ArrowLeft size={24} color={Colors.text.primary} />
+      {/* ── Nav ── */}
+      <View style={styles.nav}>
+        <TouchableOpacity onPress={() => router.back()} activeOpacity={0.7}>
+          <ArrowLeft size={22} color={Colors.text.primary} />
         </TouchableOpacity>
-        <View style={styles.headerContent}>
-          <View style={styles.headerIconWrap}>
-            <Crown size={24} color={Palette.premiumGold} />
-          </View>
-          <Text style={styles.headerTitle}>Upgrade to Premium</Text>
-          <Text style={styles.headerSubtitle}>
-            Unlock powerful features to grow your events
-          </Text>
-        </View>
       </View>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={styles.scroll}
       >
-        {/* Current status banner */}
+        {/* ── Hero ── */}
+        <View style={styles.hero}>
+          <View style={styles.iconWrap}>
+            <Crown size={26} color={Palette.premiumGold} />
+          </View>
+          <Text style={styles.heroTitle}>Go Pro</Text>
+          <Text style={styles.heroSub}>
+            Unlock powerful features to grow your events and reach more people.
+          </Text>
+        </View>
+
+        {/* ── Active banner ── */}
         {isPremium && subscription && (
-          <View style={styles.currentStatusBanner}>
-            <View style={styles.currentStatusIcon}>
-              <Check size={18} color={Palette.success} />
-            </View>
-            <View style={styles.currentStatusContent}>
-              <Text style={styles.currentStatusTitle}>
-                You're on {currentPlan?.name ?? 'Premium'}
+          <View style={styles.banner}>
+            <View style={styles.dot} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.bannerTitle}>
+                Active — {currentPlan?.name ?? 'Pro'}
               </Text>
-              <Text style={styles.currentStatusSubtitle}>
+              <Text style={styles.bannerSub}>
                 {subscription.current_period_end
                   ? `Renews ${new Date(subscription.current_period_end).toLocaleDateString()}`
                   : 'Active subscription'}
               </Text>
             </View>
             <TouchableOpacity
-              style={styles.manageButton}
               onPress={() => router.push('/premium/manage' as never)}
             >
-              <Text style={styles.manageButtonText}>Manage</Text>
+              <Text style={styles.manageText}>Manage</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Billing cycle toggle */}
-        {paidPlans.length > 0 && (
-          <View style={styles.billingToggle}>
-            <TouchableOpacity
-              style={[
-                styles.billingOption,
-                billingCycle === 'monthly' && styles.billingOptionActive,
-              ]}
-              onPress={() => setBillingCycle('monthly')}
-              activeOpacity={0.7}
-            >
-              <Text
-                style={[
-                  styles.billingOptionText,
-                  billingCycle === 'monthly' && styles.billingOptionTextActive,
-                ]}
+        {/* ── Billing toggle ── */}
+        <View style={styles.toggleRow}>
+          <View style={styles.toggle}>
+            {(['monthly', 'yearly'] as const).map((c) => (
+              <TouchableOpacity
+                key={c}
+                style={[styles.toggleBtn, billingCycle === c && styles.toggleBtnOn]}
+                onPress={() => setBillingCycle(c)}
+                activeOpacity={0.7}
               >
-                Monthly
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.billingOption,
-                billingCycle === 'yearly' && styles.billingOptionActive,
-              ]}
-              onPress={() => setBillingCycle('yearly')}
-              activeOpacity={0.7}
-            >
-              <Text
-                style={[
-                  styles.billingOptionText,
-                  billingCycle === 'yearly' && styles.billingOptionTextActive,
-                ]}
-              >
-                Yearly
-                {paidPlans[0] && getSavingsPercent(paidPlans[0]) > 0 && (
-                  <Text style={styles.savingsBadge}>
-                    {' '}
-                    Save {getSavingsPercent(paidPlans[0])}%
-                  </Text>
-                )}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Plans grid */}
-        <View style={styles.plansGrid}>
-          {allPlans.map((plan) => {
-            const isCurrentPlan = plan.slug === currentPlanSlug;
-            const isPopular = plan.slug === 'pro';
-            const price =
-              billingCycle === 'monthly' ? plan.price_monthly : plan.price_yearly;
-            const isSubscribing = subscribingPlanId === plan.id;
-
-            return (
-              <View
-                key={plan.id}
-                style={[
-                  styles.planCard,
-                  isPopular && styles.planCardPopular,
-                  isCurrentPlan && styles.planCardCurrent,
-                ]}
-              >
-                {isPopular && (
-                  <View style={styles.popularBadge}>
-                    <Sparkles size={12} color="#FFFFFF" />
-                    <Text style={styles.popularBadgeText}>Most Popular</Text>
-                  </View>
-                )}
-                {isCurrentPlan && (
-                  <View style={styles.currentBadge}>
-                    <Check size={12} color={Palette.success} />
-                    <Text style={styles.currentBadgeText}>Current Plan</Text>
-                  </View>
-                )}
-
-                <View style={styles.planHeader}>
-                  <Text style={styles.planName}>{plan.name}</Text>
-                  <Text style={styles.planDescription}>{plan.description}</Text>
-                  <View style={styles.planPriceRow}>
-                    <Text style={styles.planPrice}>{formatPrice(price)}</Text>
-                    {price > 0 && (
-                      <Text style={styles.planPeriod}>
-                        /{billingCycle === 'monthly' ? 'month' : 'year'}
-                      </Text>
-                    )}
-                  </View>
-                  {billingCycle === 'yearly' &&
-                    plan.price_yearly > 0 &&
-                    getSavingsPercent(plan) > 0 && (
-                      <Text style={styles.planSavings}>
-                        Save {getSavingsPercent(plan)}% vs monthly
-                      </Text>
-                    )}
-                </View>
-
-                <View style={styles.planFeatures}>
-                  {plan.features.map((feature, idx) => (
-                    <View key={idx} style={styles.featureRow}>
-                      <Check
-                        size={16}
-                        color={
-                          plan.slug === 'free'
-                            ? Colors.text.tertiary
-                            : Palette.gradientStart
-                        }
-                      />
-                      <Text style={styles.featureText}>{feature}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                <TouchableOpacity
+                <Text
                   style={[
-                    styles.planButton,
-                    isCurrentPlan && styles.planButtonCurrent,
-                    isPopular && !isCurrentPlan && styles.planButtonPopular,
-                    plan.slug === 'free' && styles.planButtonFree,
+                    styles.toggleLabel,
+                    billingCycle === c && styles.toggleLabelOn,
                   ]}
-                  onPress={() => handleSubscribe(plan)}
-                  disabled={isCurrentPlan || isSubscribing}
-                  activeOpacity={0.85}
                 >
-                  {isSubscribing ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : isCurrentPlan ? (
-                    <Text style={styles.planButtonTextCurrent}>Current Plan</Text>
-                  ) : plan.slug === 'free' ? (
-                    <Text style={styles.planButtonTextFree}>Current Plan</Text>
-                  ) : (
-                    <LinearGradient
-                      colors={
-                        isPopular
-                          ? [Palette.gradientStart, Palette.gradientEnd]
-                          : [Palette.gradientStart, Palette.gradientEnd]
-                      }
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                      style={styles.planButtonGradient}
-                    >
-                      <Text style={styles.planButtonText}>
-                        {plan.slug === 'enterprise' ? 'Contact Sales' : 'Subscribe'}
-                      </Text>
-                    </LinearGradient>
-                  )}
-                </TouchableOpacity>
-              </View>
-            );
-          })}
-        </View>
-
-        {/* Feature comparison */}
-        <View style={styles.comparisonSection}>
-          <Text style={styles.comparisonTitle}>Feature Comparison</Text>
-          <View style={styles.comparisonTable}>
-            <View style={styles.comparisonRow}>
-              <Text style={styles.comparisonLabel}>Max Events</Text>
-              <View style={styles.comparisonValues}>
-                {allPlans.map((plan) => (
-                  <Text
-                    key={plan.id}
-                    style={[
-                      styles.comparisonValue,
-                      plan.slug === currentPlanSlug && styles.comparisonValueCurrent,
-                    ]}
-                  >
-                    {plan.max_events === -1 ? '∞' : plan.max_events}
-                  </Text>
-                ))}
-              </View>
-            </View>
-            <View style={styles.comparisonRow}>
-              <Text style={styles.comparisonLabel}>Photos per Event</Text>
-              <View style={styles.comparisonValues}>
-                {allPlans.map((plan) => (
-                  <Text
-                    key={plan.id}
-                    style={[
-                      styles.comparisonValue,
-                      plan.slug === currentPlanSlug && styles.comparisonValueCurrent,
-                    ]}
-                  >
-                    {plan.max_photos_per_event}
-                  </Text>
-                ))}
-              </View>
-            </View>
-            <View style={styles.comparisonRow}>
-              <Text style={styles.comparisonLabel}>Boost Multiplier</Text>
-              <View style={styles.comparisonValues}>
-                {allPlans.map((plan) => (
-                  <Text
-                    key={plan.id}
-                    style={[
-                      styles.comparisonValue,
-                      plan.slug === currentPlanSlug && styles.comparisonValueCurrent,
-                    ]}
-                  >
-                    {plan.boost_multiplier}×
-                  </Text>
-                ))}
-              </View>
-            </View>
-            <View style={styles.comparisonRow}>
-              <Text style={styles.comparisonLabel}>Analytics</Text>
-              <View style={styles.comparisonValues}>
-                {allPlans.map((plan) => (
-                  <View key={plan.id} style={styles.comparisonCheck}>
-                    {plan.analytics_enabled ? (
-                      <Check size={14} color={Palette.success} />
-                    ) : (
-                      <Text style={styles.comparisonX}>—</Text>
-                    )}
+                  {c === 'monthly' ? 'Monthly' : 'Yearly'}
+                </Text>
+                {c === 'yearly' && savingsPercent > 0 && (
+                  <View style={styles.savePill}>
+                    <Text style={styles.savePillText}>–{savingsPercent}%</Text>
                   </View>
-                ))}
-              </View>
-            </View>
-            <View style={styles.comparisonRow}>
-              <Text style={styles.comparisonLabel}>Highlighted Markers</Text>
-              <View style={styles.comparisonValues}>
-                {allPlans.map((plan) => (
-                  <View key={plan.id} style={styles.comparisonCheck}>
-                    {plan.highlighted_markers ? (
-                      <Check size={14} color={Palette.success} />
-                    ) : (
-                      <Text style={styles.comparisonX}>—</Text>
-                    )}
-                  </View>
-                ))}
-              </View>
-            </View>
-            <View style={styles.comparisonRow}>
-              <Text style={styles.comparisonLabel}>Recurring Events</Text>
-              <View style={styles.comparisonValues}>
-                {allPlans.map((plan) => (
-                  <View key={plan.id} style={styles.comparisonCheck}>
-                    {plan.recurring_events ? (
-                      <Check size={14} color={Palette.success} />
-                    ) : (
-                      <Text style={styles.comparisonX}>—</Text>
-                    )}
-                  </View>
-                ))}
-              </View>
-            </View>
+                )}
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
 
-        {/* Footer note */}
+        {/* ── Pro card ── */}
+        {proPlan && (
+          <View style={styles.proCard}>
+            <View style={styles.proBadge}>
+              <Sparkles size={11} color="#FFF" />
+              <Text style={styles.proBadgeText}>Recommended</Text>
+            </View>
+
+            <Text style={styles.proName}>Pro</Text>
+
+            <View style={styles.proPriceRow}>
+              <Text style={styles.proPrice}>{fmt(price)}</Text>
+              <Text style={styles.proPeriod}>
+                /{billingCycle === 'monthly' ? 'mo' : 'yr'}
+              </Text>
+            </View>
+
+            {billingCycle === 'yearly' && (
+              <Text style={styles.proSavingsNote}>
+                ${monthlyEquivalent}/mo · Save {savingsPercent}%
+              </Text>
+            )}
+
+            <View style={styles.separator} />
+
+            <View style={styles.features}>
+              {proPlan.features.map((f, i) => (
+                <View key={i} style={styles.featureRow}>
+                  <View style={styles.checkDot}>
+                    <Check size={11} color="#FFF" />
+                  </View>
+                  <Text style={styles.featureLabel}>{f}</Text>
+                </View>
+              ))}
+            </View>
+
+            {currentPlanSlug === 'pro' ? (
+              <View style={styles.currentBtn}>
+                <Check size={16} color={Palette.success} />
+                <Text style={styles.currentBtnText}>Current Plan</Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.cta}
+                onPress={() => handleSubscribe(proPlan)}
+                disabled={!!subscribingPlanId}
+                activeOpacity={0.85}
+              >
+                {subscribingPlanId === proPlan.id ? (
+                  <View style={styles.ctaInner}>
+                    <ActivityIndicator size="small" color="#FFF" />
+                  </View>
+                ) : (
+                  <LinearGradient
+                    colors={[Palette.gradientStart, Palette.gradientEnd]}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.ctaInner}
+                  >
+                    <Text style={styles.ctaText}>Get Pro</Text>
+                  </LinearGradient>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* ── Free card ── */}
+        {freePlan && (
+          <View style={styles.freeCard}>
+            <View style={styles.freeHeader}>
+              <View>
+                <Text style={styles.freeName}>Free</Text>
+                <Text style={styles.freePrice}>\$0</Text>
+              </View>
+              {currentPlanSlug === 'free' && (
+                <View style={styles.freeBadge}>
+                  <Text style={styles.freeBadgeText}>Current</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.freeFeatures}>
+              {freePlan.features.map((f, i) => (
+                <View key={i} style={styles.freeFeatureRow}>
+                  <Check size={14} color={Colors.text.tertiary} />
+                  <Text style={styles.freeFeatureLabel}>{f}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* ── Footer ── */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            All plans include a 14-day free trial. Cancel anytime.
+            14-day free trial included. Cancel anytime.
           </Text>
           <Text style={styles.footerText}>
-            Questions? Contact support@eventmap.com
+            Questions? support@eventmap.com
           </Text>
         </View>
       </ScrollView>
@@ -440,359 +284,297 @@ export default function PremiumPlansScreen() {
   );
 }
 
+/* ────────────────────── Styles ────────────────────── */
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Palette.surfaceMuted,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  header: {
-    backgroundColor: Palette.cardBg,
+  container: { flex: 1, backgroundColor: Palette.surface },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
+  /* nav */
+  nav: {
     paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Palette.separator,
+    paddingVertical: Spacing.sm,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Palette.accentSoft,
+
+  /* scroll */
+  scroll: { paddingBottom: 60 },
+
+  /* hero */
+  hero: {
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.md,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.lg,
   },
-  headerContent: {
-    alignItems: 'center',
-  },
-  headerIconWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
+  iconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
     backgroundColor: Palette.premiumGoldSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.md,
   },
-  headerTitle: {
-    fontSize: Typography.sizes.xxl,
+  heroTitle: {
+    fontSize: 28,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
-    marginBottom: Spacing.xs,
+    marginBottom: 6,
   },
-  headerSubtitle: {
+  heroSub: {
     fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
     textAlign: 'center',
+    lineHeight: 22,
+    maxWidth: 280,
   },
-  scrollContent: {
-    paddingBottom: Spacing.xxl,
-  },
-  currentStatusBanner: {
+
+  /* banner */
+  banner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Palette.successSoft,
     marginHorizontal: Spacing.lg,
-    marginTop: Spacing.lg,
-    padding: Spacing.md,
+    marginBottom: Spacing.lg,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    backgroundColor: Palette.successSoft,
     borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.2)',
   },
-  currentStatusIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: Palette.success,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.md,
+    marginRight: Spacing.sm,
   },
-  currentStatusContent: {
-    flex: 1,
-  },
-  currentStatusTitle: {
-    fontSize: Typography.sizes.md,
+  bannerTitle: {
+    fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
-    marginBottom: 2,
   },
-  currentStatusSubtitle: {
-    fontSize: Typography.sizes.sm,
+  bannerSub: {
+    fontSize: Typography.sizes.xs,
     fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
+    marginTop: 2,
   },
-  manageButton: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Palette.success,
-  },
-  manageButtonText: {
+  manageText: {
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: '#FFFFFF',
+    color: Palette.success,
   },
-  billingToggle: {
+
+  /* toggle */
+  toggleRow: { alignItems: 'center', marginBottom: Spacing.lg },
+  toggle: {
     flexDirection: 'row',
     backgroundColor: Palette.cardBg,
-    marginHorizontal: Spacing.lg,
-    marginTop: Spacing.lg,
-    padding: 4,
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.round,
+    padding: 3,
     ...Shadows.sm,
   },
-  billingOption: {
-    flex: 1,
-    paddingVertical: Spacing.sm,
+  toggleBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: 10,
+    borderRadius: BorderRadius.round,
+    gap: 6,
   },
-  billingOptionActive: {
-    backgroundColor: Palette.accentSoft,
-  },
-  billingOptionText: {
+  toggleBtnOn: { backgroundColor: Palette.accentSoft },
+  toggleLabel: {
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamily,
-    color: Colors.text.secondary,
+    color: Colors.text.tertiary,
   },
-  billingOptionTextActive: {
+  toggleLabelOn: {
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Palette.gradientStart,
   },
-  savingsBadge: {
-    fontSize: Typography.sizes.xs,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-    color: Palette.success,
-  },
-  plansGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: Spacing.md,
-    marginTop: Spacing.lg,
-    gap: Spacing.md,
-  },
-  planCard: {
-    width: (SCREEN_WIDTH - Spacing.lg * 2 - Spacing.md) / 2,
-    backgroundColor: Palette.cardBg,
-    borderRadius: BorderRadius.xl,
-    padding: Spacing.md,
-    position: 'relative',
-    ...Shadows.md,
-  },
-  planCardPopular: {
-    borderWidth: 2,
-    borderColor: Palette.gradientStart,
-  },
-  planCardCurrent: {
-    borderWidth: 2,
-    borderColor: Palette.success,
-  },
-  popularBadge: {
-    position: 'absolute',
-    top: -10,
-    left: '50%',
-    transform: [{ translateX: -50 }],
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: Palette.gradientStart,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.round,
-    zIndex: 1,
-  },
-  popularBadgeText: {
-    fontSize: Typography.sizes.xs,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: '#FFFFFF',
-  },
-  currentBadge: {
-    position: 'absolute',
-    top: -10,
-    left: '50%',
-    transform: [{ translateX: -50 }],
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+  savePill: {
     backgroundColor: Palette.success,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
     borderRadius: BorderRadius.round,
-    zIndex: 1,
   },
-  currentBadgeText: {
-    fontSize: Typography.sizes.xs,
+  savePillText: {
+    fontSize: 10,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
-    color: '#FFFFFF',
+    color: '#FFF',
   },
-  planHeader: {
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-  planName: {
-    fontSize: Typography.sizes.xl,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: Colors.text.primary,
-    marginBottom: 4,
-  },
-  planDescription: {
-    fontSize: Typography.sizes.xs,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.tertiary,
-    marginBottom: Spacing.sm,
-  },
-  planPriceRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginBottom: 4,
-  },
-  planPrice: {
-    fontSize: Typography.sizes.xxl,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: Colors.text.primary,
-  },
-  planPeriod: {
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.tertiary,
-    marginLeft: 4,
-  },
-  planSavings: {
-    fontSize: Typography.sizes.xs,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-    color: Palette.success,
-  },
-  planFeatures: {
-    marginBottom: Spacing.md,
-    gap: Spacing.xs,
-  },
-  featureRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-  },
-  featureText: {
-    flex: 1,
-    fontSize: Typography.sizes.xs,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.secondary,
-  },
-  planButton: {
-    borderRadius: BorderRadius.md,
-    overflow: 'hidden',
-  },
-  planButtonCurrent: {
-    backgroundColor: Palette.successSoft,
-  },
-  planButtonPopular: {},
-  planButtonFree: {
-    backgroundColor: Palette.surfaceMuted,
-  },
-  planButtonGradient: {
-    paddingVertical: Spacing.md,
-    alignItems: 'center',
-  },
-  planButtonText: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: '#FFFFFF',
-  },
-  planButtonTextCurrent: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Palette.success,
-    textAlign: 'center',
-    paddingVertical: Spacing.md,
-  },
-  planButtonTextFree: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.text.secondary,
-    textAlign: 'center',
-    paddingVertical: Spacing.md,
-  },
-  comparisonSection: {
-    marginTop: Spacing.xl,
+
+  /* pro card */
+  proCard: {
     marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.md,
     backgroundColor: Palette.cardBg,
     borderRadius: BorderRadius.xl,
     padding: Spacing.lg,
-    ...Shadows.md,
+    borderWidth: 1.5,
+    borderColor: Palette.gradientStart,
+    ...Shadows.sm,
   },
-  comparisonTitle: {
+  proBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 4,
+    backgroundColor: Palette.gradientStart,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.round,
+    marginBottom: Spacing.md,
+  },
+  proBadgeText: {
+    fontSize: 11,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: '#FFF',
+  },
+  proName: {
     fontSize: Typography.sizes.lg,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
-    marginBottom: Spacing.md,
+    marginBottom: 4,
   },
-  comparisonTable: {
-    gap: Spacing.sm,
-  },
-  comparisonRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: Spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: Palette.separator,
-  },
-  comparisonLabel: {
-    width: 140,
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.secondary,
-  },
-  comparisonValues: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  comparisonValue: {
-    flex: 1,
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-    color: Colors.text.primary,
-    textAlign: 'center',
-  },
-  comparisonValueCurrent: {
+  proPriceRow: { flexDirection: 'row', alignItems: 'baseline' },
+  proPrice: {
+    fontSize: 34,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
-    color: Palette.gradientStart,
+    color: Colors.text.primary,
   },
-  comparisonCheck: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  comparisonX: {
+  proPeriod: {
     fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
+    marginLeft: 2,
   },
+  proSavingsNote: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Palette.success,
+    marginTop: 4,
+  },
+
+  separator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Palette.separator,
+    marginVertical: Spacing.md,
+  },
+
+  features: { gap: 12, marginBottom: Spacing.lg },
+  featureRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  checkDot: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: Palette.gradientStart,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  featureLabel: {
+    flex: 1,
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.secondary,
+    lineHeight: 20,
+  },
+
+  /* cta */
+  cta: { borderRadius: BorderRadius.lg, overflow: 'hidden' },
+  ctaInner: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderRadius: BorderRadius.lg,
+  },
+  ctaText: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: '#FFF',
+  },
+  currentBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 14,
+    backgroundColor: Palette.successSoft,
+    borderRadius: BorderRadius.lg,
+  },
+  currentBtnText: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Palette.success,
+  },
+
+  /* free card */
+  freeCard: {
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.lg,
+    backgroundColor: Palette.cardBg,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    borderWidth: 1,
+    borderColor: Palette.separator,
+  },
+  freeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.md,
+  },
+  freeName: {
+    fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: Colors.text.primary,
+  },
+  freePrice: {
+    fontSize: Typography.sizes.xxl,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: Colors.text.primary,
+    marginTop: 2,
+  },
+  freeBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: Palette.accentSoft,
+    borderRadius: BorderRadius.round,
+  },
+  freeBadgeText: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.text.secondary,
+  },
+  freeFeatures: { gap: 10 },
+  freeFeatureRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  freeFeatureLabel: {
+    flex: 1,
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+    lineHeight: 20,
+  },
+
+  /* footer */
   footer: {
-    marginTop: Spacing.xl,
+    marginTop: Spacing.lg,
     marginHorizontal: Spacing.lg,
     alignItems: 'center',
-    gap: Spacing.xs,
+    gap: 4,
   },
   footerText: {
     fontSize: Typography.sizes.xs,
