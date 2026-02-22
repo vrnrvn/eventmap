@@ -3,6 +3,7 @@ import { Text } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Notifications from 'expo-notifications';
 import {
   useFonts,
   PlusJakartaSans_400Regular,
@@ -27,6 +28,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { Typography } from '@/constants/theme';
+import { configureNotificationHandler } from '@/services/pushNotifications';
+import { router } from 'expo-router';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -59,6 +62,24 @@ export default function RootLayout() {
       (Text as any).defaultProps.style = { fontFamily: Typography.fontFamily };
     }
   }, [fontsLoaded]);
+
+  useEffect(() => {
+    configureNotificationHandler();
+    const responseSub = Notifications.addNotificationResponseReceivedListener(
+      (response) => {
+        const eventId = (response.notification.request.content.data as any)?.eventId;
+        if (typeof eventId === 'string' && eventId.length > 0) {
+          router.push(`/event/${eventId}` as never);
+        } else {
+          router.push('/(tabs)/notifications' as never);
+        }
+      }
+    );
+
+    return () => {
+      responseSub.remove();
+    };
+  }, []);
 
   if (!fontsLoaded && !fontError) {
     return null;
