@@ -4,6 +4,7 @@ import { authService } from '@/services/auth';
 import { Profile } from '@/types/database';
 import { profilesService } from '@/services/profiles';
 import { bannedService } from '@/services/banned';
+import { deactivatePushToken, registerPushToken } from '@/services/pushNotifications';
 
 type AuthContextType = {
   session: Session | null;
@@ -27,6 +28,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isBanned, setIsBanned] = useState(false);
+  const [activePushToken, setActivePushToken] = useState<string | null>(null);
 
   const loadProfile = async (userId: string) => {
     try {
@@ -73,6 +75,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const syncPush = async () => {
+      if (!user) return;
+      try {
+        const token = await registerPushToken();
+        if (!cancelled) {
+          setActivePushToken(token);
+        }
+      } catch (err) {
+        console.error('Push registration failed:', err);
+      }
+    };
+
+    syncPush();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
   const signIn = async (email: string, password: string) => {
     const data = await authService.signIn(email, password);
     setSession(data.session);
@@ -109,11 +133,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    if (activePushToken) {
+      try {
+        await deactivatePushToken(activePushToken);
+      } catch (err) {
+        console.error('Failed to deactivate push token:', err);
+      }
+    }
     await authService.signOut();
     setSession(null);
     setUser(null);
     setProfile(null);
     setIsBanned(false);
+    setActivePushToken(null);
   };
 
   const refreshProfile = async () => {

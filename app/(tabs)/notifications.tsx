@@ -36,8 +36,10 @@ import {
   markNotificationAsRead,
   markAllNotificationsAsRead,
   deleteNotification,
+  subscribeToNotifications,
   type Notification as ApiNotification,
 } from '@/services/notifications';
+import { useAuth } from '@/contexts/AuthContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -75,6 +77,8 @@ const getNotificationIcon = (type: NotificationType) => {
       return { Icon: MapPin, bg: Palette.accentSoft, color: Palette.badge };
     case 'event_update':
       return { Icon: Calendar, bg: Palette.accentSoft, color: Palette.badge };
+    case 'new_event_from_followed':
+      return { Icon: Sparkles, bg: Palette.accentSoft, color: Palette.badge };
     case 'promotion':
       return { Icon: Star, bg: Palette.warnSoft, color: Palette.warnDot };
     default:
@@ -121,6 +125,7 @@ const groupNotifications = (notifications: Notification[]) => {
 /* ── Component ── */
 export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -141,6 +146,30 @@ export default function NotificationsScreen() {
   useEffect(() => {
     loadNotifications();
   }, [loadNotifications]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const unsubscribe = subscribeToNotifications(user.id, {
+      onInsert: (incoming) => {
+        setNotifications((prev) => {
+          const exists = prev.some((n) => n.id === incoming.id);
+          if (exists) return prev;
+          return [incoming, ...prev];
+        });
+      },
+      onUpdate: (updated) => {
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === updated.id ? updated : n))
+        );
+      },
+      onDelete: (id) => {
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
+      },
+    });
+
+    return unsubscribe;
+  }, [user?.id]);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
   const sections = groupNotifications(notifications);
