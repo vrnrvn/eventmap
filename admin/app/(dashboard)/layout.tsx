@@ -9,6 +9,7 @@ const navItems = [
   { href: '/subscriptions', label: 'Subscriptions' },
   { href: '/complaints', label: 'Complaints' },
   { href: '/banners', label: 'Banners/Ads' },
+  { href: '/promotions', label: 'Promotions' },
   { href: '/refunds', label: 'Refunds' },
 ];
 

@@ -3,6 +3,14 @@ export type SocialHandles = {
   facebook?: string;
 };
 
+export type NotificationPreferences = {
+  new_follower?: boolean;
+  new_event_from_followed?: boolean;
+  event_update?: boolean;
+  rsvp?: boolean;
+  nearby_event?: boolean;
+};
+
 export type Profile = {
   id: string;
   name: string;
@@ -19,6 +27,9 @@ export type Profile = {
   is_profile_private?: boolean;
   show_attendance_publicly?: boolean;
   show_future_events?: boolean;
+  notification_preferences?: NotificationPreferences;
+  event_reminder_enabled?: boolean;
+  event_reminder_minutes?: number | null;
   created_at: string;
 };
 
@@ -56,6 +67,7 @@ export type Business = {
   subscription_expires_at: string | null;
   events_created_this_month: number;
   last_reset_date: string;
+  notifications_enabled?: boolean;
   created_at: string;
 };
 
