@@ -45,6 +45,11 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user_read
 -- Enable Row Level Security
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 
+-- Make policies idempotent (safe to re-run migration)
+DROP POLICY IF EXISTS "Users can read own notifications" ON notifications;
+DROP POLICY IF EXISTS "Users can update own notifications" ON notifications;
+DROP POLICY IF EXISTS "Users can delete own notifications" ON notifications;
+
 -- SELECT policy: users can only read their own notifications
 CREATE POLICY "Users can read own notifications"
   ON notifications
