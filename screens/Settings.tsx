@@ -42,6 +42,7 @@ import {
   Image as ImageIcon,
   Shield,
   FileText,
+  Bell,
 } from 'lucide-react-native';
 
 const Palette = {
@@ -57,6 +58,15 @@ const Palette = {
   successSoft: 'rgba(45, 138, 110, 0.12)',
   successDot: Colors.success,
 };
+
+const EVENT_REMINDER_OPTIONS: { value: number | null; label: string }[] = [
+  { value: null, label: 'Off' },
+  { value: 10, label: '10 minutes' },
+  { value: 30, label: '30 minutes' },
+  { value: 60, label: '1 hour' },
+  { value: 120, label: '2 hours' },
+  { value: 1440, label: '24 hours' },
+];
 
 const BUSINESS_CATEGORIES = [
   'Restaurant',
@@ -101,6 +111,20 @@ export default function SettingsScreen() {
     showProfileToOthers: true,
     showAttendancePublicly: true,
     showFutureEvents: true,
+  });
+
+  const [notificationForm, setNotificationForm] = useState({
+    newFollower: true,
+    newEventFromFollowed: true,
+    eventUpdate: true,
+    rsvp: true,
+    nearbyEvent: true,
+    eventReminderEnabled: true,
+    eventReminderMinutes: 60 as number | null,
+  });
+
+  const [businessNotificationForm, setBusinessNotificationForm] = useState({
+    notificationsEnabled: true,
   });
 
   const [businessForm, setBusinessForm] = useState({
@@ -151,6 +175,16 @@ export default function SettingsScreen() {
         showAttendancePublicly: profile.show_attendance_publicly ?? true,
         showFutureEvents: profile.show_future_events ?? true,
       });
+      const prefs = (profile.notification_preferences as Record<string, boolean> | null) ?? {};
+      setNotificationForm({
+        newFollower: prefs.new_follower ?? true,
+        newEventFromFollowed: prefs.new_event_from_followed ?? true,
+        eventUpdate: prefs.event_update ?? true,
+        rsvp: prefs.rsvp ?? true,
+        nearbyEvent: prefs.nearby_event ?? true,
+        eventReminderEnabled: profile.event_reminder_enabled ?? true,
+        eventReminderMinutes: profile.event_reminder_minutes ?? 60,
+      });
     }
   }, [profile]);
 
@@ -184,6 +218,9 @@ export default function SettingsScreen() {
           instagram: handles.instagram ?? '',
           facebook: handles.facebook ?? '',
           venuePhotos,
+        });
+        setBusinessNotificationForm({
+          notificationsEnabled: userBusiness.notifications_enabled ?? true,
         });
       };
       load();
@@ -297,6 +334,52 @@ export default function SettingsScreen() {
       Alert.alert('Error', 'Failed to save business. Please try again.');
     } finally {
       setSaving(null);
+    }
+  };
+
+  const handleNotificationToggle = async (
+    field: keyof typeof notificationForm,
+    value: boolean | number | null
+  ) => {
+    if (!user) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const next = { ...notificationForm, [field]: value };
+    setNotificationForm(next);
+    try {
+      const prefs = {
+        new_follower: next.newFollower,
+        new_event_from_followed: next.newEventFromFollowed,
+        event_update: next.eventUpdate,
+        rsvp: next.rsvp,
+        nearby_event: next.nearbyEvent,
+      };
+      const reminderEnabled = next.eventReminderMinutes != null;
+      const reminderMinutes = next.eventReminderMinutes ?? null;
+      await profilesService.updateProfile(user.id, {
+        notification_preferences: prefs,
+        event_reminder_enabled: reminderEnabled,
+        event_reminder_minutes: reminderMinutes,
+      });
+      await refreshProfile();
+    } catch (e) {
+      setNotificationForm(notificationForm);
+      Alert.alert('Error', 'Failed to update notification settings. Please try again.');
+    }
+  };
+
+  const handleBusinessNotificationToggle = async (value: boolean) => {
+    if (!userBusiness) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const prev = businessNotificationForm.notificationsEnabled;
+    setBusinessNotificationForm({ notificationsEnabled: value });
+    try {
+      await businessesService.updateBusiness(userBusiness.id, {
+        notifications_enabled: value,
+      });
+      await refreshBusiness();
+    } catch (e) {
+      setBusinessNotificationForm({ notificationsEnabled: prev });
+      Alert.alert('Error', 'Failed to update notification settings. Please try again.');
     }
   };
 
@@ -699,6 +782,34 @@ export default function SettingsScreen() {
                 </View>
               </View>
 
+              {/* ── Business Notifications ── */}
+              <View style={[styles.sectionLabelRow, { marginTop: 32 }]}>
+                <Text style={styles.sectionLabel}>Notifications</Text>
+              </View>
+              <View style={styles.card}>
+                <View style={styles.privacyRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Bell size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Receive notifications</Text>
+                    <Text style={styles.privacyDesc}>
+                      RSVPs and new followers
+                    </Text>
+                  </View>
+                  <Switch
+                    value={businessNotificationForm.notificationsEnabled}
+                    onValueChange={handleBusinessNotificationToggle}
+                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    thumbColor={
+                      businessNotificationForm.notificationsEnabled
+                        ? Colors.primary
+                        : Colors.background.secondary
+                    }
+                  />
+                </View>
+              </View>
+
               {/* Unsubscribe from premium – only for premium business users */}
               {isBizMode && userBusiness && isPremium && (
                 <TouchableOpacity
@@ -929,6 +1040,179 @@ export default function SettingsScreen() {
                     }
                   />
                 </View>
+              </View>
+
+              {/* ── Notifications Section ── */}
+              <View style={[styles.sectionLabelRow, { marginTop: 32 }]}>
+                <Text style={styles.sectionLabel}>Notifications</Text>
+              </View>
+              <View style={styles.card}>
+                <View style={styles.privacyRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Bell size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>New followers</Text>
+                    <Text style={styles.privacyDesc}>When someone follows your business</Text>
+                  </View>
+                  <Switch
+                    value={notificationForm.newFollower}
+                    onValueChange={(v) => handleNotificationToggle('newFollower', v)}
+                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    thumbColor={
+                      notificationForm.newFollower ? Colors.primary : Colors.background.secondary
+                    }
+                  />
+                </View>
+                <View style={styles.fieldSeparator} />
+                <View style={styles.privacyRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Bell size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>New events from followed businesses</Text>
+                    <Text style={styles.privacyDesc}>When a business you follow posts an event</Text>
+                  </View>
+                  <Switch
+                    value={notificationForm.newEventFromFollowed}
+                    onValueChange={(v) => handleNotificationToggle('newEventFromFollowed', v)}
+                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    thumbColor={
+                      notificationForm.newEventFromFollowed
+                        ? Colors.primary
+                        : Colors.background.secondary
+                    }
+                  />
+                </View>
+                <View style={styles.fieldSeparator} />
+                <View style={styles.privacyRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Bell size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Event updates</Text>
+                    <Text style={styles.privacyDesc}>When an event you RSVP'd to changes</Text>
+                  </View>
+                  <Switch
+                    value={notificationForm.eventUpdate}
+                    onValueChange={(v) => handleNotificationToggle('eventUpdate', v)}
+                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    thumbColor={
+                      notificationForm.eventUpdate ? Colors.primary : Colors.background.secondary
+                    }
+                  />
+                </View>
+                <View style={styles.fieldSeparator} />
+                <View style={styles.privacyRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Bell size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>RSVPs</Text>
+                    <Text style={styles.privacyDesc}>When someone RSVPs to your event</Text>
+                  </View>
+                  <Switch
+                    value={notificationForm.rsvp}
+                    onValueChange={(v) => handleNotificationToggle('rsvp', v)}
+                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    thumbColor={
+                      notificationForm.rsvp ? Colors.primary : Colors.background.secondary
+                    }
+                  />
+                </View>
+                <View style={styles.fieldSeparator} />
+                <View style={styles.privacyRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Bell size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Nearby events</Text>
+                    <Text style={styles.privacyDesc}>Events starting soon near you</Text>
+                  </View>
+                  <Switch
+                    value={notificationForm.nearbyEvent}
+                    onValueChange={(v) => handleNotificationToggle('nearbyEvent', v)}
+                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    thumbColor={
+                      notificationForm.nearbyEvent ? Colors.primary : Colors.background.secondary
+                    }
+                  />
+                </View>
+                <View style={styles.fieldSeparator} />
+                <View style={styles.privacyRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Bell size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Event reminder</Text>
+                    <Text style={styles.privacyDesc}>
+                      Remind me before events I'm attending
+                    </Text>
+                  </View>
+                  <Switch
+                    value={notificationForm.eventReminderMinutes != null}
+                    onValueChange={(v) =>
+                      handleNotificationToggle(
+                        'eventReminderMinutes',
+                        v ? 60 : null
+                      )
+                    }
+                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    thumbColor={
+                      notificationForm.eventReminderMinutes != null
+                        ? Colors.primary
+                        : Colors.background.secondary
+                    }
+                  />
+                </View>
+                {notificationForm.eventReminderMinutes != null && (
+                  <>
+                    <View style={styles.fieldSeparator} />
+                    <View style={styles.fieldRowNoPad}>
+                      <View style={[styles.fieldIcon, { marginTop: 14, backgroundColor: accentSoft }]}>
+                        <Bell size={16} color={accentColor} />
+                      </View>
+                      <View style={styles.fieldContent}>
+                        <Text style={styles.catLabel}>Remind me</Text>
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          contentContainerStyle={styles.catScrollContent}
+                        >
+                          {EVENT_REMINDER_OPTIONS.filter((o) => o.value != null).map((opt) => {
+                            const selected =
+                              notificationForm.eventReminderMinutes === opt.value;
+                            return (
+                              <TouchableOpacity
+                                key={String(opt.value)}
+                                style={[
+                                  styles.catChip,
+                                  selected && {
+                                    backgroundColor: accentColor,
+                                    borderColor: accentColor,
+                                  },
+                                ]}
+                                onPress={() =>
+                                  handleNotificationToggle('eventReminderMinutes', opt.value)
+                                }
+                                activeOpacity={0.7}
+                              >
+                                <Text
+                                  style={[
+                                    styles.catChipText,
+                                    selected && styles.catChipTextSelected,
+                                  ]}
+                                >
+                                  {opt.label}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </ScrollView>
+                      </View>
+                    </View>
+                  </>
+                )}
               </View>
             </>
           )}

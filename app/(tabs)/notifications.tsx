@@ -204,6 +204,8 @@ export default function NotificationsScreen() {
       markAsRead(notification.id);
       if (notification.eventId) {
         router.push(`/event/${notification.eventId}` as never);
+      } else if (notification.businessId) {
+        router.push(`/business/${notification.businessId}` as never);
       } else {
         router.push('/(tabs)/discover' as never);
       }
@@ -242,50 +244,59 @@ export default function NotificationsScreen() {
         overshootRight={false}
         friction={2}
       >
-        <TouchableOpacity
-          style={[
-            styles.notifCard,
-            !notification.read && styles.notifCardUnread,
-          ]}
-          onPress={() => handlePress(notification)}
-          activeOpacity={0.7}
-        >
-          {/* Unread dot */}
-          {!notification.read && <View style={styles.unreadDot} />}
+        <View style={styles.notifCardWrapper}>
+          <TouchableOpacity
+            style={[
+              styles.notifCard,
+              !notification.read && styles.notifCardUnread,
+            ]}
+            onPress={() => handlePress(notification)}
+            activeOpacity={0.7}
+          >
+            {/* Unread dot */}
+            {!notification.read && <View style={styles.unreadDot} />}
 
-          {/* Icon */}
-          <View style={[styles.notifIcon, { backgroundColor: bg }]}>
-            <Icon size={18} color={color} />
-          </View>
+            {/* Icon */}
+            <View style={[styles.notifIcon, { backgroundColor: bg }]}>
+              <Icon size={18} color={color} />
+            </View>
 
-          {/* Content */}
-          <View style={styles.notifContent}>
-            <Text
-              style={[
-                styles.notifTitle,
-                !notification.read && styles.notifTitleUnread,
-              ]}
-              numberOfLines={1}
-            >
-              {notification.title}
-            </Text>
-            <Text style={styles.notifBody} numberOfLines={2}>
-              {notification.body}
-            </Text>
-            <Text style={styles.notifTime}>
-              {formatTimeAgo(notification.timestamp)}
-            </Text>
-          </View>
+            {/* Content */}
+            <View style={styles.notifContent}>
+              <Text
+                style={[
+                  styles.notifTitle,
+                  !notification.read && styles.notifTitleUnread,
+                ]}
+                numberOfLines={1}
+              >
+                {notification.title}
+              </Text>
+              <Text style={styles.notifBody} numberOfLines={2}>
+                {notification.body}
+              </Text>
+              <Text style={styles.notifTime}>
+                {formatTimeAgo(notification.timestamp)}
+              </Text>
+            </View>
 
-          {/* Chevron */}
-          {notification.eventId && (
-            <ChevronRight
-              size={16}
-              color={Colors.text.tertiary}
-              style={styles.notifChevron}
-            />
-          )}
-        </TouchableOpacity>
+            {/* Chevron */}
+            {(notification.eventId || notification.businessId) && (
+              <ChevronRight
+                size={16}
+                color={Colors.text.tertiary}
+                style={styles.notifChevron}
+              />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            onPress={() => dismissNotification(notification.id)}
+            style={styles.deleteIconBtn}
+          >
+            <Trash2 size={18} color={Colors.text.tertiary} />
+          </TouchableOpacity>
+        </View>
       </Swipeable>
     );
   };
@@ -524,6 +535,11 @@ const styles = StyleSheet.create({
   },
 
   /* ── Notification card ── */
+  notifCardWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
   notifCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -531,7 +547,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 14,
     paddingHorizontal: 14,
-    marginBottom: 8,
+    flex: 1,
+    marginRight: 8,
     position: 'relative',
     ...Platform.select({
       ios: {
@@ -601,6 +618,9 @@ const styles = StyleSheet.create({
   notifChevron: {
     marginLeft: 8,
   },
+  deleteIconBtn: {
+    padding: 8,
+  },
 
   /* ── Swipe action ── */
   swipeAction: {
@@ -610,7 +630,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: 80,
     marginBottom: 8,
-    marginLeft: 8,
     gap: 4,
   },
   swipeActionText: {

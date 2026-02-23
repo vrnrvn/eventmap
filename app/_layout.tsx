@@ -3,7 +3,6 @@ import { Text } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
-import * as Notifications from 'expo-notifications';
 import {
   useFonts,
   PlusJakartaSans_400Regular,
@@ -28,8 +27,35 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { Typography } from '@/constants/theme';
-import { configureNotificationHandler } from '@/services/pushNotifications';
+import { setupNotificationResponseHandlers } from '@/services/pushNotifications';
 import { router } from 'expo-router';
+import * as Linking from 'expo-linking';
+
+function handleNotificationData(data: Record<string, unknown> | null | undefined) {
+  if (!data || typeof data !== 'object') {
+    router.push('/(tabs)/notifications' as never);
+    return;
+  }
+  const eventId = data.eventId;
+  const businessId = data.businessId;
+  const linkUrl = data.linkUrl;
+
+  if (typeof eventId === 'string' && eventId.length > 0) {
+    router.push(`/event/${eventId}` as never);
+    return;
+  }
+  if (typeof businessId === 'string' && businessId.length > 0) {
+    router.push(`/business/${businessId}` as never);
+    return;
+  }
+  if (typeof linkUrl === 'string' && linkUrl.startsWith('myapp://')) {
+    const parsed = Linking.parse(linkUrl);
+    const path = parsed.path ? `/${parsed.path}` : '/(tabs)/notifications';
+    router.push(path as never);
+    return;
+  }
+  router.push('/(tabs)/notifications' as never);
+}
 
 SplashScreen.preventAutoHideAsync();
 
@@ -64,21 +90,8 @@ export default function RootLayout() {
   }, [fontsLoaded]);
 
   useEffect(() => {
-    configureNotificationHandler();
-    const responseSub = Notifications.addNotificationResponseReceivedListener(
-      (response) => {
-        const eventId = (response.notification.request.content.data as any)?.eventId;
-        if (typeof eventId === 'string' && eventId.length > 0) {
-          router.push(`/event/${eventId}` as never);
-        } else {
-          router.push('/(tabs)/notifications' as never);
-        }
-      }
-    );
-
-    return () => {
-      responseSub.remove();
-    };
+    const cleanup = setupNotificationResponseHandlers(handleNotificationData);
+    return () => cleanup?.();
   }, []);
 
   if (!fontsLoaded && !fontError) {
