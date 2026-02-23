@@ -13,12 +13,19 @@ import {
 import DateTimePicker, {
   DateTimePickerAndroid,
 } from '@react-native-community/datetimepicker';
+import { Repeat, ChevronRight } from 'lucide-react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useApp } from '@/contexts/AppContext';
 import { Input } from '@/components/Input';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
 import { GoogleMapView } from '@/components/GoogleMapView';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
+import {
+  RecurrencePicker,
+  getRecurrenceLabel,
+  type RecurrencePickerHandle,
+} from '@/components/RecurrencePicker';
+import type { RecurrenceOption } from '@/utils/recurrence';
 import { geocodingService } from '@/services/geocoding';
 import { eventsService } from '@/services/events';
 import { categoriesService } from '@/services/categories';
@@ -53,7 +60,9 @@ export default function EditEvent() {
     lat: DEFAULT_LOCATION.lat,
     lng: DEFAULT_LOCATION.lng,
     images: [] as ImageAsset[],
+    recurrence: null as RecurrenceOption,
   });
+  const recurrencePickerRef = useRef<RecurrencePickerHandle>(null);
   /** Track the original photos loaded from DB to detect removals */
   const originalPhotoIds = useRef<string[]>([]);
 
@@ -98,6 +107,7 @@ export default function EditEvent() {
           lat: e.lat,
           lng: e.lng,
           images: existingImages,
+          recurrence: e.is_recurring && e.recurrence_pattern ? e.recurrence_pattern : null,
         });
       } catch {
         Alert.alert('Error', 'Failed to load event', [
@@ -208,6 +218,8 @@ export default function EditEvent() {
         lat,
         lng,
         cover_image_url: coverImageUrl,
+        is_recurring: formData.recurrence != null,
+        recurrence_pattern: formData.recurrence ?? null,
       });
       Alert.alert('Saved', 'Event updated.', [
         { text: 'OK', onPress: () => router.back() },
@@ -376,6 +388,37 @@ export default function EditEvent() {
           <Text style={styles.errorText}>{errors.endDatetime}</Text>
         )}
 
+        {/* Recurrence (Premium only) */}
+        <Text style={styles.label}>Repeat</Text>
+        <TouchableOpacity
+          style={styles.dateButton}
+          onPress={() => {
+            if (userBusiness?.subscription_tier !== 'premium') {
+              Alert.alert(
+                'Premium Feature',
+                'Recurring events are only available for Premium businesses. Upgrade to create recurring events.',
+                [
+                  { text: 'OK' },
+                  { text: 'Upgrade', onPress: () => router.push('/(tabs)/profile') },
+                ]
+              );
+              return;
+            }
+            recurrencePickerRef.current?.present();
+          }}
+        >
+          <View style={styles.recurrenceRow}>
+            <Repeat size={18} color={Colors.primary} />
+            <View style={styles.recurrenceTextWrap}>
+              <Text style={styles.dateButtonText}>
+                {getRecurrenceLabel(formData.recurrence)}
+                {userBusiness?.subscription_tier !== 'premium' && ' (Premium)'}
+              </Text>
+            </View>
+            <ChevronRight size={18} color={Colors.text.tertiary} />
+          </View>
+        </TouchableOpacity>
+
         <Text style={styles.label}>Photos</Text>
         <Text style={styles.tapHint}>First image becomes the cover photo</Text>
         <ImagePickerButton
@@ -427,6 +470,11 @@ export default function EditEvent() {
             }}
           />
         </View>
+        <RecurrencePicker
+          ref={recurrencePickerRef}
+          selectedValue={formData.recurrence}
+          onSelect={(v) => setFormData((f) => ({ ...f, recurrence: v }))}
+        />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -535,6 +583,14 @@ const styles = StyleSheet.create({
   dateButtonText: {
     fontSize: Typography.sizes.md,
     color: Colors.text.primary,
+  },
+  recurrenceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  recurrenceTextWrap: {
+    flex: 1,
   },
   errorText: {
     fontSize: Typography.sizes.xs,
