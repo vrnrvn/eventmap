@@ -1,12 +1,25 @@
 import { Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { supabase } from './supabase';
+
+const isExpoGo = Constants.appOwnership === 'expo';
+
+function getNotifications(): typeof import('expo-notifications') | null {
+  if (isExpoGo && Platform.OS === 'android') return null;
+  try {
+    return require('expo-notifications');
+  } catch {
+    return null;
+  }
+}
 
 let configured = false;
 
 export function configureNotificationHandler() {
   if (configured) return;
+
+  const Notifications = getNotifications();
+  if (!Notifications) return;
 
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
@@ -28,6 +41,9 @@ function getProjectId(): string | null {
 }
 
 export async function registerPushToken(): Promise<string | null> {
+  const Notifications = getNotifications();
+  if (!Notifications) return null;
+
   configureNotificationHandler();
 
   const existing = await Notifications.getPermissionsAsync();
@@ -72,4 +88,30 @@ export async function deactivatePushToken(token: string): Promise<void> {
   await (supabase as any).rpc('deactivate_push_token', {
     p_token: token,
   });
+}
+
+export type NotificationResponseHandler = (data: Record<string, unknown> | null | undefined) => void;
+
+export function setupNotificationResponseHandlers(
+  onResponse: NotificationResponseHandler
+): (() => void) | null {
+  const Notifications = getNotifications();
+  if (!Notifications) return null;
+
+  configureNotificationHandler();
+
+  Notifications.getLastNotificationResponseAsync().then((response) => {
+    if (response?.notification.request.content.data) {
+      onResponse(response.notification.request.content.data as Record<string, unknown>);
+    }
+  });
+
+  const subscription = Notifications.addNotificationResponseReceivedListener(
+    (response) => {
+      const data = response.notification.request.content.data as Record<string, unknown> | undefined;
+      onResponse(data);
+    }
+  );
+
+  return () => subscription.remove();
 }

@@ -22,6 +22,7 @@ export interface Notification {
   timestamp: Date;
   read: boolean;
   eventId?: string;
+  businessId?: string;
 }
 
 type RealtimeNotificationHandler = {
@@ -39,6 +40,7 @@ function mapRowToNotification(row: any): Notification {
     timestamp: new Date(row.created_at),
     read: row.read ?? false,
     eventId: row.event_id ?? undefined,
+    businessId: row.business_id ?? undefined,
   };
 }
 
@@ -53,7 +55,7 @@ export async function getNotifications(): Promise<Notification[]> {
 
   const { data, error } = await supabase
     .from('notifications')
-    .select('id, type, title, body, read, event_id, created_at')
+    .select('id, type, title, body, read, event_id, business_id, created_at')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(100);
