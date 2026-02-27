@@ -4,6 +4,7 @@ import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import { supabase } from './supabase';
+import { getAuthRedirectUrl } from './authRedirect';
 
 const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim() || '';
 
@@ -30,6 +31,7 @@ export const authService = {
 
     try {
       await GoogleSignin.hasPlayServices();
+      await GoogleSignin.signOut();
       const response = await GoogleSignin.signIn();
 
       if (response.type !== 'success' || !response.data?.idToken) {
@@ -62,18 +64,26 @@ export const authService = {
   },
 
   async signInWithOAuthWeb(provider: 'google' | 'facebook') {
-    const redirectTo = AuthSession.makeRedirectUri();
+    const redirectTo = getAuthRedirectUrl();
 
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo,
         skipBrowserRedirect: true,
+        ...(provider === 'google' && {
+          queryParams: { prompt: 'select_account' },
+        }),
       },
     });
 
     if (error) throw error;
     if (!data?.url) throw new Error('No OAuth URL returned');
+
+    if (Platform.OS === 'web') {
+      window.location.href = data.url;
+      return;
+    }
 
     const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
 
