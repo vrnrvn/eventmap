@@ -4,13 +4,16 @@
     "slug": "eventmap",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "myapp",
+    "icon": "./assets/images/EMlogo.png",
+    "scheme": "eventmap",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.eventmap.app"
+      "bundleIdentifier": "com.eventmap.app",
+      "associatedDomains": [
+        "applinks:eventmap.pro"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -21,7 +24,12 @@
       "expo-router",
       "expo-font",
       "expo-web-browser",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "default"
+        }
+      ],
       [
         "@react-native-google-signin/google-signin",
         {
@@ -33,13 +41,52 @@
       "typedRoutes": true
     },
     "android": {
-      "package": "com.eventmap.app"
+      "package": "com.eventmap.app",
+      "googleServicesFile": "./google-services.json",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "eventmap",
+              "host": "auth-callback",
+              "pathPrefix": "/"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        },
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "eventmap.pro",
+              "pathPrefix": "/"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
     },
     "extra": {
       "router": {},
       "eas": {
         "projectId": "a7da7dc4-919f-4d29-981b-777798915b54"
       }
+    },
+    "owner": "shalommeoded",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/a7da7dc4-919f-4d29-981b-777798915b54"
     }
   }
 }

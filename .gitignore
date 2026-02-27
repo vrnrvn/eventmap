@@ -27,6 +27,10 @@ yarn-error.*
 .DS_Store
 *.pem
 
+# Firebase FCM service account key (private - upload to EAS only)
+*-firebase-adminsdk*.json
+firebase-service-account*.json
+
 # local env files
 .env*.local
 .env
