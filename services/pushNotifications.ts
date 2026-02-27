@@ -5,7 +5,8 @@ import { supabase } from './supabase';
 const isExpoGo = Constants.appOwnership === 'expo';
 
 function getNotifications(): typeof import('expo-notifications') | null {
-  if (isExpoGo && Platform.OS === 'android') return null;
+  if (Platform.OS === 'web') return null;
+  if (isExpoGo) return null;
   try {
     return require('expo-notifications');
   } catch {
@@ -40,11 +41,22 @@ function getProjectId(): string | null {
   return fromExpoConfig ?? fromEasConfig ?? null;
 }
 
+const ANDROID_CHANNEL_ID = 'default';
+
 export async function registerPushToken(): Promise<string | null> {
   const Notifications = getNotifications();
   if (!Notifications) return null;
 
   configureNotificationHandler();
+
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
+      name: 'EventMap Notifications',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#FF231F7C',
+    });
+  }
 
   const existing = await Notifications.getPermissionsAsync();
   let finalStatus = existing.status;
@@ -74,10 +86,13 @@ export async function registerPushToken(): Promise<string | null> {
   }
   const token = tokenResponse.data;
 
+  const appOwnership = (Constants as any).appOwnership ?? 'standalone';
+
   await (supabase as any).rpc('upsert_push_token', {
     p_token: token,
     p_platform: Platform.OS,
     p_device_id: `${(Constants as any).deviceName ?? 'device'}-${Platform.OS}`,
+    p_app_ownership: appOwnership,
   });
 
   return token;

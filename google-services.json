@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "890594356744",
+    "project_id": "eventmap-notification",
+    "storage_bucket": "eventmap-notification.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:890594356744:android:de6d15ea85dc6472eb2bbd",
+        "android_client_info": {
+          "package_name": "com.eventmap.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAfpYdWCWOoOP1QLwYqjFtOfq0x-mae3k4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
