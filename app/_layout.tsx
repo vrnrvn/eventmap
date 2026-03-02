@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Text } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -30,6 +30,7 @@ import { Typography } from '@/constants/theme';
 import { setupNotificationResponseHandlers } from '@/services/pushNotifications';
 import { router } from 'expo-router';
 import * as Linking from 'expo-linking';
+import { BrandedSplashScreen } from '@/components/BrandedSplashScreen';
 
 function handleNotificationData(data: Record<string, unknown> | null | undefined) {
   if (!data || typeof data !== 'object') {
@@ -63,6 +64,7 @@ const queryClient = new QueryClient();
 
 export default function RootLayout() {
   useFrameworkReady();
+  const [showBrandedSplash, setShowBrandedSplash] = useState(true);
 
   const [fontsLoaded, fontError] = useFonts({
     PlusJakartaSans_400Regular,
@@ -81,6 +83,18 @@ export default function RootLayout() {
       SplashScreen.hideAsync();
     }
   }, [fontsLoaded, fontError]);
+
+  useEffect(() => {
+    if (!fontsLoaded && !fontError) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      setShowBrandedSplash(false);
+    }, 1150);
+
+    return () => clearTimeout(timeout);
+  }, [fontError, fontsLoaded]);
 
   useEffect(() => {
     if (fontsLoaded) {
@@ -114,6 +128,7 @@ export default function RootLayout() {
                 <Stack.Screen name="premium" options={{ headerShown: false }} />
                 <Stack.Screen name="+not-found" />
               </Stack>
+              <BrandedSplashScreen visible={showBrandedSplash} />
               </BottomSheetModalProvider>
               </SearchProvider>
               <StatusBar style="auto" />
