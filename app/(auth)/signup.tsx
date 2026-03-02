@@ -26,7 +26,7 @@ import {
   Lock,
   UserPlus,
 } from 'lucide-react-native';
-import { GoogleIcon, FacebookIcon } from '@/components/icons/BrandIcons';
+import { GoogleIcon } from '@/components/icons/BrandIcons';
 
 const Palette = {
   gradientStart: Colors.primary,
@@ -52,7 +52,7 @@ export default function SignupScreen() {
   }>({});
   const [showEmailPopup, setShowEmailPopup] = useState(false);
   const [emailPopupVariant, setEmailPopupVariant] = useState<'new' | 'existing'>('new');
-  const [oauthLoading, setOauthLoading] = useState<'google' | 'facebook' | null>(null);
+  const [oauthLoading, setOauthLoading] = useState<'google' | null>(null);
 
   const validateForm = () => {
     const newErrors: { name?: string; email?: string; password?: string } = {};
@@ -107,7 +107,7 @@ export default function SignupScreen() {
     router.replace('/');
   };
 
-  const handleOAuthSignIn = async (provider: 'google' | 'facebook') => {
+  const handleOAuthSignIn = async (provider: 'google') => {
     setOauthLoading(provider);
     try {
       await signInWithOAuth(provider);
@@ -115,7 +115,7 @@ export default function SignupScreen() {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       Alert.alert(
-        provider === 'google' ? 'Google Sign In' : 'Facebook Sign In',
+        'Google Sign In',
         msg.includes('cancelled') ? 'Sign in was cancelled.' : msg
       );
     } finally {
@@ -244,23 +244,6 @@ export default function SignupScreen() {
                 )}
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.methodCard}
-                onPress={() => handleOAuthSignIn('facebook')}
-                disabled={oauthLoading !== null}
-                activeOpacity={0.85}
-              >
-                <View style={[styles.methodIcon, styles.methodIconBrand]}>
-                  <FacebookIcon size={24} />
-                </View>
-                <View style={styles.methodText}>
-                  <Text style={styles.methodLabel}>Facebook</Text>
-                  <Text style={styles.methodHint}>Sign up with Facebook</Text>
-                </View>
-                {oauthLoading === 'facebook' && (
-                  <ActivityIndicator size="small" color={Colors.primary} style={styles.methodSpinner} />
-                )}
-              </TouchableOpacity>
             </View>
           ) : null}
 

@@ -15,7 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { GoogleIcon, FacebookIcon } from '@/components/icons/BrandIcons';
+import { GoogleIcon } from '@/components/icons/BrandIcons';
 import { Input } from '@/components/Input';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import {
@@ -53,7 +53,7 @@ export default function LoginScreen() {
   const [errors, setErrors] = useState<{ email?: string; password?: string }>(
     {}
   );
-  const [oauthLoading, setOauthLoading] = useState<'google' | 'facebook' | null>(null);
+  const [oauthLoading, setOauthLoading] = useState<'google' | null>(null);
 
   const validateForm = () => {
     const newErrors: { email?: string; password?: string } = {};
@@ -90,7 +90,7 @@ export default function LoginScreen() {
     scrollRef.current?.scrollTo({ y: 180, animated: true });
   };
 
-  const handleOAuthSignIn = async (provider: 'google' | 'facebook') => {
+  const handleOAuthSignIn = async (provider: 'google') => {
     setOauthLoading(provider);
     try {
       await signInWithOAuth(provider);
@@ -98,7 +98,7 @@ export default function LoginScreen() {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       Alert.alert(
-        provider === 'google' ? 'Google Sign In' : 'Facebook Sign In',
+        'Google Sign In',
         msg.includes('cancelled') ? 'Sign in was cancelled.' : msg
       );
     } finally {
@@ -254,20 +254,6 @@ export default function LoginScreen() {
                 {oauthLoading === 'google' ? 'Signing in…' : 'Continue with Google'}
               </Text>
               {oauthLoading === 'google' && (
-                <ActivityIndicator size="small" color={Colors.primary} style={styles.oauthSpinner} />
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.oauthBtn, oauthLoading !== null && styles.oauthBtnDisabled]}
-              onPress={() => handleOAuthSignIn('facebook')}
-              disabled={oauthLoading !== null}
-              activeOpacity={0.85}
-            >
-              <FacebookIcon size={20} />
-              <Text style={styles.oauthBtnText}>
-                {oauthLoading === 'facebook' ? 'Signing in…' : 'Continue with Facebook'}
-              </Text>
-              {oauthLoading === 'facebook' && (
                 <ActivityIndicator size="small" color={Colors.primary} style={styles.oauthSpinner} />
               )}
             </TouchableOpacity>
