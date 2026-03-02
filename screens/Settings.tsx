@@ -43,6 +43,7 @@ import {
   Shield,
   FileText,
   Bell,
+  ChevronRight,
 } from 'lucide-react-native';
 
 const Palette = {
@@ -1214,6 +1215,44 @@ export default function SettingsScreen() {
                   </>
                 )}
               </View>
+
+              {/* ── About Section ── */}
+              <View style={[styles.sectionLabelRow, { marginTop: 32 }]}> 
+                <Text style={styles.sectionLabel}>About</Text>
+              </View>
+              <View style={styles.card}>
+                <TouchableOpacity
+                  style={styles.aboutRow}
+                  onPress={() => router.push('/settings/faq')}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <FileText size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>FAQ</Text>
+                    <Text style={styles.privacyDesc}>Quick answers to common questions</Text>
+                  </View>
+                  <ChevronRight size={18} color={Colors.text.tertiary} />
+                </TouchableOpacity>
+
+                <View style={styles.fieldSeparator} />
+
+                <TouchableOpacity
+                  style={styles.aboutRow}
+                  onPress={() => router.push('/settings/disclaimers')}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Shield size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Disclaimers</Text>
+                    <Text style={styles.privacyDesc}>Important notes about events, safety, and accuracy</Text>
+                  </View>
+                  <ChevronRight size={18} color={Colors.text.tertiary} />
+                </TouchableOpacity>
+              </View>
             </>
           )}
         </ScrollView>
@@ -1380,6 +1419,13 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     gap: 14,
   },
+  aboutRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 14,
+  },
   privacyContent: {
     flex: 1,
   },
@@ -1488,7 +1534,7 @@ const styles = StyleSheet.create({
   },
   addressCoords: {
     fontSize: Typography.sizes.xs,
-    fontFamily: Typography.fontFamilies.mono,
+    fontFamily: Typography.fontFamilies.regular ?? Typography.fontFamily,
     color: Colors.text.tertiary,
     marginTop: 4,
   },
