@@ -5,6 +5,11 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/EMlogo.png",
+    "splash": {
+      "image": "./assets/images/EMlogo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#083838"
+    },
     "scheme": "eventmap",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
