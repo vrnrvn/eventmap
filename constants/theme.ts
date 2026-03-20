@@ -4,48 +4,48 @@
  */
 
 export const Colors = {
-  /** Terracotta – warm, earthy, place-centric primary */
-  primary: '#C45C3E',
-  primaryDark: '#A34A2F',
-  primaryLight: '#D47A5F',
+  /** New brand red */
+  primary: '#B41924',
+  primaryDark: '#A3041A',
+  primaryLight: '#FF7671',
 
-  /** Deep teal – geography, water, secondary actions */
-  secondary: '#0D4F4F',
-  secondaryDark: '#083838',
-  secondaryLight: '#1A6B6B',
+  /** Warm secondary orange-brown */
+  secondary: '#9B3E20',
+  secondaryDark: '#8B3315',
+  secondaryLight: '#FFC4B3',
 
-  /** Warm amber – energy, events, accents */
-  accent: '#E8A838',
-  accentDark: '#C98E1F',
-  accentLight: '#F0BC5C',
+  /** Accent retained for highlights and badges */
+  accent: '#FF8EAA',
+  accentDark: '#B40953',
+  accentLight: '#FFEFF0',
 
   success: '#2D8A6E',
   warning: '#D4A017',
-  error: '#C45C3E',
+  error: '#B41340',
 
   text: {
-    primary: '#1C1C1C',
-    secondary: '#5C5C5C',
-    tertiary: '#8A8A8A',
-    disabled: '#B8B8B8',
-    inverse: '#FAF8F5',
+    primary: '#2D2F2F',
+    secondary: '#5A5C5C',
+    tertiary: '#767777',
+    disabled: '#9C9D9D',
+    inverse: '#FFEFEE',
   },
 
   background: {
-    /** Warm cream – main app background */
-    primary: '#FAF8F5',
-    /** Slightly cooler surface for cards */
-    secondary: '#F2EFE9',
-    /** Deeper surface for contrast */
-    tertiary: '#E8E4DC',
+    /** Main canvas */
+    primary: '#F6F6F6',
+    /** Elevated surface */
+    secondary: '#F0F1F1',
+    /** Muted surface */
+    tertiary: '#E7E8E8',
     /** Dark mode / overlays */
-    dark: '#1C1C1C',
+    dark: '#0C0F0F',
   },
 
   border: {
-    light: '#E8E4DC',
-    medium: '#D4CFC4',
-    dark: '#8A8A8A',
+    light: '#DBDDDD',
+    medium: '#ACADAD',
+    dark: '#767777',
   },
 
   overlay: {
@@ -54,7 +54,7 @@ export const Colors = {
     dark: 'rgba(28, 28, 28, 0.55)',
   },
 
-  premium: '#E8A838',
+  premium: '#B40953',
 };
 
 export const Spacing = {
@@ -94,11 +94,20 @@ export const DMSansFont = {
   bold: 'DMSans_700Bold',
 } as const;
 
+/** Inter – labels and compact UI metadata */
+export const InterFont = {
+  regular: 'Inter_400Regular',
+  medium: 'Inter_500Medium',
+  semibold: 'Inter_600SemiBold',
+} as const;
+
 export const Typography = {
   fontFamily: DMSansFont.regular,
   fontFamilies: DMSansFont,
   displayFont: PlusJakartaSansFont.bold,
   displayFontFamilies: PlusJakartaSansFont,
+  labelFont: InterFont.medium,
+  labelFontFamilies: InterFont,
   sizes: {
     xs: 12,
     sm: 14,
