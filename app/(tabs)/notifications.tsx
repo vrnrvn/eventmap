@@ -195,7 +195,10 @@ export default function NotificationsScreen() {
           >
             <Search size={21} color={Palette.muted} />
           </TouchableOpacity>
-          <Text style={styles.brandText}>EventMaps</Text>
+          <View style={styles.brandRow}>
+            <Image source={require('@/assets/images/EMlogo.png')} style={styles.brandLogo} />
+            <Text style={styles.brandText}>EventMaps</Text>
+          </View>
           <TouchableOpacity
             style={styles.topBarIcon}
             activeOpacity={0.75}
@@ -380,6 +383,17 @@ const styles = StyleSheet.create({
     fontFamily: Typography.displayFontFamilies.extrabold,
     fontWeight: '800',
     color: Palette.primary,
+  },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  brandLogo: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    tintColor: Colors.primary,
   },
   editorialHeader: {
     marginBottom: 20,

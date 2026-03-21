@@ -14,6 +14,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import { eventsService } from '@/services/events';
@@ -43,6 +44,9 @@ import {
   Star,
   Flag,
   Repeat,
+  Share2,
+  Ticket,
+  Clock3,
 } from 'lucide-react-native';
 import { EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { complaintsService } from '@/services/complaints';
@@ -51,6 +55,7 @@ import { getNextOccurrences, getRecurrenceLabel } from '@/utils/recurrence';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function EventDetail() {
+  const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user, isBanned } = useAuth();
   const { userBusiness } = useApp();
@@ -65,7 +70,7 @@ export default function EventDetail() {
   const [showReviewForm, setShowReviewForm] = useState(false);
   const attendeesSheetRef = useRef<AttendeesBottomSheetHandle>(null);
 
-  const isOwner = userBusiness && details?.event.business_id === userBusiness.id;
+  const isOwner = !!(userBusiness && details?.event.business_id === userBusiness.id);
 
   const allPhotoUrls = useMemo(() => {
     if (!details) return [];
@@ -288,52 +293,30 @@ export default function EventDetail() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <ArrowLeft size={24} color={Colors.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {event.title}
-        </Text>
-        <View style={styles.headerRight}>
-          {user && !isOwner && (
-            <TouchableOpacity
-              style={styles.reportButton}
-              onPress={async () => {
-                Alert.alert(
-                  'Report Event',
-                  'Report this event for inappropriate content?',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                      text: 'Report',
-                      style: 'destructive',
-                      onPress: async () => {
-                        try {
-                          await complaintsService.createComplaint('event', event.id);
-                          Alert.alert('Thank you', 'Your report has been submitted.');
-                        } catch {
-                          Alert.alert('Error', 'Failed to submit report.');
-                        }
-                      },
-                    },
-                  ]
-                );
-              }}
-            >
-              <Flag size={20} color={Colors.text.tertiary} />
-            </TouchableOpacity>
-          )}
+      <View style={[styles.heroTopBarWrap, { top: insets.top + 10 }]}>
+        <View style={styles.heroTopBar}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <ArrowLeft size={24} color={Colors.text.primary} />
+          </TouchableOpacity>
+          <Text style={styles.brandTitle}>EventMaps</Text>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => {
+              Alert.alert('Share', 'Sharing is coming soon.');
+            }}
+          >
+            <Share2 size={20} color={Colors.text.primary} />
+          </TouchableOpacity>
         </View>
       </View>
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={{ paddingBottom: 160 }}
         showsVerticalScrollIndicator={false}
       >
-        {allPhotoUrls.length > 0 ? (
-          <View>
+        <View style={styles.heroSection}>
+          {allPhotoUrls.length > 0 ? (
             <FlatList
               data={allPhotoUrls}
               horizontal
@@ -356,19 +339,19 @@ export default function EventDetail() {
                 </TouchableOpacity>
               )}
             />
-            {allPhotoUrls.length > 1 && (
-              <View style={styles.photoDots}>
-                {allPhotoUrls.map((_, i) => (
-                  <View key={i} style={[styles.photoDot, i === 0 && styles.photoDotActive]} />
-                ))}
-              </View>
-            )}
+          ) : (
+            <View style={styles.coverPlaceholder}>
+              <EventmapCalendar size={48} color={Colors.text.tertiary} />
+            </View>
+          )}
+          <View style={styles.heroGradient} />
+          <View style={styles.heroTitleWrap}>
+            <View style={styles.heroCategoryPill}>
+              <Text style={styles.heroCategoryText}>{category.label.toUpperCase()}</Text>
+            </View>
+            <Text style={styles.heroTitle}>{event.title}</Text>
           </View>
-        ) : (
-          <View style={styles.coverPlaceholder}>
-            <EventmapCalendar size={48} color={Colors.text.tertiary} />
-          </View>
-        )}
+        </View>
 
         <ImageViewer
           visible={viewerVisible}
@@ -377,50 +360,57 @@ export default function EventDetail() {
           onClose={() => setViewerVisible(false)}
         />
 
-        <View style={styles.content}>
-          <Text style={styles.title}>{event.title}</Text>
-          <View style={styles.categoryBadge}>
-            <CategoryIcon category={category.slug} size="sm" variant="pill" />
-            <Text style={styles.categoryText}>{category.label}</Text>
+        <View style={styles.contentCard}>
+          <View style={styles.quickInfoSection}>
+            <View style={styles.metaRow}>
+              <View style={styles.metaIconWrap}>
+                <EventmapCalendar size={18} color={Colors.primary} />
+              </View>
+              <View>
+                <Text style={styles.metaLabel}>Date</Text>
+                <Text style={styles.metaValue}>{formatDate(event.start_datetime)}</Text>
+              </View>
+            </View>
+            <View style={styles.metaRow}>
+              <View style={styles.metaIconWrap}>
+                <Clock3 size={18} color={Colors.primary} />
+              </View>
+              <View>
+                <Text style={styles.metaLabel}>Time</Text>
+                <Text style={styles.metaValue}>{formatDateTime(event.start_datetime)}</Text>
+              </View>
+            </View>
+            {event.address && (
+              <View style={styles.metaRow}>
+                <View style={styles.metaIconWrap}>
+                  <EventmapMapPin size={18} color={Colors.primary} />
+                </View>
+                <View>
+                  <Text style={styles.metaLabel}>Location</Text>
+                  <Text style={styles.metaValue}>{event.address}</Text>
+                </View>
+              </View>
+            )}
           </View>
 
-          <TouchableOpacity
-            style={styles.businessRow}
-            onPress={() => router.push(`/business/${business.id}` as any)}
-            activeOpacity={0.7}
-          >
-            <Avatar
-              imageUrl={business.logo_url}
-              name={business.name}
-              size={28}
-            />
-            <Text style={styles.businessName}>{business.name}</Text>
-            {user && !isOwner && (
-              <TouchableOpacity
-                style={[
-                  styles.followButton,
-                  details.user_following_business && styles.followButtonActive,
-                ]}
-                onPress={handleFollow}
-                disabled={saving}
-              >
-                <Text
-                  style={[
-                    styles.followButtonText,
-                    details.user_following_business && styles.followButtonTextActive,
-                  ]}
-                >
-                  {details.user_following_business ? 'Following' : 'Follow'}
-                </Text>
-              </TouchableOpacity>
-            )}
-          </TouchableOpacity>
+          <View style={styles.attendeesSection}>
+            <View style={styles.attendeeRow}>
+              <View style={styles.attendeeGroup}>
+                <Avatar imageUrl={business.logo_url} name={business.name} size={36} />
+                <View style={styles.attendeePlaceholder}><Text style={styles.attendeePlus}>+{Math.max(details.rsvp_count, 12)}</Text></View>
+              </View>
+              <Text style={styles.attendeeText}>Joined by friends & others</Text>
+            </View>
+            <View style={styles.ticketPill}>
+              <Ticket size={16} color={Colors.primary} />
+              <Text style={styles.ticketText}>120 tickets left</Text>
+            </View>
+          </View>
 
-          <View style={styles.metaRow}>
-            <EventmapCalendar size={18} color={Colors.text.secondary} />
-            <Text style={styles.metaText}>
-              {formatDate(event.start_datetime)}
-              {event.end_datetime && ` – ${formatDate(event.end_datetime)}`}
+          <View style={styles.descriptionSection}>
+            <Text style={styles.bigSectionTitle}>About Event</Text>
+            <Text style={styles.descriptionText}>
+              {event.description || 'Experience an immersive journey through sound and light.'}
             </Text>
           </View>
 
@@ -440,16 +430,25 @@ export default function EventDetail() {
             </View>
           )}
 
-          {event.address && (
-            <View style={styles.metaRow}>
-              <EventmapMapPin size={18} color={Colors.text.secondary} />
-              <Text style={styles.metaText}>{event.address}</Text>
+          <View style={styles.venueSection}>
+            <View style={styles.venueHeader}>
+              <Text style={styles.bigSectionTitle}>The Venue</Text>
+              {event.address ? (
+                <TouchableOpacity onPress={() => Linking.openURL(`https://www.google.com/maps?q=${encodeURIComponent(event.address || `${event.lat},${event.lng}`)}`)}>
+                  <Text style={styles.directionsText}>Get Directions</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
-          )}
-
-          {event.description && (
-            <Text style={styles.description}>{event.description}</Text>
-          )}
+            <View style={styles.venueMapCard}>
+              <Image
+                source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuB63GFwCNyJH6b2Bvf9n9Wb_x5YAfgsoGbM2ofojeA2wZBed4meKHCQeh534TJNdg_dBepjVRuZdLNRavYoB_L1F7eWIJA4vPSSUocfHXisvuerDA0YoWOn-B9_rUy70IZLZwfe397SLcdFMcGqgGZqFpA1Wmt1g00mMLAR-Kevnz1fH69Y-Ny5aQiIJEH848UTy1F1X9zgiKT80TIfSncaVJ95uplw-_Ljg5rRrqJbgbN9qW9egp-N4obG58PYodf0GcdlMIy75ok' }}
+                style={styles.venueMapImage}
+              />
+              <View style={styles.venuePin}>
+                <EventmapMapPin size={22} color="#FFFFFF" />
+              </View>
+            </View>
+          </View>
 
           {links.length > 0 && (
             <View style={styles.linksSection}>
@@ -686,6 +685,19 @@ export default function EventDetail() {
           </View>
         </View>
       </ScrollView>
+      <View style={[styles.bottomActionBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
+        <TouchableOpacity
+          style={styles.joinButton}
+          onPress={() => {
+            if (!user || saving) return;
+            handleRsvp('going');
+          }}
+          activeOpacity={0.9}
+        >
+          <Text style={styles.joinButtonText}>Join Event</Text>
+          <Text style={styles.joinArrow}>→</Text>
+        </TouchableOpacity>
+      </View>
       {id && (
         <AttendeesBottomSheet
           ref={attendeesSheetRef}
@@ -701,6 +713,31 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background.primary,
+  },
+  heroTopBarWrap: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    zIndex: 50,
+  },
+  heroTopBar: {
+    height: 56,
+    borderRadius: BorderRadius.round,
+    backgroundColor: 'rgba(255,255,255,0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+  },
+  brandTitle: {
+    color: Colors.primary,
+    fontSize: 32,
+    lineHeight: 36,
+    letterSpacing: -0.3,
+    fontFamily: Typography.displayFontFamilies.extrabold,
+    fontWeight: '800',
   },
   centerContainer: {
     flex: 1,
@@ -737,13 +774,52 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
+  heroSection: {
+    position: 'relative',
+    height: 540,
+    overflow: 'hidden',
+  },
   scrollContent: {
     paddingBottom: Spacing.xxl,
   },
   coverImage: {
     width: SCREEN_WIDTH,
-    height: 200,
+    height: 540,
     backgroundColor: Colors.background.secondary,
+  },
+  heroGradient: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  heroTitleWrap: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    bottom: 34,
+  },
+  heroCategoryPill: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.round,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    marginBottom: 12,
+  },
+  heroCategoryText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    letterSpacing: 2,
+    fontFamily: Typography.labelFontFamilies.semibold,
+  },
+  heroTitle: {
+    color: '#FFFFFF',
+    fontSize: 52,
+    lineHeight: 56,
+    letterSpacing: -1,
+    fontFamily: Typography.displayFontFamilies.extrabold,
+    fontWeight: '800',
   },
   photoDots: {
     position: 'absolute',
@@ -763,10 +839,171 @@ const styles = StyleSheet.create({
   },
   coverPlaceholder: {
     width: '100%',
-    height: 160,
+    height: 540,
     backgroundColor: Colors.background.secondary,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  contentCard: {
+    marginHorizontal: 16,
+    marginTop: -42,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 40,
+    paddingHorizontal: 22,
+    paddingTop: 26,
+    paddingBottom: 28,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    elevation: 6,
+  },
+  quickInfoSection: {
+    gap: 16,
+    marginBottom: 22,
+  },
+  metaIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.background.secondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  metaLabel: {
+    color: Colors.text.tertiary,
+    fontSize: 11,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    fontFamily: Typography.labelFontFamilies.semibold,
+  },
+  metaValue: {
+    marginTop: 2,
+    fontSize: 31,
+    lineHeight: 38,
+    color: Colors.text.primary,
+    fontFamily: Typography.displayFontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    maxWidth: SCREEN_WIDTH - 128,
+  },
+  attendeesSection: {
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: Colors.border.light,
+    paddingVertical: 22,
+    marginBottom: 22,
+    gap: 18,
+  },
+  attendeeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  attendeeGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  attendeePlaceholder: {
+    width: 36,
+    height: 36,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.background.tertiary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attendeePlus: {
+    fontSize: 11,
+    color: Colors.text.secondary,
+    fontFamily: Typography.labelFontFamilies.semibold,
+  },
+  attendeeText: {
+    flex: 1,
+    fontSize: 16,
+    color: Colors.text.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+  },
+  ticketPill: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(180,25,36,0.08)',
+  },
+  ticketText: {
+    color: Colors.primary,
+    fontSize: 15,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+  },
+  descriptionSection: {
+    marginBottom: 22,
+  },
+  bigSectionTitle: {
+    fontSize: 43,
+    lineHeight: 46,
+    color: Colors.text.primary,
+    letterSpacing: -0.6,
+    fontFamily: Typography.displayFontFamilies.extrabold,
+    fontWeight: '800',
+    marginBottom: 12,
+  },
+  descriptionText: {
+    fontSize: 18,
+    lineHeight: 34,
+    color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+  },
+  venueSection: {
+    marginBottom: 26,
+  },
+  venueHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  directionsText: {
+    color: Colors.primary,
+    fontSize: 16,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+  },
+  venueMapCard: {
+    height: 224,
+    borderRadius: 30,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  venueMapImage: {
+    width: '100%',
+    height: '100%',
+    opacity: 0.45,
+  },
+  venuePin: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    marginTop: -26,
+    marginLeft: -26,
+    width: 52,
+    height: 52,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 14,
+    elevation: 6,
   },
   content: {
     paddingHorizontal: Spacing.lg,
@@ -1061,5 +1298,34 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: Typography.sizes.md,
     color: Colors.error,
+  },
+  bottomActionBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingTop: 16,
+    paddingHorizontal: 24,
+    backgroundColor: 'rgba(255,255,255,0.94)',
+  },
+  joinButton: {
+    height: 58,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  joinButtonText: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontFamily: Typography.displayFontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+  },
+  joinArrow: {
+    color: '#FFFFFF',
+    fontSize: 26,
+    lineHeight: 26,
   },
 });

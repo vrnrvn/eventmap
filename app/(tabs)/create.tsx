@@ -318,7 +318,10 @@ export default function CreateScreen() {
           >
             <X size={24} color={Design.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Host Event</Text>
+          <View style={styles.headerTitleRow}>
+            <Image source={require('@/assets/images/EMlogo.png')} style={styles.headerLogo} />
+            <Text style={styles.headerTitle}>Host Event</Text>
+          </View>
           <View style={styles.headerSpacer} />
         </View>
       </View>
@@ -700,6 +703,16 @@ const styles = StyleSheet.create({
     fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Design.text,
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerLogo: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
   },
   headerSpacer: {
     width: 40,

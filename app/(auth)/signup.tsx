@@ -8,721 +8,349 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
-  Modal,
-  Pressable,
   Image,
+  TextInput,
   Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { Input } from '@/components/Input';
-import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
-import {
-  ArrowLeft,
-  User,
-  Mail,
-  Lock,
-  UserPlus,
-} from 'lucide-react-native';
+import { Colors, Typography, BorderRadius } from '@/constants/theme';
+import { ArrowLeft, Eye, EyeOff, ArrowRight } from 'lucide-react-native';
 import { GoogleIcon } from '@/components/icons/BrandIcons';
-
-const Palette = {
-  gradientStart: Colors.primary,
-  gradientEnd: Colors.accent,
-  cardBg: Colors.background.primary,
-  surfaceMuted: Colors.background.primary,
-  accentSoft: 'rgba(196, 92, 62, 0.12)',
-  separator: Colors.border.light,
-};
 
 export default function SignupScreen() {
   const insets = useSafeAreaInsets();
   const { signUp, signInWithOAuth } = useAuth();
-  const [selectedMethod, setSelectedMethod] = useState<'select' | 'email'>('select');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState<{
-    name?: string;
-    email?: string;
-    password?: string;
-  }>({});
-  const [showEmailPopup, setShowEmailPopup] = useState(false);
-  const [emailPopupVariant, setEmailPopupVariant] = useState<'new' | 'existing'>('new');
-  const [oauthLoading, setOauthLoading] = useState<'google' | null>(null);
+  const [oauthLoading, setOauthLoading] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const validateForm = () => {
-    const newErrors: { name?: string; email?: string; password?: string } = {};
-
-    if (!name.trim()) {
-      newErrors.name = 'Name is required';
-    }
-
-    if (!email) {
-      newErrors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(email)) {
-      newErrors.email = 'Email is invalid';
-    }
-
-    if (!password) {
-      newErrors.password = 'Password is required';
-    } else if (password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
-    }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+  const validate = () => {
+    const next: Record<string, string> = {};
+    if (!name.trim()) next.name = 'Full name is required';
+    if (!email.trim()) next.email = 'Email is required';
+    else if (!/\S+@\S+\.\S+/.test(email)) next.email = 'Email is invalid';
+    if (!password) next.password = 'Password is required';
+    else if (password.length < 6) next.password = 'Minimum 6 characters';
+    if (confirmPassword !== password) next.confirm = 'Passwords do not match';
+    setErrors(next);
+    return Object.keys(next).length === 0;
   };
 
   const handleSignUp = async () => {
-    if (!validateForm()) return;
-
+    if (!validate()) return;
     setLoading(true);
     try {
       await signUp(email, password, name);
-      setEmailPopupVariant('new');
-      setShowEmailPopup(true);
+      Alert.alert(
+        'Check Your Email',
+        'Please verify your email, then sign in to continue.',
+        [{ text: 'OK', onPress: () => router.replace('/(auth)/login') }]
+      );
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
-      const isExistingUser =
-        /already registered|user already exists|email already|already been registered/i.test(msg);
-      if (isExistingUser) {
-        router.replace({
-          pathname: '/(auth)/login',
-          params: { email },
-        });
-      } else {
-        setErrors({ email: msg || 'Please try again' });
-      }
+      Alert.alert('Sign Up Failed', msg || 'Please try again');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleEmailPopupDismiss = () => {
-    setShowEmailPopup(false);
-    router.replace('/');
-  };
-
-  const handleOAuthSignIn = async (provider: 'google') => {
-    setOauthLoading(provider);
+  const handleGoogle = async () => {
+    setOauthLoading(true);
     try {
-      await signInWithOAuth(provider);
+      await signInWithOAuth('google');
       router.replace('/');
-    } catch (error) {
+    } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
-      Alert.alert(
-        'Google Sign In',
-        msg.includes('cancelled') ? 'Sign in was cancelled.' : msg
-      );
+      Alert.alert('Google Sign Up', msg.includes('cancelled') ? 'Sign up was cancelled.' : msg);
     } finally {
-      setOauthLoading(null);
+      setOauthLoading(false);
     }
   };
 
   return (
     <View style={styles.root}>
-      <Modal
-        visible={showEmailPopup}
-        transparent
-        animationType="fade"
-        onRequestClose={handleEmailPopupDismiss}
-      >
-        <Pressable style={styles.popupOverlay} onPress={handleEmailPopupDismiss}>
-          <Pressable style={styles.popupCard} onPress={(e) => e.stopPropagation()}>
-            <View style={styles.popupIconWrap}>
-              <Image
-                source={require('@/assets/images/EMlogo.png')}
-                style={styles.popupLogo}
-                resizeMode="contain"
-              />
-            </View>
-            <Text style={styles.popupTitle}>
-              {emailPopupVariant === 'existing' ? 'Email Already Registered' : 'Check Your Email'}
-            </Text>
-            <Text style={styles.popupMessage}>
-              {emailPopupVariant === 'existing'
-                ? 'This email is already registered. Please check your inbox to verify your account, then sign in to continue with onboarding.'
-                : 'Please check your email to verify your account. Once verified, sign in to continue with onboarding.'}
-            </Text>
-            <TouchableOpacity
-              style={styles.popupButton}
-              onPress={handleEmailPopupDismiss}
-              activeOpacity={0.85}
-            >
-              <LinearGradient
-                colors={[Palette.gradientStart, Palette.gradientEnd]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.popupButtonGradient}
-              >
-                <Text style={styles.popupButtonText}>OK</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+      <View style={styles.bgGlowTop} />
+      <View style={styles.bgGlowBottom} />
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView
-          contentContainerStyle={[
-            styles.scrollContent,
-            { paddingTop: insets.top, paddingBottom: insets.bottom + 32 },
-          ]}
+          contentContainerStyle={{
+            paddingTop: insets.top + 10,
+            paddingBottom: insets.bottom + 24,
+            paddingHorizontal: 22,
+          }}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* ── Back button ── */}
-          <TouchableOpacity
-            style={styles.backBtn}
-            onPress={() =>
-              selectedMethod === 'email' ? setSelectedMethod('select') : router.back()
-            }
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={22} color={Colors.text.primary} />
+          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.75}>
+            <ArrowLeft size={20} color={Colors.text.primary} />
           </TouchableOpacity>
 
-          {/* ── Hero area ── */}
-          <View style={styles.heroSection}>
-            <View style={styles.logoWrap}>
-              <View style={styles.logoOuter}>
-                <View style={styles.logoInner}>
-                  <Image
-                    source={require('@/assets/images/EMlogo.png')}
-                    style={styles.heroLogo}
-                    resizeMode="contain"
-                  />
-                </View>
-              </View>
+          <View style={styles.hero}>
+            <View style={styles.logoTile}>
+              <Image source={require('@/assets/images/EMlogo.png')} style={[styles.logo, styles.logoTint]} resizeMode="contain" />
             </View>
-            <Text style={styles.heroTitle}>Create Account</Text>
-            <Text style={styles.heroSubtitle}>
-              {selectedMethod === 'select'
-                ? 'Choose how you want to sign up'
-                : 'Join to discover and share local events'}
-            </Text>
+            <Text style={styles.heroTitle}>Create an Account</Text>
+            <Text style={styles.heroSub}>Join our community and explore your city.</Text>
           </View>
 
-          {selectedMethod === 'select' ? (
-            /* ── Method selection cards ── */
-            <View style={styles.methodCards}>
-              <TouchableOpacity
-                style={styles.methodCard}
-                onPress={() => setSelectedMethod('email')}
-                activeOpacity={0.85}
-              >
-                <View style={styles.methodIcon}>
-                  <Mail size={24} color={Colors.primary} />
-                </View>
-                <View style={styles.methodText}>
-                  <Text style={styles.methodLabel}>Email</Text>
-                  <Text style={styles.methodHint}>Sign up with your email</Text>
-                </View>
-              </TouchableOpacity>
+          <View style={styles.card}>
+            <Field label="Full Name" value={name} onChangeText={setName} placeholder="Enter your full name" />
+            {errors.name ? <Text style={styles.errorText}>{errors.name}</Text> : null}
 
-              <TouchableOpacity
-                style={styles.methodCard}
-                onPress={() => handleOAuthSignIn('google')}
-                disabled={oauthLoading !== null}
-                activeOpacity={0.85}
-              >
-                <View style={[styles.methodIcon, styles.methodIconBrand]}>
-                  <GoogleIcon size={24} />
-                </View>
-                <View style={styles.methodText}>
-                  <Text style={styles.methodLabel}>Gmail</Text>
-                  <Text style={styles.methodHint}>Sign up with Google</Text>
-                </View>
-                {oauthLoading === 'google' && (
-                  <ActivityIndicator size="small" color={Colors.primary} style={styles.methodSpinner} />
-                )}
-              </TouchableOpacity>
+            <Field label="Email Address" value={email} onChangeText={setEmail} placeholder="name@example.com" keyboardType="email-address" autoCapitalize="none" />
+            {errors.email ? <Text style={styles.errorText}>{errors.email}</Text> : null}
 
-            </View>
-          ) : null}
-
-          {selectedMethod === 'select' ? (
-            <View style={[styles.footer, { marginTop: 24 }]}>
-              <Text style={styles.footerText}>Already have an account?</Text>
-              <TouchableOpacity
-                style={styles.signInBtn}
-                onPress={() => router.push('/(auth)/login')}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.signInBtnText}>Sign In</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          {selectedMethod === 'email' ? (
-            <>
-              {/* ── Form card ── */}
-              <View style={styles.formCard}>
-                {/* Name */}
-                <View style={styles.fieldRow}>
-                  <View style={styles.fieldIcon}>
-                    <User size={16} color={Colors.primary} />
-                  </View>
-                  <View style={styles.fieldContent}>
-                    <Input
-                      label="Name"
-                      value={name}
-                      onChangeText={setName}
-                      placeholder="Your name"
-                      error={errors.name}
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.fieldSeparator} />
-
-                {/* Email */}
-                <View style={styles.fieldRow}>
-                  <View style={styles.fieldIcon}>
-                    <Mail size={16} color={Colors.primary} />
-                  </View>
-                  <View style={styles.fieldContent}>
-                    <Input
-                      label="Email"
-                      value={email}
-                      onChangeText={setEmail}
-                      placeholder="your@email.com"
-                      keyboardType="email-address"
-                      autoCapitalize="none"
-                      error={errors.email}
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.fieldSeparator} />
-
-                {/* Password */}
-                <View style={styles.fieldRow}>
-                  <View style={styles.fieldIcon}>
-                    <Lock size={16} color={Colors.primary} />
-                  </View>
-                  <View style={styles.fieldContent}>
-                    <Input
-                      label="Password"
-                      value={password}
-                      onChangeText={setPassword}
-                      placeholder="At least 6 characters"
-                      secureTextEntry
-                      error={errors.password}
-                    />
-                  </View>
-                </View>
-              </View>
-
-              {/* ── Create account button ── */}
-              <TouchableOpacity
-                style={styles.submitWrap}
-                onPress={handleSignUp}
-                disabled={loading}
-                activeOpacity={0.85}
-              >
-                <LinearGradient
-                  colors={
-                    loading
-                      ? [Colors.primaryLight, Colors.accentLight]
-                      : [Palette.gradientStart, Palette.gradientEnd]
-                  }
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.submitGradient}
-                >
-                  {loading ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <>
-                      <UserPlus size={18} color="#FFFFFF" />
-                      <Text style={styles.submitText}>Create Account</Text>
-                    </>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
-
-              {/* ── Terms hint ── */}
-              <Text style={styles.termsText}>
-                By creating an account, you agree to our{' '}
-                <Text style={styles.termsLink}>Terms of Service</Text> and{' '}
-                <Text style={styles.termsLink}>Privacy Policy</Text>
-              </Text>
-
-              {/* ── Divider ── */}
-              <View style={styles.dividerRow}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>or</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              {/* ── Footer ── */}
-              <View style={styles.footer}>
-                <Text style={styles.footerText}>Already have an account?</Text>
-                <TouchableOpacity
-                  style={styles.signInBtn}
-                  onPress={() => router.push('/(auth)/login')}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.signInBtnText}>Sign In</Text>
+            <View style={styles.fieldBlock}>
+              <Text style={styles.fieldLabel}>Password</Text>
+              <View style={styles.inputShell}>
+                <TextInput
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="••••••••"
+                  placeholderTextColor={Colors.text.tertiary}
+                  secureTextEntry={!showPassword}
+                  style={styles.input}
+                />
+                <TouchableOpacity onPress={() => setShowPassword((v) => !v)}>
+                  {showPassword ? <EyeOff size={21} color={Colors.text.tertiary} /> : <Eye size={21} color={Colors.text.tertiary} />}
                 </TouchableOpacity>
               </View>
-            </>
-          ) : null}
+            </View>
+            {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
+
+            <Field label="Confirm Password" value={confirmPassword} onChangeText={setConfirmPassword} placeholder="••••••••" secureTextEntry />
+            {errors.confirm ? <Text style={styles.errorText}>{errors.confirm}</Text> : null}
+
+            <TouchableOpacity style={styles.ctaWrap} onPress={handleSignUp} disabled={loading} activeOpacity={0.9}>
+              <LinearGradient colors={[Colors.primary, Colors.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.cta}>
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <Text style={styles.ctaText}>Sign Up</Text>
+                    <ArrowRight size={22} color="#FFFFFF" />
+                  </>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>OR CONTINUE WITH</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <TouchableOpacity style={styles.googleBtn} onPress={handleGoogle} activeOpacity={0.85} disabled={oauthLoading}>
+              <GoogleIcon size={20} />
+              <Text style={styles.googleText}>{oauthLoading ? 'Signing up...' : 'Sign up with Google'}</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>Already have an account?</Text>
+            <TouchableOpacity onPress={() => router.push('/(auth)/login')}>
+              <Text style={styles.footerLink}>Log In</Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
 }
 
-/* ────────────────────────── STYLES ────────────────────────── */
+function Field({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  secureTextEntry,
+  keyboardType,
+  autoCapitalize,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  placeholder: string;
+  secureTextEntry?: boolean;
+  keyboardType?: 'email-address' | 'default';
+  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
+}) {
+  return (
+    <View style={styles.fieldBlock}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <View style={styles.inputShell}>
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={Colors.text.tertiary}
+          secureTextEntry={secureTextEntry}
+          keyboardType={keyboardType}
+          autoCapitalize={autoCapitalize}
+          style={styles.input}
+        />
+      </View>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: Palette.surfaceMuted,
-  },
-  flex: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 24,
-  },
-
-  /* ── Back button ── */
+  root: { flex: 1, backgroundColor: Colors.background.primary },
+  flex: { flex: 1 },
   backBtn: {
-    width: 44,
-    height: 44,
+    width: 42,
+    height: 42,
     borderRadius: 14,
-    backgroundColor: Palette.cardBg,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 12,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 8,
-      },
-      android: { elevation: 3 },
-    }),
+    backgroundColor: '#FFFFFF',
   },
-
-  /* ── Hero ── */
-  heroSection: {
+  hero: { alignItems: 'center', marginTop: 18, marginBottom: 18 },
+  logoTile: {
+    width: 106,
+    height: 106,
+    borderRadius: 30,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
-    marginTop: 28,
-    marginBottom: 32,
-  },
-  logoWrap: {
+    justifyContent: 'center',
     marginBottom: 18,
-    ...Platform.select({
-      ios: {
-        shadowColor: Colors.primary,
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.25,
-        shadowRadius: 16,
-      },
-      android: { elevation: 8 },
-    }),
   },
-  logoOuter: {
-    width: 88,
-    height: 88,
-    borderRadius: 28,
-    backgroundColor: Palette.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logoInner: {
-    width: 72,
-    height: 72,
-    borderRadius: 22,
-    backgroundColor: Palette.cardBg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  heroLogo: {
-    width: 56,
-    height: 56,
-  },
+  logo: { width: 52, height: 52 },
+  logoTint: { tintColor: Colors.primary },
   heroTitle: {
-    fontSize: 28,
+    fontSize: 50,
+    lineHeight: 56,
+    color: Colors.text.primary,
+    fontFamily: Typography.displayFontFamilies.extrabold,
+    fontWeight: '800',
+    letterSpacing: -0.8,
+    textAlign: 'center',
+  },
+  heroSub: {
+    marginTop: 6,
+    fontSize: 18,
+    lineHeight: 30,
+    color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.medium,
+    textAlign: 'center',
+  },
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 40,
+    padding: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.04)',
+  },
+  fieldBlock: { marginBottom: 14 },
+  fieldLabel: {
+    marginBottom: 10,
+    color: Colors.text.secondary,
+    fontSize: 12,
+    letterSpacing: 1.8,
+    textTransform: 'uppercase',
+    fontFamily: Typography.labelFontFamilies.semibold,
+  },
+  inputShell: {
+    height: 60,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.background.secondary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    gap: 10,
+  },
+  input: {
+    flex: 1,
+    color: Colors.text.primary,
+    fontSize: 16,
+    fontFamily: Typography.fontFamilies.medium,
+  },
+  errorText: {
+    marginTop: -8,
+    marginBottom: 10,
+    marginLeft: 4,
+    color: Colors.error,
+    fontSize: 12,
+    fontFamily: Typography.fontFamilies.medium,
+  },
+  ctaWrap: { marginTop: 8, borderRadius: BorderRadius.round, overflow: 'hidden' },
+  cta: {
+    height: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  ctaText: {
+    color: '#FFFFFF',
+    fontSize: 20,
     fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
-    color: Colors.text.primary,
-    marginBottom: 6,
   },
-  heroSubtitle: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.tertiary,
-    textAlign: 'center',
-  },
-
-  /* ── Form card ── */
-  formCard: {
-    backgroundColor: Palette.cardBg,
-    borderRadius: 22,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.07,
-        shadowRadius: 12,
-      },
-      android: { elevation: 4 },
-    }),
-  },
-  fieldRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    gap: 14,
-  },
-  fieldIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 11,
-    backgroundColor: Palette.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fieldContent: {
-    flex: 1,
-  },
-  fieldSeparator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: Palette.separator,
-    marginLeft: 70,
-  },
-
-  /* ── Method selection ── */
-  methodCards: {
-    gap: 12,
-    marginTop: 8,
-  },
-  methodCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Palette.cardBg,
-    borderRadius: 16,
-    padding: 18,
-    gap: 16,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 8,
-      },
-      android: { elevation: 3 },
-    }),
-  },
-  methodIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: Palette.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  methodIconBrand: {
-    backgroundColor: 'rgba(0,0,0,0.04)',
-  },
-  methodSpinner: {
-    marginLeft: 8,
-  },
-  methodText: {
-    flex: 1,
-  },
-  methodLabel: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.text.primary,
-  },
-  methodLabelMuted: {
-    color: Colors.text.tertiary,
-  },
-  methodHint: {
-    fontSize: Typography.sizes.xs,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.tertiary,
-    marginTop: 2,
-  },
-
-  /* ── Submit ── */
-  submitWrap: {
+  divider: {
     marginTop: 24,
-    borderRadius: 16,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: Colors.primary,
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.3,
-        shadowRadius: 14,
-      },
-      android: { elevation: 8 },
-    }),
-  },
-  submitGradient: {
+    marginBottom: 18,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 10,
-    paddingVertical: 17,
   },
-  submitText: {
-    fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: '#FFFFFF',
-    letterSpacing: 0.3,
-  },
-
-  /* ── Terms ── */
-  termsText: {
-    fontSize: Typography.sizes.xs,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.tertiary,
-    textAlign: 'center',
-    lineHeight: 18,
-    marginTop: 16,
-    paddingHorizontal: 12,
-  },
-  termsLink: {
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-    color: Colors.primary,
-  },
-
-  /* ── Divider ── */
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 24,
-    marginBottom: 20,
-    gap: 14,
-  },
-  dividerLine: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: Palette.separator,
-  },
+  dividerLine: { flex: 1, height: 1, backgroundColor: Colors.border.light },
   dividerText: {
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
     color: Colors.text.tertiary,
-    textTransform: 'lowercase',
+    fontSize: 11,
+    letterSpacing: 2,
+    fontFamily: Typography.labelFontFamilies.semibold,
   },
-
-  /* ── Footer ── */
-  footer: {
-    alignItems: 'center',
-    gap: 12,
-  },
-  footerText: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.secondary,
-  },
-  signInBtn: {
-    paddingVertical: 13,
-    paddingHorizontal: 32,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: Colors.primary,
-    backgroundColor: Palette.accentSoft,
-  },
-  signInBtnText: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.primary,
-  },
-
-  /* ── Email popup ── */
-  popupOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  popupCard: {
-    width: '100%',
-    maxWidth: 340,
-    backgroundColor: Palette.cardBg,
-    borderRadius: 24,
-    padding: 28,
-    alignItems: 'center',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.2,
-        shadowRadius: 24,
-      },
-      android: { elevation: 16 },
-    }),
-  },
-  popupIconWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: Palette.accentSoft,
+  googleBtn: {
+    height: 58,
+    borderRadius: BorderRadius.round,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 20,
-    overflow: 'hidden',
+    flexDirection: 'row',
+    gap: 10,
+    backgroundColor: '#FFFFFF',
   },
-  popupLogo: {
-    width: 44,
-    height: 44,
-  },
-  popupTitle: {
-    fontSize: 20,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
+  googleText: {
     color: Colors.text.primary,
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  popupMessage: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.secondary,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 24,
-  },
-  popupButton: {
-    width: '100%',
-    borderRadius: 14,
-    overflow: 'hidden',
-  },
-  popupButtonGradient: {
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  popupButtonText: {
-    fontSize: Typography.sizes.md,
+    fontSize: 16,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: '#FFFFFF',
+  },
+  footer: {
+    marginTop: 22,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  footerText: { color: Colors.text.secondary, fontSize: 16, fontFamily: Typography.fontFamilies.medium },
+  footerLink: { color: Colors.primary, fontSize: 16, fontFamily: Typography.fontFamilies.bold, fontWeight: Typography.weights.bold },
+  bgGlowTop: {
+    position: 'absolute',
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    backgroundColor: 'rgba(180,25,36,0.08)',
+    top: -80,
+    left: -80,
+  },
+  bgGlowBottom: {
+    position: 'absolute',
+    width: 320,
+    height: 320,
+    borderRadius: 160,
+    backgroundColor: 'rgba(155,62,32,0.08)',
+    bottom: -120,
+    right: -90,
   },
 });

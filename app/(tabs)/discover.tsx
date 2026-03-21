@@ -25,7 +25,7 @@ import { RankedEvent, Category } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { getCategoryIconColor } from '@/constants/categoryIcons';
 import { CategoryIcon } from '@/components/CategoryIcon';
-import { Users, List, Repeat, X, Heart } from 'lucide-react-native';
+import { Users, List, Repeat, X, Heart, Search, SlidersHorizontal, Plus, MapPin } from 'lucide-react-native';
 import { EventmapFilter, EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView';
 import { EventCardCarousel } from '@/components/EventCardCarousel';
@@ -39,7 +39,7 @@ import { AppBannerCarousel } from '@/components/AppBannerCarousel';
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const DEFAULT_CENTER = { lat: 37.7749, lng: -122.4194 };
 const REGION_DEBOUNCE_MS = 500;
-const HEADER_HEIGHT_PX = SCREEN_HEIGHT * 0.15;
+const HEADER_HEIGHT_PX = 170;
 
 function truncateText(text: string, limit = 50): string {
   if (!text || text.length <= limit) return text;
@@ -369,66 +369,45 @@ export default function DiscoverScreen() {
   const renderEventCard = ({ item, index }: { item: RankedEvent; index: number }) => (
     <Animated.View
       entering={FadeInDown.delay(index * 60).springify().damping(18)}
-      style={[styles.eventCardWrapper, index % 2 === 1 && styles.eventCardOffset]}
+      style={styles.eventCardWrapper}
     >
       <TouchableOpacity
         style={styles.eventCard}
         onPress={() => router.push(`/event/${item.id}` as never)}
         activeOpacity={0.92}
       >
-        <EventCardCarousel
-          imageUrls={item.cover_image_url ? [item.cover_image_url] : []}
-          applySkew={index % 2 === 1}
-        />
+        <EventCardCarousel imageUrls={item.cover_image_url ? [item.cover_image_url] : []} />
         <View style={styles.eventContent}>
           <View style={styles.eventHeader}>
-            <Text style={styles.eventTitle} numberOfLines={2}>
+            <Text style={styles.eventTitle} numberOfLines={1}>
               {item.title}
             </Text>
-            {/* {item.is_premium && (
-              <View style={styles.premiumBadge}>
-                <Text style={styles.premiumText}>★</Text>
-              </View>
-            )} */}
           </View>
           <View style={styles.eventMeta}>
             <View style={styles.metaRow}>
-              <EventmapCalendar size={14} color={Colors.text.secondary} />
-              <Text style={styles.metaText}>{formatDate(item.start_datetime)}</Text>
-              {item.is_recurring && (
-                <Repeat size={14} color={Colors.text.tertiary} style={{ marginLeft: Spacing.xs }} />
-              )}
-            </View>
-            <View style={styles.metaRow}>
-              <EventmapMapPin size={14} color={Colors.text.secondary} />
-              <Text style={styles.metaText}>
-                {item.distance_km.toFixed(1)} km from you
+              <MapPin size={14} color={Colors.text.tertiary} />
+              <Text style={styles.metaText}>{item.distance_km.toFixed(1)} mi</Text>
+              <Text style={styles.metaDot}>•</Text>
+              <Text style={styles.metaText} numberOfLines={1}>
+                {item.business_name}
               </Text>
             </View>
-            {item.rsvp_count > 0 && (
-              <View style={styles.metaRow}>
-                <Users size={14} color={Colors.text.secondary} />
-                <Text style={styles.metaText}>{item.rsvp_count} going</Text>
-              </View>
-            )}
           </View>
-          <View style={[styles.categoryBadge, { backgroundColor: `${getCategoryIconColor(item.category_slug)}18` }]}>
-            <CategoryIcon category={item.category_slug} size="sm" variant="minimal" />
-            <Text style={[styles.categoryText, { color: getCategoryIconColor(item.category_slug) }]}>
-              {item.category_label}
+          <View style={styles.eventBadgeRow}>
+            <View style={styles.eventBadgeLight}>
+              <Text style={styles.eventBadgeLightText}>
+                {new Date(item.start_datetime).toDateString() === new Date().toDateString() ? 'TODAY' : 'UPCOMING'}
+              </Text>
+            </View>
+            <View style={styles.eventBadgeDark}>
+              <Text style={styles.eventBadgeDarkText}>{item.category_label.toUpperCase()}</Text>
+            </View>
+          </View>
+          <TouchableOpacity style={styles.businessRow} onPress={() => router.push(`/business/${item.business_id}` as never)} activeOpacity={0.7}>
+            <Avatar imageUrl={item.business_logo_url} name={item.business_name} size={24} />
+            <Text style={styles.businessName} numberOfLines={1}>
+              {formatDate(item.start_datetime)}
             </Text>
-          </View>
-          <TouchableOpacity
-            style={styles.businessRow}
-            onPress={() => router.push(`/business/${item.business_id}` as never)}
-            activeOpacity={0.7}
-          >
-            <Avatar
-              imageUrl={item.business_logo_url}
-              name={item.business_name}
-              size={24}
-            />
-            <Text style={styles.businessName}>{item.business_name}</Text>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
@@ -443,27 +422,21 @@ export default function DiscoverScreen() {
 
   const renderListHeader = () => (
     <View style={styles.sheetHeader}>
-      {sheetIndex === 0 ? (
+      <View style={styles.sheetHandle} />
+      <View style={styles.sheetHeaderRow}>
+        <View>
+          <Text style={styles.sheetEyebrow}>Happening Nearby</Text>
+          <Text style={styles.sheetTitle}>Discover</Text>
+        </View>
         <TouchableOpacity
-          style={styles.pullUpPill}
           onPress={() => bottomSheetRef.current?.snapToIndex(1)}
-          activeOpacity={0.7}
+          activeOpacity={0.8}
         >
-          <Text style={styles.pullUpText}>{eventCountLabel}</Text>
+          <Text style={styles.seeAllText}>See all</Text>
         </TouchableOpacity>
-      ) : (
-        <>
-          <AppBannerCarousel banners={banners} />
-          <TouchableOpacity
-            style={styles.showListRow}
-            onPress={() => bottomSheetRef.current?.snapToIndex(0)}
-            activeOpacity={0.7}
-          >
-            <List size={20} color={Colors.primary} />
-            <Text style={styles.sheetSummary}>{eventCountLabel}</Text>
-          </TouchableOpacity>
-        </>
-      )}
+      </View>
+      {banners.length > 0 ? <AppBannerCarousel banners={banners} /> : null}
+      <Text style={styles.sheetSummary}>{eventCountLabel}</Text>
     </View>
   );
 
@@ -568,31 +541,59 @@ export default function DiscoverScreen() {
         </>
       )}
 
-      {/* ── Fixed Header (Layer 3 - Control Center) ── */}
+      {/* Top app bar */}
       <View style={[styles.fixedHeader, { height: headerHeight, paddingTop: insets.top }]}>
-        <View style={styles.headerRow}>
+        <View style={styles.topBar}>
           <TouchableOpacity
-            style={styles.searchPill}
+            style={styles.topBarLeft}
             onPress={() => setShowSearchOverlay(true)}
-            activeOpacity={0.9}
+            activeOpacity={0.8}
           >
-            <Text style={styles.searchPillText} numberOfLines={1}>
-              Events in area
-            </Text>
+            <Search size={21} color={Colors.primary} />
+            <Image source={require('@/assets/images/EMlogo.png')} style={styles.topBarLogo} />
+            <Text style={styles.brandText}>EventMaps</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.filterIconButton}
             onPress={() => setShowFilters(!showFilters)}
             activeOpacity={0.8}
           >
-            <EventmapFilter size={22} color={Colors.primary} />
-            {selectedCategories.length > 0 && (
-              <View style={styles.filterButtonBadge}>
-                <Text style={styles.filterButtonBadgeText}>{selectedCategories.length}</Text>
-              </View>
-            )}
+            <SlidersHorizontal size={20} color={Colors.text.secondary} />
           </TouchableOpacity>
         </View>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipsRow}
+          style={styles.chipsScroll}
+        >
+          <TouchableOpacity
+            style={[styles.overlayChip, selectedCategories.length === 0 && styles.overlayChipActive]}
+            onPress={() => setSelectedCategories([])}
+            activeOpacity={0.85}
+          >
+            <Text style={[styles.overlayChipText, selectedCategories.length === 0 && styles.overlayChipTextActive]}>
+              ALL EVENTS
+            </Text>
+          </TouchableOpacity>
+          {categories.slice(0, 8).map((category) => {
+            const selected = selectedCategories.includes(category.id);
+            return (
+              <TouchableOpacity
+                key={category.id}
+                style={[styles.overlayChip, selected && styles.overlayChipActive]}
+                onPress={() => toggleCategory(category.id)}
+                activeOpacity={0.85}
+              >
+                <CategoryIcon category={category.slug} size="sm" variant="minimal" />
+                <Text style={[styles.overlayChipText, selected && styles.overlayChipTextActive]}>
+                  {category.label.toUpperCase()}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
 
       <Modal
@@ -675,6 +676,16 @@ export default function DiscoverScreen() {
       {sheetIndex === 1 && (
         <View style={styles.mapDimOverlay} pointerEvents="box-only" />
       )}
+
+      <View style={[styles.fabWrap, { bottom: insets.bottom + 104 }]}>
+        <TouchableOpacity
+          style={styles.fab}
+          activeOpacity={0.88}
+          onPress={() => router.push('/(tabs)/create')}
+        >
+          <Plus size={30} color="#FFFFFF" />
+        </TouchableOpacity>
+      </View>
 
       {!(activeEvent && showFloatingCard) && (
       <BottomSheet
@@ -768,41 +779,82 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 30,
-    backgroundColor: '#FFFFFF',
     paddingHorizontal: Spacing.md,
-    paddingBottom: Spacing.md,
+    paddingBottom: Spacing.sm,
     justifyContent: 'flex-end',
+    pointerEvents: 'box-none',
+  },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255,255,255,0.82)',
+    borderRadius: BorderRadius.round,
+    paddingHorizontal: 14,
+    height: 56,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
     ...Shadows.sm,
   },
-  headerRow: {
+  topBarLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
   },
-  searchPill: {
-    flex: 1,
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Colors.background.secondary,
-    justifyContent: 'center',
-    minWidth: 0,
-    ...Shadows.sm,
+  topBarLogo: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    tintColor: Colors.primary,
   },
-  searchPillText: {
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.secondary,
+  brandText: {
+    color: Colors.primary,
+    fontSize: 36,
+    lineHeight: 38,
+    letterSpacing: -0.4,
+    fontFamily: Typography.displayFontFamilies.extrabold,
+    fontWeight: '800',
+  },
+  chipsScroll: {
+    marginTop: Spacing.sm,
+  },
+  chipsRow: {
+    gap: Spacing.sm,
+    paddingRight: Spacing.md,
+  },
+  overlayChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: BorderRadius.round,
+    backgroundColor: 'rgba(255,255,255,0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.26)',
+  },
+  overlayChipActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  overlayChipText: {
+    fontSize: 12,
+    letterSpacing: 1,
+    color: Colors.text.primary,
+    fontFamily: Typography.labelFontFamilies.semibold,
+  },
+  overlayChipTextActive: {
+    color: '#FFFFFF',
   },
   filterIconButton: {
-    width: 44,
-    height: 44,
-    borderRadius: BorderRadius.lg,
-    backgroundColor: Colors.background.secondary,
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.round,
+    backgroundColor: 'rgba(255,255,255,0.7)',
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
-    ...Shadows.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
   },
   filterButtonBadge: {
     position: 'absolute',
@@ -884,8 +936,8 @@ const styles = StyleSheet.create({
   },
   sheetBackground: {
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 44,
+    borderTopRightRadius: 44,
     overflow: 'hidden',
     ...Platform.select({
       ios: {
@@ -1011,55 +1063,58 @@ const styles = StyleSheet.create({
   sheetHeader: {
     width: '100%',
     alignSelf: 'stretch',
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.sm,
-    borderBottomWidth: 0,
-    borderBottomColor: Colors.border.light,
+    paddingHorizontal: 24,
+    paddingBottom: 14,
   },
-  pullUpPill: {
+  sheetHandle: {
+    width: 62,
+    height: 6,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.border.light,
     alignSelf: 'center',
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.lg,
-    marginBottom: Spacing.sm,
+    marginBottom: 22,
   },
-  pullUpText: {
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-    color: Colors.text.tertiary,
-  },
-  showListRow: {
+  sheetHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.xxl,
-    gap: Spacing.md,
-    paddingVertical: Spacing.sm,
+    justifyContent: 'space-between',
+    marginBottom: 10,
   },
-  sheetHandleIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: BorderRadius.md,
-    backgroundColor: 'rgba(196, 92, 62, 0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  sheetEyebrow: {
+    color: Colors.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 3,
+    fontSize: 10,
+    fontFamily: Typography.labelFontFamilies.semibold,
+    marginBottom: 4,
+  },
+  sheetTitle: {
+    color: Colors.text.primary,
+    fontSize: 56,
+    lineHeight: 62,
+    letterSpacing: -1,
+    fontFamily: Typography.displayFontFamilies.extrabold,
+    fontWeight: '800',
+  },
+  seeAllText: {
+    color: Colors.primary,
+    fontSize: 16,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
   },
   sheetSummary: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.displayFontFamilies.medium,
-    color: Colors.text.primary,
-    textAlign: 'center',
+    fontSize: 12,
+    fontFamily: Typography.labelFontFamilies.semibold,
+    color: Colors.text.tertiary,
+    marginTop: 8,
+    marginBottom: 10,
   },
   listContent: {
-    paddingHorizontal: Spacing.lg,
+    paddingHorizontal: 24,
     paddingBottom: Spacing.xxl * 2,
   },
   eventCardWrapper: {
-    marginBottom: Spacing.lg,
-  },
-  eventCardOffset: {
-    marginLeft: 24,
-    transform: [{ rotate: '-1deg' }],
+    marginBottom: 18,
   },
   searchInput: {
     flex: 1,
@@ -1122,12 +1177,11 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.medium,
   },
   eventCard: {
-    backgroundColor: Colors.background.primary,
-    borderRadius: BorderRadius.xl,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 32,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: Colors.border.light,
-    ...Shadows.card,
+    borderWidth: 0,
+    ...Shadows.sm,
   },
   eventImage: {
     height: 150,
@@ -1140,7 +1194,7 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily,
   },
   eventContent: {
-    padding: Spacing.md,
+    padding: 10,
   },
   eventHeader: {
     flexDirection: 'row',
@@ -1150,11 +1204,12 @@ const styles = StyleSheet.create({
   },
   eventTitle: {
     flex: 1,
-    fontSize: Typography.sizes.lg,
+    fontSize: 22,
+    lineHeight: 28,
     fontFamily: Typography.displayFontFamilies.extrabold,
     fontWeight: '800',
     color: Colors.text.primary,
-    letterSpacing: 0.5,
+    letterSpacing: -0.2,
   },
   premiumBadge: {
     backgroundColor: Colors.accent,
@@ -1170,7 +1225,7 @@ const styles = StyleSheet.create({
   },
   eventMeta: {
     gap: Spacing.xs,
-    marginBottom: Spacing.sm,
+    marginBottom: 10,
   },
   metaRow: {
     flexDirection: 'row',
@@ -1178,9 +1233,42 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   metaText: {
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamily,
+    fontSize: 12,
+    fontFamily: Typography.labelFontFamilies.medium,
     color: Colors.text.secondary,
+  },
+  metaDot: {
+    color: Colors.text.tertiary,
+    marginHorizontal: 4,
+  },
+  eventBadgeRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  eventBadgeLight: {
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.round,
+  },
+  eventBadgeLightText: {
+    color: '#0F172A',
+    fontSize: 10,
+    letterSpacing: 2,
+    fontFamily: Typography.labelFontFamilies.semibold,
+  },
+  eventBadgeDark: {
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.round,
+  },
+  eventBadgeDarkText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    letterSpacing: 2,
+    fontFamily: Typography.labelFontFamilies.semibold,
   },
   categoryBadge: {
     flexDirection: 'row',
@@ -1202,13 +1290,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
-    marginTop: Spacing.xs,
+    marginTop: 2,
   },
   businessName: {
     flex: 1,
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.tertiary,
+    fontSize: 12,
+    fontFamily: Typography.labelFontFamilies.medium,
+    color: Colors.text.secondary,
   },
   loadingRow: {
     paddingVertical: Spacing.xxl,
@@ -1263,5 +1351,23 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
     color: Colors.text.inverse,
+  },
+  fabWrap: {
+    position: 'absolute',
+    right: 24,
+    zIndex: 60,
+  },
+  fab: {
+    width: 64,
+    height: 64,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.28,
+    shadowRadius: 20,
+    elevation: 8,
   },
 });
