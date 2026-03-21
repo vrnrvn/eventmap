@@ -68,7 +68,7 @@ export function BrandedSplashScreen({ visible }: BrandedSplashScreenProps) {
   return (
     <Animated.View exiting={FadeOut.duration(420)} style={StyleSheet.absoluteFill}>
       <LinearGradient
-        colors={[Colors.secondaryDark, Colors.secondary, Colors.primaryDark]}
+        colors={[Colors.primaryDark, Colors.primary, Colors.secondary]}
         start={{ x: 0.1, y: 0 }}
         end={{ x: 0.95, y: 1 }}
         style={styles.container}
@@ -88,7 +88,7 @@ export function BrandedSplashScreen({ visible }: BrandedSplashScreenProps) {
             <View style={styles.logoCore}>
               <AnimatedImage
                 source={require('@/assets/images/EMlogo.png')}
-                style={styles.logo}
+                style={[styles.logo, styles.logoTint]}
                 resizeMode="contain"
               />
             </View>
@@ -96,7 +96,7 @@ export function BrandedSplashScreen({ visible }: BrandedSplashScreenProps) {
         </Animated.View>
 
         <Animated.View style={[styles.wordmarkWrap, wordmarkStyle]}>
-          <Text style={styles.title}>EventMap</Text>
+          <Text style={styles.title}>Event Maps</Text>
           <Text style={styles.subtitle}>Find the signal in your city.</Text>
         </Animated.View>
       </LinearGradient>
@@ -156,6 +156,9 @@ const styles = StyleSheet.create({
   logo: {
     width: 98,
     height: 98,
+  },
+  logoTint: {
+    tintColor: Colors.primary,
   },
   wordmarkWrap: {
     marginTop: 28,

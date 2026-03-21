@@ -65,14 +65,14 @@ export default function WelcomeScreen() {
             <View style={styles.logoInner}>
               <Image
                 source={require('@/assets/images/EMlogo.png')}
-                style={styles.heroLogo}
+                style={[styles.heroLogo, styles.heroLogoTint]}
                 resizeMode="contain"
               />
             </View>
           </View>
         </View>
 
-        <Text style={styles.heroTitle}>EventMap</Text>
+        <Text style={styles.heroTitle}>Event Maps</Text>
         <Text style={styles.heroSubtitle}>
           Discover what's happening{'\n'}around you
         </Text>
@@ -237,6 +237,9 @@ const styles = StyleSheet.create({
   heroLogo: {
     width: 52,
     height: 52,
+  },
+  heroLogoTint: {
+    tintColor: Colors.primary,
   },
   heroTitle: {
     fontSize: 36,
