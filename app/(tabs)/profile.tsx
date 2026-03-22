@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
@@ -33,6 +34,7 @@ import {
   ChevronRight,
   LogOut,
   ArrowLeftRight,
+  SlidersHorizontal,
 } from 'lucide-react-native';
 
 const FALLBACK_CREATED_IMAGES = [
@@ -233,10 +235,27 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.root}>
+      <View style={[styles.topBarWrap, { top: insets.top + 10 }]}>
+        <BlurView intensity={50} tint="light" style={styles.topBar}>
+          <View style={styles.topBarSideSpacer} />
+          <View style={styles.brandRow}>
+            <Image source={require('@/assets/images/EMlogo.png')} style={styles.brandLogo} />
+            <Text style={styles.brandText}>Event Maps</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.topBarIcon}
+            activeOpacity={0.75}
+            onPress={() => router.push('/settings')}
+          >
+            <SlidersHorizontal size={19} color={Palette.muted} />
+          </TouchableOpacity>
+        </BlurView>
+      </View>
+
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{
-          paddingTop: insets.top + 18,
+          paddingTop: insets.top + 92,
           paddingBottom: insets.bottom + 48,
           paddingHorizontal: 16,
         }}
@@ -554,6 +573,10 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.round,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  topBarSideSpacer: {
+    width: 36,
+    height: 36,
   },
   brandText: {
     fontSize: 24,

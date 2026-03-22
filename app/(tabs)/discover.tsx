@@ -825,9 +825,9 @@ const styles = StyleSheet.create({
   overlayChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: BorderRadius.round,
     backgroundColor: 'rgba(255,255,255,0.78)',
     borderWidth: 1,
@@ -838,8 +838,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
   },
   overlayChipText: {
-    fontSize: 12,
-    letterSpacing: 1,
+    fontSize: 10,
+    letterSpacing: 0.8,
     color: Colors.text.primary,
     fontFamily: Typography.labelFontFamilies.semibold,
   },
