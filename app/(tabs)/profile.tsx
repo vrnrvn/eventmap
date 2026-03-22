@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
@@ -26,8 +25,6 @@ import { router } from 'expo-router';
 import { Colors, Typography, BorderRadius } from '@/constants/theme';
 import { Event, RankedEvent } from '@/types/database';
 import {
-  Search,
-  SlidersHorizontal,
   Settings,
   MapPin,
   BadgeCheck,
@@ -236,33 +233,10 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.root}>
-      <View style={[styles.topBarWrap, { top: insets.top + 10 }]}>
-        <BlurView intensity={50} tint="light" style={styles.topBar}>
-          <TouchableOpacity
-            style={styles.topBarIcon}
-            activeOpacity={0.75}
-            onPress={() => router.push('/(tabs)/discover')}
-          >
-            <Search size={20} color={Palette.muted} />
-          </TouchableOpacity>
-          <View style={styles.brandRow}>
-            <Image source={require('@/assets/images/EMlogo.png')} style={styles.brandLogo} />
-            <Text style={styles.brandText}>EventMaps</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.topBarIcon}
-            activeOpacity={0.75}
-            onPress={() => router.push('/settings')}
-          >
-            <SlidersHorizontal size={20} color={Palette.muted} />
-          </TouchableOpacity>
-        </BlurView>
-      </View>
-
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{
-          paddingTop: insets.top + 92,
+          paddingTop: insets.top + 18,
           paddingBottom: insets.bottom + 48,
           paddingHorizontal: 16,
         }}
@@ -582,8 +556,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   brandText: {
-    fontSize: 31,
-    lineHeight: 34,
+    fontSize: 24,
+    lineHeight: 28,
     letterSpacing: -0.2,
     fontFamily: Typography.displayFontFamilies.extrabold,
     fontWeight: '800',
@@ -631,13 +605,13 @@ const styles = StyleSheet.create({
     fontFamily: Typography.labelFontFamilies.semibold,
   },
   avatarFrame: {
-    marginTop: -8,
-    marginBottom: 12,
+    marginTop: 0,
+    marginBottom: 10,
   },
   avatarRing: {
-    width: 164,
-    height: 164,
-    borderRadius: 82,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 6,
@@ -659,7 +633,7 @@ const styles = StyleSheet.create({
   },
   avatarInitial: {
     color: Palette.primary,
-    fontSize: 54,
+    fontSize: 46,
     fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
   },
@@ -682,11 +656,11 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   heroName: {
-    marginTop: 4,
+    marginTop: 2,
     color: Palette.text,
-    fontSize: 46,
-    lineHeight: 54,
-    letterSpacing: -0.8,
+    fontSize: 28,
+    lineHeight: 32,
+    letterSpacing: -0.3,
     fontFamily: Typography.displayFontFamilies.extrabold,
     fontWeight: '800',
   },
@@ -698,8 +672,8 @@ const styles = StyleSheet.create({
   },
   locationText: {
     color: Palette.primary,
-    fontSize: 26,
-    lineHeight: 32,
+    fontSize: 14,
+    lineHeight: 20,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     maxWidth: 260,
@@ -708,9 +682,9 @@ const styles = StyleSheet.create({
     marginTop: 12,
     textAlign: 'center',
     color: Palette.muted,
-    fontSize: 17,
-    lineHeight: 31,
-    maxWidth: 340,
+    fontSize: 14,
+    lineHeight: 22,
+    maxWidth: 320,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
   },
@@ -736,8 +710,8 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   statValue: {
-    fontSize: 34,
-    lineHeight: 38,
+    fontSize: 22,
+    lineHeight: 26,
     fontFamily: Typography.displayFontFamilies.extrabold,
     fontWeight: '800',
   },
@@ -784,8 +758,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: Palette.text,
-    fontSize: 34,
-    lineHeight: 38,
+    fontSize: 20,
+    lineHeight: 24,
     letterSpacing: -0.2,
     fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
