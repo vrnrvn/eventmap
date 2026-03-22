@@ -1060,15 +1060,15 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   submitGradient: {
-    minHeight: 68,
+    minHeight: 60,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
+    gap: 10,
   },
   submitText: {
     color: '#FFFFFF',
-    fontSize: 18,
+    fontSize: 16,
     fontFamily: Typography.displayFontFamilies.extrabold,
     fontWeight: '800',
   },
