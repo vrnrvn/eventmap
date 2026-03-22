@@ -9,11 +9,8 @@ import {
   Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BlurView } from 'expo-blur';
 import { router } from 'expo-router';
 import {
-  Search,
-  SlidersHorizontal,
   Mail,
   Clock3,
   RefreshCcw,
@@ -186,29 +183,6 @@ export default function NotificationsScreen() {
 
   return (
     <View style={styles.root}>
-      <View style={[styles.topBarWrap, { top: insets.top + 10 }]}>
-        <BlurView intensity={50} tint="light" style={styles.topBar}>
-          <TouchableOpacity
-            style={styles.topBarIcon}
-            activeOpacity={0.75}
-            onPress={() => router.push('/(tabs)/discover')}
-          >
-            <Search size={21} color={Palette.muted} />
-          </TouchableOpacity>
-          <View style={styles.brandRow}>
-            <Image source={require('@/assets/images/EMlogo.png')} style={styles.brandLogo} />
-            <Text style={styles.brandText}>EventMaps</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.topBarIcon}
-            activeOpacity={0.75}
-            onPress={() => router.push('/settings')}
-          >
-            <SlidersHorizontal size={21} color={Palette.muted} />
-          </TouchableOpacity>
-        </BlurView>
-      </View>
-
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -220,12 +194,16 @@ export default function NotificationsScreen() {
           />
         }
         contentContainerStyle={{
-          paddingTop: insets.top + 96,
+          paddingTop: insets.top + 18,
           paddingBottom: insets.bottom + 130,
           paddingHorizontal: 16,
         }}
       >
         <View style={styles.editorialHeader}>
+          <View style={styles.brandRow}>
+            <Image source={require('@/assets/images/EMlogo.png')} style={styles.brandLogo} />
+            <Text style={styles.brandText}>EventMaps</Text>
+          </View>
           <Text style={styles.editorialTitle}>Updates</Text>
           <Text style={styles.editorialSubtitle}>
             Stay in the loop with your latest event activity.
@@ -358,27 +336,9 @@ const styles = StyleSheet.create({
     right: 16,
     zIndex: 20,
   },
-  topBar: {
-    height: 56,
-    borderRadius: BorderRadius.round,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.35)',
-    overflow: 'hidden',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 13,
-  },
-  topBarIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: BorderRadius.round,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   brandText: {
-    fontSize: 32,
-    lineHeight: 36,
+    fontSize: 20,
+    lineHeight: 24,
     letterSpacing: -0.2,
     fontFamily: Typography.displayFontFamilies.extrabold,
     fontWeight: '800',
@@ -396,21 +356,22 @@ const styles = StyleSheet.create({
     tintColor: Colors.primary,
   },
   editorialHeader: {
+    marginTop: 6,
     marginBottom: 20,
+    gap: 8,
   },
   editorialTitle: {
-    fontSize: 56,
-    lineHeight: 62,
-    letterSpacing: -0.8,
+    fontSize: 24,
+    lineHeight: 28,
+    letterSpacing: -0.2,
     color: Palette.text,
     fontFamily: Typography.displayFontFamilies.extrabold,
     fontWeight: '800',
   },
   editorialSubtitle: {
-    marginTop: 10,
-    fontSize: 17,
-    lineHeight: 31,
-    maxWidth: 340,
+    fontSize: 14,
+    lineHeight: 21,
+    maxWidth: 320,
     color: Palette.muted,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
