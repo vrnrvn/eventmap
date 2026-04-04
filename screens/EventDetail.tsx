@@ -733,8 +733,8 @@ const styles = StyleSheet.create({
   },
   brandTitle: {
     color: Colors.primary,
-    fontSize: 32,
-    lineHeight: 36,
+    fontSize: Typography.sizes.xl,
+    lineHeight: 28,
     letterSpacing: -0.3,
     fontFamily: Typography.displayFontFamilies.extrabold,
     fontWeight: '800',
@@ -776,7 +776,7 @@ const styles = StyleSheet.create({
   },
   heroSection: {
     position: 'relative',
-    height: 540,
+    height: 480,
     overflow: 'hidden',
   },
   scrollContent: {
@@ -784,7 +784,7 @@ const styles = StyleSheet.create({
   },
   coverImage: {
     width: SCREEN_WIDTH,
-    height: 540,
+    height: 480,
     backgroundColor: Colors.background.secondary,
   },
   heroGradient: {
@@ -795,7 +795,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 24,
     right: 24,
-    bottom: 34,
+    bottom: 28,
   },
   heroCategoryPill: {
     alignSelf: 'flex-start',
@@ -815,9 +815,9 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     color: '#FFFFFF',
-    fontSize: 52,
-    lineHeight: 56,
-    letterSpacing: -1,
+    fontSize: 32,
+    lineHeight: 36,
+    letterSpacing: -0.4,
     fontFamily: Typography.displayFontFamilies.extrabold,
     fontWeight: '800',
   },
@@ -839,19 +839,19 @@ const styles = StyleSheet.create({
   },
   coverPlaceholder: {
     width: '100%',
-    height: 540,
+    height: 480,
     backgroundColor: Colors.background.secondary,
     justifyContent: 'center',
     alignItems: 'center',
   },
   contentCard: {
     marginHorizontal: 16,
-    marginTop: -42,
+    marginTop: -32,
     backgroundColor: '#FFFFFF',
-    borderRadius: 40,
-    paddingHorizontal: 22,
-    paddingTop: 26,
-    paddingBottom: 28,
+    borderRadius: 32,
+    paddingHorizontal: 20,
+    paddingTop: 22,
+    paddingBottom: 24,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.08,
@@ -859,12 +859,12 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   quickInfoSection: {
-    gap: 16,
-    marginBottom: 22,
+    gap: 12,
+    marginBottom: 18,
   },
   metaIconWrap: {
-    width: 48,
-    height: 48,
+    width: 42,
+    height: 42,
     borderRadius: BorderRadius.round,
     backgroundColor: Colors.background.secondary,
     alignItems: 'center',
@@ -872,27 +872,27 @@ const styles = StyleSheet.create({
   },
   metaLabel: {
     color: Colors.text.tertiary,
-    fontSize: 11,
-    letterSpacing: 1.4,
+    fontSize: Typography.sizes.xs,
+    letterSpacing: 1,
     textTransform: 'uppercase',
     fontFamily: Typography.labelFontFamilies.semibold,
   },
   metaValue: {
     marginTop: 2,
-    fontSize: 31,
-    lineHeight: 38,
+    fontSize: Typography.sizes.md,
+    lineHeight: 22,
     color: Colors.text.primary,
-    fontFamily: Typography.displayFontFamilies.bold,
-    fontWeight: Typography.weights.bold,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
     maxWidth: SCREEN_WIDTH - 128,
   },
   attendeesSection: {
     borderTopWidth: 1,
     borderBottomWidth: 1,
     borderColor: Colors.border.light,
-    paddingVertical: 22,
-    marginBottom: 22,
-    gap: 18,
+    paddingVertical: 18,
+    marginBottom: 18,
+    gap: 14,
   },
   attendeeRow: {
     flexDirection: 'row',
@@ -919,7 +919,7 @@ const styles = StyleSheet.create({
   },
   attendeeText: {
     flex: 1,
-    fontSize: 16,
+    fontSize: Typography.sizes.sm,
     color: Colors.text.primary,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
@@ -936,31 +936,31 @@ const styles = StyleSheet.create({
   },
   ticketText: {
     color: Colors.primary,
-    fontSize: 15,
+    fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
   },
   descriptionSection: {
-    marginBottom: 22,
+    marginBottom: 18,
   },
   bigSectionTitle: {
-    fontSize: 43,
-    lineHeight: 46,
+    fontSize: Typography.sizes.xl,
+    lineHeight: 28,
     color: Colors.text.primary,
-    letterSpacing: -0.6,
+    letterSpacing: -0.2,
     fontFamily: Typography.displayFontFamilies.extrabold,
     fontWeight: '800',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   descriptionText: {
-    fontSize: 18,
-    lineHeight: 34,
+    fontSize: Typography.sizes.md,
+    lineHeight: 24,
     color: Colors.text.secondary,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
   },
   venueSection: {
-    marginBottom: 26,
+    marginBottom: 20,
   },
   venueHeader: {
     flexDirection: 'row',
@@ -970,7 +970,7 @@ const styles = StyleSheet.create({
   },
   directionsText: {
     color: Colors.primary,
-    fontSize: 16,
+    fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
   },
@@ -1011,12 +1011,12 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.xxl,
   },
   title: {
-    fontSize: Typography.sizes.xxl,
+    fontSize: Typography.sizes.xl,
     fontFamily: Typography.displayFontFamilies.extrabold,
     fontWeight: '800',
     color: Colors.text.primary,
-    marginBottom: Spacing.sm,
-    letterSpacing: 0.5,
+    marginBottom: Spacing.xs,
+    letterSpacing: 0,
   },
   categoryBadge: {
     flexDirection: 'row',
@@ -1043,7 +1043,7 @@ const styles = StyleSheet.create({
   },
   businessName: {
     flex: 1,
-    fontSize: Typography.sizes.md,
+    fontSize: Typography.sizes.sm,
     color: Colors.text.secondary,
   },
   followButton: {
@@ -1073,7 +1073,7 @@ const styles = StyleSheet.create({
   },
   metaText: {
     flex: 1,
-    fontSize: Typography.sizes.md,
+    fontSize: Typography.sizes.sm,
     color: Colors.text.primary,
   },
   recurrenceSection: {
@@ -1092,7 +1092,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   recurrenceSectionTitle: {
-    fontSize: Typography.sizes.md,
+    fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
@@ -1104,11 +1104,11 @@ const styles = StyleSheet.create({
     marginLeft: 26,
   },
   description: {
-    fontSize: Typography.sizes.md,
+    fontSize: Typography.sizes.sm,
     color: Colors.text.primary,
-    lineHeight: 24,
-    marginTop: Spacing.md,
-    marginBottom: Spacing.lg,
+    lineHeight: 22,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.md,
   },
   linksSection: {
     marginBottom: Spacing.lg,
@@ -1135,7 +1135,7 @@ const styles = StyleSheet.create({
   },
   linkText: {
     flex: 1,
-    fontSize: Typography.sizes.md,
+    fontSize: Typography.sizes.sm,
     color: Colors.primary,
   },
   actionsSection: {
@@ -1171,7 +1171,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
   },
   actionButtonText: {
-    fontSize: Typography.sizes.md,
+    fontSize: Typography.sizes.sm,
     color: Colors.primary,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
@@ -1188,7 +1188,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   actionButtonRemoveText: {
-    fontSize: Typography.sizes.sm,
+    fontSize: Typography.sizes.xs,
     color: Colors.text.secondary,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
@@ -1200,7 +1200,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
   },
   saveButtonText: {
-    fontSize: Typography.sizes.md,
+    fontSize: Typography.sizes.sm,
     color: Colors.text.secondary,
   },
   saveButtonTextActive: {
@@ -1225,7 +1225,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
   },
   editButtonText: {
-    fontSize: Typography.sizes.md,
+    fontSize: Typography.sizes.sm,
     color: Colors.primary,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
@@ -1242,7 +1242,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.error,
   },
   deleteButtonText: {
-    fontSize: Typography.sizes.md,
+    fontSize: Typography.sizes.sm,
     color: Colors.error,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
@@ -1265,7 +1265,7 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary + '40',
   },
   statText: {
-    fontSize: Typography.sizes.sm,
+    fontSize: Typography.sizes.xs,
     color: Colors.text.tertiary,
   },
   statTextActionable: {
@@ -1290,13 +1290,13 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background.secondary,
   },
   writeReviewBtnText: {
-    fontSize: Typography.sizes.sm,
+    fontSize: Typography.sizes.xs,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
     color: Colors.primary,
   },
   errorText: {
-    fontSize: Typography.sizes.md,
+    fontSize: Typography.sizes.sm,
     color: Colors.error,
   },
   bottomActionBar: {
@@ -1319,7 +1319,7 @@ const styles = StyleSheet.create({
   },
   joinButtonText: {
     color: '#FFFFFF',
-    fontSize: 17,
+    fontSize: Typography.sizes.sm,
     fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
   },
