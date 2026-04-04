@@ -8,7 +8,6 @@ import {
   RefreshControl,
   Image,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import {
@@ -18,7 +17,6 @@ import {
   BellRing,
   ChevronRight,
   History,
-  SlidersHorizontal,
 } from 'lucide-react-native';
 import { Colors, Typography, BorderRadius } from '@/constants/theme';
 import {
@@ -185,23 +183,6 @@ export default function NotificationsScreen() {
 
   return (
     <View style={styles.root}>
-      <View style={[styles.topBarWrap, { top: insets.top + 10 }]}>
-        <BlurView intensity={50} tint="light" style={styles.topBar}>
-          <View style={styles.topBarSideSpacer} />
-          <View style={styles.brandRow}>
-            <Image source={require('@/assets/images/EMlogo.png')} style={styles.brandLogo} />
-            <Text style={styles.brandText}>Event Maps</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.topBarIcon}
-            activeOpacity={0.75}
-            onPress={() => router.push('/settings')}
-          >
-            <SlidersHorizontal size={19} color={Palette.muted} />
-          </TouchableOpacity>
-        </BlurView>
-      </View>
-
       <ScrollView
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -213,11 +194,15 @@ export default function NotificationsScreen() {
           />
         }
         contentContainerStyle={{
-          paddingTop: insets.top + 92,
+          paddingTop: insets.top + 12,
           paddingBottom: insets.bottom + 130,
           paddingHorizontal: 16,
         }}
       >
+        <View style={styles.logoRow}>
+          <Image source={require('@/assets/images/EMlogo.png')} style={styles.headerLogo} />
+        </View>
+
         <View style={styles.editorialHeader}>
           <Text style={styles.editorialTitle}>Updates</Text>
           <Text style={styles.editorialSubtitle}>
@@ -345,60 +330,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Palette.surface,
   },
-  topBarWrap: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    zIndex: 20,
+  logoRow: {
+    alignItems: 'flex-end',
+    marginBottom: 10,
   },
-  brandText: {
-    fontSize: 24,
-    lineHeight: 28,
-    letterSpacing: -0.2,
-    fontFamily: Typography.displayFontFamilies.extrabold,
-    fontWeight: '800',
-    color: Palette.primary,
-  },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  topBar: {
-    height: 54,
-    borderRadius: BorderRadius.round,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.35)',
-    overflow: 'hidden',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 20,
-    elevation: 5,
-  },
-  topBarIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: BorderRadius.round,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  topBarSideSpacer: {
-    width: 36,
-    height: 36,
-  },
-  brandLogo: {
+  headerLogo: {
     width: 30,
     height: 30,
     borderRadius: 8,
     tintColor: Colors.primary,
   },
   editorialHeader: {
-    marginTop: 6,
+    marginTop: 8,
     marginBottom: 20,
     gap: 8,
   },

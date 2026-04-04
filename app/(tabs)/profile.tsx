@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
@@ -26,7 +25,6 @@ import { router } from 'expo-router';
 import { Colors, Typography, BorderRadius } from '@/constants/theme';
 import { Event, RankedEvent } from '@/types/database';
 import {
-  Settings,
   MapPin,
   BadgeCheck,
   Star,
@@ -235,43 +233,26 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.root}>
-      <View style={[styles.topBarWrap, { top: insets.top + 10 }]}>
-        <BlurView intensity={50} tint="light" style={styles.topBar}>
-          <View style={styles.topBarSideSpacer} />
-          <View style={styles.brandRow}>
-            <Image source={require('@/assets/images/EMlogo.png')} style={styles.brandLogo} />
-            <Text style={styles.brandText}>Event Maps</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.topBarIcon}
-            activeOpacity={0.75}
-            onPress={() => router.push('/settings')}
-          >
-            <SlidersHorizontal size={19} color={Palette.muted} />
-          </TouchableOpacity>
-        </BlurView>
-      </View>
-
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{
-          paddingTop: insets.top + 92,
+          paddingTop: insets.top + 12,
           paddingBottom: insets.bottom + 48,
           paddingHorizontal: 16,
         }}
       >
-        <View style={styles.heroSection}>
-          <View style={styles.heroTopActions}>
-            <TouchableOpacity
-              style={styles.settingsPill}
-              onPress={() => router.push('/settings')}
-              activeOpacity={0.8}
-            >
-              <Settings size={16} color={Palette.text} />
-              <Text style={styles.settingsPillText}>Settings</Text>
-            </TouchableOpacity>
-          </View>
+        <View style={styles.logoRow}>
+          <Image source={require('@/assets/images/EMlogo.png')} style={styles.headerLogo} />
+          <TouchableOpacity
+            style={styles.settingsIcon}
+            activeOpacity={0.8}
+            onPress={() => router.push('/settings')}
+          >
+            <SlidersHorizontal size={17} color={Palette.muted} />
+          </TouchableOpacity>
+        </View>
 
+        <View style={styles.heroSection}>
           <TouchableOpacity
             style={styles.avatarFrame}
             activeOpacity={0.88}
@@ -545,87 +526,29 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Palette.surface,
   },
-  topBarWrap: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    zIndex: 20,
-  },
-  topBar: {
-    height: 54,
-    borderRadius: BorderRadius.round,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.35)',
-    overflow: 'hidden',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 20,
-    elevation: 5,
-  },
-  topBarIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: BorderRadius.round,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  topBarSideSpacer: {
-    width: 36,
-    height: 36,
-  },
-  brandText: {
-    fontSize: 24,
-    lineHeight: 28,
-    letterSpacing: -0.2,
-    fontFamily: Typography.displayFontFamilies.extrabold,
-    fontWeight: '800',
-    color: Palette.primary,
-  },
-  brandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  logoRow: {
+    alignItems: 'flex-end',
+    marginBottom: 10,
     gap: 8,
   },
-  brandLogo: {
+  headerLogo: {
     width: 30,
     height: 30,
     borderRadius: 8,
     tintColor: Colors.primary,
   },
+  settingsIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: BorderRadius.round,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.06)',
+  },
   heroSection: {
     alignItems: 'center',
-  },
-  heroTopActions: {
-    width: '100%',
-    alignItems: 'flex-end',
-  },
-  settingsPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: Palette.card,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.08)',
-    borderRadius: BorderRadius.round,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    elevation: 3,
-  },
-  settingsPillText: {
-    fontSize: 12,
-    color: Palette.text,
-    textTransform: 'uppercase',
-    letterSpacing: 1.2,
-    fontFamily: Typography.labelFontFamilies.semibold,
   },
   avatarFrame: {
     marginTop: 0,
