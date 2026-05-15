@@ -12,6 +12,7 @@ import {
   Platform,
   FlatList,
   Dimensions,
+  Share,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,7 +21,7 @@ import { useApp } from '@/contexts/AppContext';
 import { eventsService } from '@/services/events';
 import { socialService } from '@/services/social';
 import { reviewsService, type ReviewWithProfile } from '@/services/reviews';
-import { EventDetails } from '@/types/database';
+import { EventDetails, type PublicAttendee } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { ImageViewer } from '@/components/ImageViewer';
 import { Avatar } from '@/components/Avatar';
@@ -37,7 +38,6 @@ import {
   Building2,
   ExternalLink,
   Heart,
-  Users,
   Pencil,
   Trash2,
   CheckCircle2,
@@ -45,12 +45,15 @@ import {
   Flag,
   Repeat,
   Share2,
-  Ticket,
   Clock3,
+  CalendarPlus,
+  TrendingUp,
 } from 'lucide-react-native';
 import { EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
+import { GoogleMapView } from '@/components/GoogleMapView';
 import { complaintsService } from '@/services/complaints';
 import { getNextOccurrences, getRecurrenceLabel } from '@/utils/recurrence';
+import { getEventWebUrl, getGoogleCalendarEventUrl } from '@/utils/eventShare';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -69,6 +72,7 @@ export default function EventDetail() {
   const [userReview, setUserReview] = useState<{ rating: number; text: string } | null>(null);
   const [showReviewForm, setShowReviewForm] = useState(false);
   const attendeesSheetRef = useRef<AttendeesBottomSheetHandle>(null);
+  const [previewAttendees, setPreviewAttendees] = useState<PublicAttendee[]>([]);
 
   const isOwner = !!(userBusiness && details?.event.business_id === userBusiness.id);
 
@@ -125,6 +129,25 @@ export default function EventDetail() {
     };
     loadReviews();
   }, [businessId, user]);
+
+  useEffect(() => {
+    if (!id || !details || details.rsvp_count < 1) {
+      setPreviewAttendees([]);
+      return;
+    }
+    let cancelled = false;
+    socialService
+      .getEventAttendees(id)
+      .then((list) => {
+        if (!cancelled) setPreviewAttendees(list);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewAttendees([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, details?.rsvp_count]);
 
   const handleReviewSubmit = async (rating: number, text: string) => {
     if (!businessId) return;
@@ -250,6 +273,65 @@ export default function EventDetail() {
     ]);
   };
 
+  const handleShareEvent = async () => {
+    if (!id || !details) return;
+    const url = getEventWebUrl(id);
+    const title = details.event.title;
+    try {
+      await Share.share(
+        Platform.OS === 'ios'
+          ? { title, url }
+          : { title, message: `${title}\n${url}` }
+      );
+    } catch {
+      // dismissed
+    }
+  };
+
+  const handleOpenCalendar = () => {
+    if (!details) return;
+    const url = getGoogleCalendarEventUrl({
+      title: details.event.title,
+      startIso: details.event.start_datetime,
+      endIso: details.event.end_datetime,
+      address: details.event.address,
+      details: `${getEventWebUrl(details.event.id)}\n\nHosted by ${details.business.name}`,
+    });
+    Linking.openURL(url);
+  };
+
+  const submitEventReport = async (reason: string) => {
+    if (!id) return;
+    try {
+      await complaintsService.createComplaint('event', id, reason);
+      Alert.alert(
+        'Report received',
+        'Thanks for helping keep EventMaps safe. We typically review reports within about 48 hours and may remove content that violates our guidelines.'
+      );
+    } catch {
+      Alert.alert('Error', 'Failed to submit report. Please try again.');
+    }
+  };
+
+  const handleReportEvent = () => {
+    Alert.alert('Report this event', 'What best describes the issue?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Spam or misleading',
+        onPress: () => void submitEventReport('Spam or misleading'),
+      },
+      {
+        text: 'Safety concern',
+        style: 'destructive',
+        onPress: () => void submitEventReport('Safety concern'),
+      },
+      {
+        text: 'Other',
+        onPress: () => void submitEventReport('Other'),
+      },
+    ]);
+  };
+
   const formatDate = (dateString: string) =>
     new Date(dateString).toLocaleDateString('en-US', {
       weekday: 'short',
@@ -291,6 +373,9 @@ export default function EventDetail() {
 
   const { event, business, category, links } = details;
 
+  const venueLat = Number.isFinite(event.lat) ? event.lat : business.lat;
+  const venueLng = Number.isFinite(event.lng) ? event.lng : business.lng;
+
   return (
     <View style={styles.container}>
       <View style={[styles.heroTopBarWrap, { top: insets.top + 10 }]}>
@@ -301,9 +386,8 @@ export default function EventDetail() {
           <Text style={styles.brandTitle}>EventMaps</Text>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => {
-              Alert.alert('Share', 'Sharing is coming soon.');
-            }}
+            onPress={handleShareEvent}
+            accessibilityLabel="Share event"
           >
             <Share2 size={20} color={Colors.text.primary} />
           </TouchableOpacity>
@@ -393,19 +477,57 @@ export default function EventDetail() {
             )}
           </View>
 
-          <View style={styles.attendeesSection}>
+          <TouchableOpacity
+            style={styles.calendarRow}
+            onPress={handleOpenCalendar}
+            activeOpacity={0.75}
+          >
+            <View style={styles.metaIconWrap}>
+              <CalendarPlus size={18} color={Colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.metaLabel}>Add to calendar</Text>
+              <Text style={styles.metaValue}>Google Calendar</Text>
+            </View>
+            <ExternalLink size={18} color={Colors.text.tertiary} />
+          </TouchableOpacity>
+
+          <Text style={styles.promoFootnote}>
+            Listings may be ordered using distance, relevance, and paid promotion from hosts.
+          </Text>
+
+          <TouchableOpacity
+            style={styles.attendeesSection}
+            onPress={() => (details.rsvp_count > 0 ? attendeesSheetRef.current?.present() : null)}
+            activeOpacity={details.rsvp_count > 0 ? 0.85 : 1}
+            disabled={details.rsvp_count === 0}
+          >
             <View style={styles.attendeeRow}>
               <View style={styles.attendeeGroup}>
-                <Avatar imageUrl={business.logo_url} name={business.name} size={36} />
-                <View style={styles.attendeePlaceholder}><Text style={styles.attendeePlus}>+{Math.max(details.rsvp_count, 12)}</Text></View>
+                {(() => {
+                  const faces = previewAttendees.slice(0, 4);
+                  const moreCount = Math.max(0, details.rsvp_count - faces.length);
+                  return (
+                    <>
+                      {faces.map((a) => (
+                        <Avatar key={a.id} imageUrl={a.avatar_url} name={a.name} size={36} />
+                      ))}
+                      {moreCount > 0 ? (
+                        <View style={styles.attendeePlaceholder}>
+                          <Text style={styles.attendeePlus}>+{moreCount}</Text>
+                        </View>
+                      ) : null}
+                    </>
+                  );
+                })()}
               </View>
-              <Text style={styles.attendeeText}>Joined by friends & others</Text>
+              <Text style={styles.attendeeText}>
+                {details.rsvp_count === 0
+                  ? 'Be the first to RSVP'
+                  : `${details.rsvp_count} going — tap to see who’s coming`}
+              </Text>
             </View>
-            <View style={styles.ticketPill}>
-              <Ticket size={16} color={Colors.primary} />
-              <Text style={styles.ticketText}>120 tickets left</Text>
-            </View>
-          </View>
+          </TouchableOpacity>
 
           <View style={styles.descriptionSection}>
             <Text style={styles.bigSectionTitle}>About Event</Text>
@@ -440,12 +562,24 @@ export default function EventDetail() {
               ) : null}
             </View>
             <View style={styles.venueMapCard}>
-              <Image
-                source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuB63GFwCNyJH6b2Bvf9n9Wb_x5YAfgsoGbM2ofojeA2wZBed4meKHCQeh534TJNdg_dBepjVRuZdLNRavYoB_L1F7eWIJA4vPSSUocfHXisvuerDA0YoWOn-B9_rUy70IZLZwfe397SLcdFMcGqgGZqFpA1Wmt1g00mMLAR-Kevnz1fH69Y-Ny5aQiIJEH848UTy1F1X9zgiKT80TIfSncaVJ95uplw-_Ljg5rRrqJbgbN9qW9egp-N4obG58PYodf0GcdlMIy75ok' }}
-                style={styles.venueMapImage}
-              />
-              <View style={styles.venuePin}>
-                <EventmapMapPin size={22} color="#FFFFFF" />
+              <View style={styles.venueMapInner}>
+                <GoogleMapView
+                  style={{ flex: 1, minHeight: 0 }}
+                  center={{ lat: venueLat, lng: venueLng }}
+                  zoom={15}
+                  markers={[
+                    {
+                      id: event.id,
+                      lat: venueLat,
+                      lng: venueLng,
+                      title: event.title,
+                      categorySlug: category.slug,
+                      coverImageUrl: event.cover_image_url,
+                      businessLogoUrl: business.logo_url,
+                      businessName: business.name,
+                    },
+                  ]}
+                />
               </View>
             </View>
           </View>
@@ -572,53 +706,41 @@ export default function EventDetail() {
           )}
 
           {isOwner && (
-            <View style={styles.ownerActions}>
+            <>
               <TouchableOpacity
-                style={styles.editButton}
-                onPress={() => router.push(`/business/edit-event/${event.id}` as any)}
+                style={styles.insightsBanner}
+                onPress={() => router.push(`/business/event-insights/${event.id}` as never)}
+                activeOpacity={0.85}
               >
-                <Pencil size={18} color={Colors.primary} />
-                <Text style={styles.editButtonText}>Edit Event</Text>
+                <TrendingUp size={20} color={Colors.primary} />
+                <Text style={styles.insightsBannerText}>Reach, saves & RSVPs</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.deleteButton}
-                onPress={handleDelete}
-              >
-                <Trash2 size={18} color={Colors.error} />
-                <Text style={styles.deleteButtonText}>Delete Event</Text>
-              </TouchableOpacity>
-            </View>
+              <View style={styles.ownerActions}>
+                <TouchableOpacity
+                  style={styles.editButton}
+                  onPress={() => router.push(`/business/edit-event/${event.id}` as any)}
+                >
+                  <Pencil size={18} color={Colors.primary} />
+                  <Text style={styles.editButtonText}>Edit Event</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
+                  <Trash2 size={18} color={Colors.error} />
+                  <Text style={styles.deleteButtonText}>Delete Event</Text>
+                </TouchableOpacity>
+              </View>
+            </>
           )}
 
-          <View style={styles.statsRow}>
-            <TouchableOpacity
-              style={[
-                styles.stat,
-                details.rsvp_count > 0 && styles.statActionable,
-              ]}
-              onPress={() => attendeesSheetRef.current?.present()}
-              activeOpacity={0.7}
-            >
-              <Users
-                size={16}
-                color={details.rsvp_count > 0 ? Colors.primary : Colors.text.tertiary}
-              />
-              <Text
-                style={[
-                  styles.statText,
-                  details.rsvp_count > 0 && styles.statTextActionable,
-                ]}
-              >
-                {details.rsvp_count > 0
-                  ? `See who's going (${details.rsvp_count})`
-                  : `${details.rsvp_count} going`}
-              </Text>
+          {user && !isOwner ? (
+            <TouchableOpacity style={styles.reportEventRow} onPress={handleReportEvent} activeOpacity={0.75}>
+              <Flag size={18} color={Colors.text.secondary} />
+              <Text style={styles.reportEventText}>Report this event</Text>
             </TouchableOpacity>
-            <View style={styles.stat}>
-              <Heart size={16} color={Colors.text.tertiary} />
-              <Text style={styles.statText}>{details.save_count} saved</Text>
-            </View>
-          </View>
+          ) : null}
+
+          <Text style={styles.trustFootnote}>
+            Reports are reviewed within about 48 hours. We may remove content that violates our guidelines.
+          </Text>
 
           <View style={styles.reviewsSection}>
             <Text style={styles.sectionTitle}>Reviews</Text>
@@ -669,7 +791,10 @@ export default function EventDetail() {
                               onPress: async () => {
                                 try {
                                   await complaintsService.createComplaint('review', reviewId);
-                                  Alert.alert('Thank you', 'Your report has been submitted.');
+                                  Alert.alert(
+                                    'Thank you',
+                                    'Your report has been submitted. We typically review within about 48 hours.'
+                                  );
                                 } catch {
                                   Alert.alert('Error', 'Failed to submit report.');
                                 }
@@ -886,6 +1011,22 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.semibold,
     maxWidth: SCREEN_WIDTH - 128,
   },
+  calendarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    marginBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border.light,
+  },
+  promoFootnote: {
+    fontSize: Typography.sizes.xs,
+    lineHeight: 16,
+    color: Colors.text.tertiary,
+    fontFamily: Typography.fontFamilies.regular,
+    marginBottom: 14,
+  },
   attendeesSection: {
     borderTopWidth: 1,
     borderBottomWidth: 1,
@@ -923,22 +1064,6 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-  },
-  ticketPill: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 14,
-    backgroundColor: 'rgba(180,25,36,0.08)',
-  },
-  ticketText: {
-    color: Colors.primary,
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
   },
   descriptionSection: {
     marginBottom: 18,
@@ -979,31 +1104,12 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     overflow: 'hidden',
     position: 'relative',
+    backgroundColor: Colors.background.secondary,
   },
-  venueMapImage: {
-    width: '100%',
+  venueMapInner: {
+    flex: 1,
     height: '100%',
-    opacity: 0.45,
-  },
-  venuePin: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    marginTop: -26,
-    marginLeft: -26,
-    width: 52,
-    height: 52,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: '#FFFFFF',
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.25,
-    shadowRadius: 14,
-    elevation: 6,
+    width: '100%',
   },
   content: {
     paddingHorizontal: Spacing.lg,
@@ -1208,6 +1314,24 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
+  insightsBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    marginBottom: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.primary + '44',
+    backgroundColor: Colors.primary + '10',
+  },
+  insightsBannerText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+  },
   ownerActions: {
     flexDirection: 'row',
     gap: Spacing.md,
@@ -1247,31 +1371,25 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
-  statsRow: {
-    flexDirection: 'row',
-    gap: Spacing.lg,
-  },
-  stat: {
+  reportEventRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.xs,
-  },
-  statActionable: {
-    backgroundColor: Colors.primary + '18',
+    gap: Spacing.sm,
     paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    borderColor: Colors.primary + '40',
+    marginBottom: Spacing.xs,
   },
-  statText: {
-    fontSize: Typography.sizes.xs,
+  reportEventText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+  },
+  trustFootnote: {
+    fontSize: 11,
+    lineHeight: 15,
     color: Colors.text.tertiary,
-  },
-  statTextActionable: {
-    color: Colors.primary,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
+    fontFamily: Typography.fontFamilies.regular,
+    marginBottom: Spacing.lg,
   },
   reviewsSection: {
     marginTop: Spacing.xl,

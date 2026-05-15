@@ -25,19 +25,22 @@ import {
 import { usePremium } from '@/contexts/PremiumContext';
 import { premiumService } from '@/services/premium';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import * as WebBrowser from 'expo-web-browser';
+
+const STRIPE_PORTAL_URL = process.env.EXPO_PUBLIC_STRIPE_CUSTOMER_PORTAL_URL?.trim();
 
 const Palette = {
   gradientStart: Colors.primary,
   gradientEnd: Colors.accent,
   cardBg: Colors.background.primary,
   surfaceMuted: Colors.background.primary,
-  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  accentSoft: 'rgba(180, 25, 36, 0.12)',
   separator: Colors.border.light,
   premiumGold: Colors.accent,
   success: Colors.success,
   successSoft: 'rgba(45, 138, 110, 0.12)',
   error: Colors.error,
-  errorSoft: 'rgba(196, 92, 62, 0.12)',
+  errorSoft: 'rgba(180, 25, 36, 0.12)',
   warn: Colors.warning,
   warnSoft: 'rgba(212, 160, 23, 0.12)',
 };
@@ -328,22 +331,28 @@ export default function ManageSubscriptionScreen() {
             <CreditCard size={20} color={Colors.text.primary} />
             <Text style={styles.sectionTitle}>Payment Method</Text>
           </View>
-          <Text style={styles.paymentNote}>
-            Payment methods are managed through Stripe. You'll be redirected to Stripe
-            to update your payment information.
-          </Text>
-          <TouchableOpacity
-            style={styles.updatePaymentButton}
-            onPress={() => {
-              Alert.alert(
-                'Update Payment',
-                'This will redirect you to Stripe to manage your payment method. Coming soon!'
-              );
-            }}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.updatePaymentText}>Update Payment Method</Text>
-          </TouchableOpacity>
+          {STRIPE_PORTAL_URL ? (
+            <>
+              <Text style={styles.paymentNote}>
+                Update your card on Stripe’s secure billing portal.
+              </Text>
+              <TouchableOpacity
+                style={styles.updatePaymentButton}
+                onPress={() => {
+                  void WebBrowser.openBrowserAsync(STRIPE_PORTAL_URL);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.updatePaymentText}>Open Stripe billing</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <Text style={styles.paymentNote}>
+              Self-serve card updates are not enabled for this build yet. Email
+              support@eventmap.com and we’ll help you update billing, or set
+              EXPO_PUBLIC_STRIPE_CUSTOMER_PORTAL_URL to your Stripe Customer Portal link.
+            </Text>
+          )}
         </View>
 
         {/* Footer */}
