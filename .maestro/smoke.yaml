@@ -1,0 +1,6 @@
+# Smoke: maestro test .maestro/smoke.yaml
+# Install: https://maestro.mobile.dev — device/simulator with app installed.
+
+appId: com.eventmap.app
+---
+- launchApp

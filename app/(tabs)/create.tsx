@@ -9,9 +9,9 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Dimensions,
   TouchableOpacity,
   Image,
-  TextInput,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,18 +19,25 @@ import DateTimePicker, {
   DateTimePickerAndroid,
 } from '@react-native-community/datetimepicker';
 import {
-  X,
+  ChevronRight,
+  ChevronDown,
+  CalendarPlus,
+  Type,
+  AlignLeft,
+  Tag,
+  Clock,
   CalendarDays,
-  Clock3,
   Repeat,
   MapPin,
+  Briefcase,
+  Sparkles,
   Navigation,
-  ImagePlus,
-  Rocket,
+  ImageIcon,
 } from 'lucide-react-native';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { router } from 'expo-router';
+import { Input } from '@/components/Input';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { GoogleMapView } from '@/components/GoogleMapView';
@@ -45,26 +52,22 @@ import { eventsService } from '@/services/events';
 import { categoriesService } from '@/services/categories';
 import { businessesService } from '@/services/businesses';
 import { Category } from '@/types/database';
-import { Colors, Typography, BorderRadius } from '@/constants/theme';
+import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import type { RecurrenceOption } from '@/utils/recurrence';
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
 const MAX_EVENT_DATE = new Date();
 MAX_EVENT_DATE.setFullYear(MAX_EVENT_DATE.getFullYear() + 10);
 
-const Design = {
-  surface: '#F6F6F6',
-  surfaceCard: '#FFFFFF',
-  surfaceMuted: '#F0F1F1',
-  surfaceSoft: '#E7E8E8',
-  surfaceStrong: '#DBDDDD',
-  text: '#2D2F2F',
-  textMuted: '#5A5C5C',
-  outline: '#ACADAD',
-  primary: '#B41924',
-  secondary: '#9B3E20',
-  primarySoft: 'rgba(180, 25, 36, 0.1)',
-  shadow: 'rgba(16, 24, 40, 0.08)',
+const Palette = {
+  gradientStart: Colors.primary,
+  gradientEnd: Colors.accent,
+  cardBg: Colors.background.primary,
+  surfaceMuted: Colors.background.primary,
+  accentSoft: 'rgba(180, 25, 36, 0.12)',
+  separator: Colors.border.light,
+  badge: Colors.primary,
 };
 
 export default function CreateScreen() {
@@ -245,220 +248,230 @@ export default function CreateScreen() {
     }
   };
 
-  const formatDateValue = (d: Date) =>
-    d.toLocaleDateString('en-US', {
-      month: '2-digit',
-      day: '2-digit',
-      year: '2-digit',
-    });
-
-  const formatTimeValue = (d: Date) =>
-    d.toLocaleTimeString('en-US', {
-      hour: '2-digit',
+  const formatDateTime = (d: Date) =>
+    d.toLocaleString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
       minute: '2-digit',
-      hour12: false,
     });
 
-  const closeScreen = () => {
-    if (router.canGoBack()) {
-      router.back();
-      return;
-    }
-    router.replace('/(tabs)/discover');
-  };
-
+  /* ── No business state ── */
   if (!hasBusiness) {
     return (
-      <View style={[styles.noBizContainer, { paddingTop: insets.top + 48 }]}>
-        <View style={styles.noBizBadge}>
+      <View style={[styles.noBizContainer, { paddingTop: insets.top + 40 }]}>
+        <View style={styles.noBizIconWrap}>
           <Image
             source={require('@/assets/images/EMlogo.png')}
             style={styles.noBizLogo}
             resizeMode="contain"
           />
         </View>
-        <Text style={styles.noBizTitle}>Host Event</Text>
+        <Text style={styles.noBizTitle}>Create Events</Text>
         <Text style={styles.noBizSubtitle}>
-          Create your business profile first so we can attach events to the right venue.
+          You need a business profile to start posting events and reaching your
+          community.
         </Text>
         <TouchableOpacity
-          style={styles.noBizButton}
+          style={styles.noBizCta}
           onPress={() => router.push('/(tabs)/profile')}
-          activeOpacity={0.88}
+          activeOpacity={0.85}
         >
           <LinearGradient
-            colors={[Design.primary, Design.secondary]}
+            colors={[Colors.primary, Palette.gradientEnd]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
-            style={styles.noBizButtonGradient}
+            style={styles.noBizCtaGradient}
           >
-            <Text style={styles.noBizButtonText}>Set Up Business</Text>
+            <Text style={styles.noBizCtaText}>Set Up Business</Text>
+            <ChevronRight size={18} color="#fff" />
           </LinearGradient>
         </TouchableOpacity>
       </View>
     );
   }
 
+  /* ── Main form ── */
   return (
     <KeyboardAvoidingView
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View
-        style={[
-          styles.headerWrap,
-          { top: insets.top + 12, left: 20, right: 20 },
-        ]}
-      >
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.headerButton}
-            onPress={closeScreen}
-            activeOpacity={0.75}
-          >
-            <X size={24} color={Design.text} />
-          </TouchableOpacity>
-          <View style={styles.headerTitleRow}>
-            <Image source={require('@/assets/images/EMlogo.png')} style={styles.headerLogo} />
-            <Text style={styles.headerTitle}>Host Event</Text>
-          </View>
-          <View style={styles.headerSpacer} />
-        </View>
-      </View>
-
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={{
-          paddingTop: insets.top + 92,
-          paddingBottom: insets.bottom + 148,
-          paddingHorizontal: 24,
-        }}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 40 },
+        ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.sectionEyebrow}>Event Banner</Text>
-        <View style={styles.bannerCard}>
-          <View style={styles.bannerPreview}>
-            {formData.images[0] ? (
-              <Image source={{ uri: formData.images[0].uri }} style={styles.bannerImage} />
-            ) : null}
-            <View
-              style={[
-                styles.bannerPlaceholder,
-                formData.images[0] && styles.bannerPlaceholderOverlay,
-              ]}
-            >
-              <View style={styles.bannerBadge}>
-                <ImagePlus size={28} color={Design.primary} />
-              </View>
-              <Text style={styles.bannerTitle}>Upload cover image</Text>
-              <Text style={styles.bannerSubtitle}>
-                High resolution PNG or JPG preferred
-              </Text>
-            </View>
-          </View>
-          <View style={styles.bannerPickerRow}>
-            <ImagePickerButton
-              images={formData.images}
-              onChange={(imgs) => setFormData((f) => ({ ...f, images: imgs }))}
-              maxImages={5}
-            />
+        {/* ── Page header ── */}
+        <View style={styles.pageHeader}>
+          <Image
+            source={require('@/assets/images/EMlogo.png')}
+            style={styles.pageHeaderLogo}
+            resizeMode="contain"
+          />
+          <View>
+            <Text style={styles.pageTitle}>Create Event</Text>
+            <Text style={styles.pageSubtitle}>
+              Fill in the details below to publish
+            </Text>
           </View>
         </View>
 
-        <View style={styles.sectionBlock}>
-          <View style={styles.infoCard}>
-            <View style={styles.infoSection}>
-              <Text style={styles.fieldEyebrow}>What Is It Called?</Text>
-              <TextInput
-                style={styles.titleInput}
+        {/* ── Section: Basic Info ── */}
+        <Text style={styles.sectionLabel}>Basic Information</Text>
+        <View style={styles.card}>
+          <View style={styles.fieldRow}>
+            <View style={styles.fieldIcon}>
+              <Type size={16} color={Colors.primary} />
+            </View>
+            <View style={styles.fieldContent}>
+              <Input
+                label="Title"
                 value={formData.title}
                 onChangeText={(t) => setFormData((f) => ({ ...f, title: t }))}
-                placeholder="The Sunset Rooftop Mixer"
-                placeholderTextColor={Design.surfaceStrong}
+                placeholder="Event name"
+                error={errors.title}
               />
-              {errors.title ? <Text style={styles.errorText}>{errors.title}</Text> : null}
             </View>
-            <View style={styles.infoDivider} />
-            <View style={styles.infoSection}>
-              <Text style={styles.fieldEyebrow}>Details</Text>
-              <TextInput
-                style={styles.detailsInput}
+          </View>
+
+          <View style={styles.fieldSeparator} />
+
+          <View style={styles.fieldRow}>
+            <View style={styles.fieldIcon}>
+              <AlignLeft size={16} color={Colors.primary} />
+            </View>
+            <View style={styles.fieldContent}>
+              <Input
+                label="Description"
                 value={formData.description}
-                onChangeText={(t) => setFormData((f) => ({ ...f, description: t }))}
-                placeholder="Tell your guests about the experience, the vibe, and what to bring..."
-                placeholderTextColor={Design.textMuted}
+                onChangeText={(t) =>
+                  setFormData((f) => ({ ...f, description: t }))
+                }
+                placeholder="What's this event about?"
                 multiline
-                textAlignVertical="top"
+                numberOfLines={4}
+                style={styles.textArea}
+                error={errors.description}
               />
-              {errors.description ? (
-                <Text style={styles.errorText}>{errors.description}</Text>
-              ) : null}
             </View>
           </View>
         </View>
 
-        <View style={styles.sectionBlock}>
-          <Text style={styles.sectionEyebrow}>Category</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.categoryRow}
-          >
-            {categories.map((category) => {
-              const selected = formData.categoryId === category.id;
-              return (
-                <TouchableOpacity
-                  key={category.id}
-                  style={[styles.categoryChip, selected && styles.categoryChipSelected]}
-                  onPress={() => setFormData((f) => ({ ...f, categoryId: category.id }))}
-                  activeOpacity={0.75}
-                >
-                  <CategoryIcon
-                    category={category.slug}
-                    size="sm"
-                    variant="pill"
-                  />
-                  <Text
-                    style={[
-                      styles.categoryChipText,
-                      selected && styles.categoryChipTextSelected,
-                    ]}
+        {/* ── Section: Category ── */}
+        <Text style={styles.sectionLabel}>Category</Text>
+        <View style={styles.card}>
+          <View style={styles.fieldRowNoPad}>
+            <View style={[styles.fieldIcon, { marginTop: 14 }]}>
+              <Tag size={16} color={Colors.primary} />
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.catScroll}
+              contentContainerStyle={styles.catScrollContent}
+            >
+              {categories.map((c) => {
+                const selected = formData.categoryId === c.id;
+                return (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[styles.catChip, selected && styles.catChipSelected]}
+                    onPress={() =>
+                      setFormData((f) => ({ ...f, categoryId: c.id }))
+                    }
+                    activeOpacity={0.7}
                   >
-                    {category.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-          {errors.categoryId ? <Text style={styles.errorText}>{errors.categoryId}</Text> : null}
+                    <CategoryIcon category={c.slug} size="sm" variant="pill" />
+                    <Text
+                      style={[
+                        styles.catChipText,
+                        selected && styles.catChipTextSelected,
+                      ]}
+                    >
+                      {c.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+          {errors.categoryId && (
+            <View style={styles.inlineError}>
+              <Text style={styles.errorText}>{errors.categoryId}</Text>
+            </View>
+          )}
         </View>
 
-        <View style={styles.sectionBlock}>
-          <View style={styles.dateTimeRow}>
-            <TouchableOpacity
-              style={styles.dateTimeCard}
-              activeOpacity={0.8}
-              onPress={() => {
-                if (Platform.OS === 'android') {
-                  openAndroidPicker(formData.startDatetime, 'start');
-                } else {
-                  setShowEndPicker(false);
-                  setShowStartPicker((prev) => !prev);
-                }
+        {/* ── Section: Date & Time ── */}
+        <Text style={styles.sectionLabel}>Date & Time</Text>
+        <View style={styles.card}>
+          {/* Start */}
+          <TouchableOpacity
+            style={styles.dateRow}
+            activeOpacity={0.6}
+            onPress={() => {
+              if (Platform.OS === 'android') {
+                openAndroidPicker(formData.startDatetime, 'start');
+              } else {
+                setShowEndPicker(false);
+                setShowStartPicker((prev) => !prev);
+              }
+            }}
+          >
+            <View style={styles.fieldIcon}>
+              <Clock size={16} color={Colors.primary} />
+            </View>
+            <View style={styles.dateTextBlock}>
+              <Text style={styles.dateLabel}>Starts</Text>
+              <Text style={styles.dateValue}>
+                {formatDateTime(formData.startDatetime)}
+              </Text>
+            </View>
+            {showStartPicker ? (
+              <ChevronDown size={18} color={Colors.primary} />
+            ) : (
+              <ChevronRight size={18} color={Colors.text.tertiary} />
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* Start picker rendered OUTSIDE the card */}
+        {Platform.OS !== 'android' && showStartPicker && (
+          <View style={styles.pickerContainer}>
+            <DateTimePicker
+              value={formData.startDatetime}
+              mode="datetime"
+              display="spinner"
+              maximumDate={MAX_EVENT_DATE}
+              textColor={Colors.text.primary}
+              themeVariant="light"
+              onChange={(_, d) => {
+                if (d) setFormData((f) => ({ ...f, startDatetime: d }));
               }}
-            >
-              <View style={styles.dateIconWrap}>
-                <CalendarDays size={20} color={Design.primary} />
-              </View>
-              <View style={styles.dateTimeCopy}>
-                <Text style={styles.dateTimeLabel}>Date</Text>
-                <Text style={styles.dateTimeValue}>{formatDateValue(formData.startDatetime)}</Text>
-              </View>
-            </TouchableOpacity>
+              style={styles.picker}
+            />
             <TouchableOpacity
-              style={styles.dateTimeCard}
-              activeOpacity={0.8}
+              style={styles.pickerDoneButton}
+              onPress={() => setShowStartPicker(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.pickerDoneText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <View style={styles.dateCardSpacing}>
+          <View style={styles.card}>
+            {/* End */}
+            <TouchableOpacity
+              style={styles.dateRow}
+              activeOpacity={0.6}
               onPress={() => {
                 if (Platform.OS === 'android') {
                   openAndroidPicker(formData.endDatetime, 'end');
@@ -468,126 +481,128 @@ export default function CreateScreen() {
                 }
               }}
             >
-              <View style={styles.dateIconWrap}>
-                <Clock3 size={20} color={Design.primary} />
+              <View style={styles.fieldIcon}>
+                <CalendarDays size={16} color={Colors.primary} />
               </View>
-              <View style={styles.dateTimeCopy}>
-                <Text style={styles.dateTimeLabel}>Time</Text>
-                <Text style={styles.dateTimeValue}>{formatTimeValue(formData.startDatetime)}</Text>
+              <View style={styles.dateTextBlock}>
+                <Text style={styles.dateLabel}>Ends</Text>
+                <Text style={styles.dateValue}>
+                  {formatDateTime(formData.endDatetime)}
+                </Text>
               </View>
+              {showEndPicker ? (
+                <ChevronDown size={18} color={Colors.primary} />
+              ) : (
+                <ChevronRight size={18} color={Colors.text.tertiary} />
+              )}
             </TouchableOpacity>
+
+            {errors.endDatetime && (
+              <View style={styles.inlineError}>
+                <Text style={styles.errorText}>{errors.endDatetime}</Text>
+              </View>
+            )}
           </View>
-
-          {Platform.OS !== 'android' && showStartPicker ? (
-            <View style={styles.pickerCard}>
-              <DateTimePicker
-                value={formData.startDatetime}
-                mode="datetime"
-                display="spinner"
-                maximumDate={MAX_EVENT_DATE}
-                textColor={Colors.text.primary}
-                themeVariant="light"
-                onChange={(_, d) => {
-                  if (d) setFormData((f) => ({ ...f, startDatetime: d }));
-                }}
-                style={styles.picker}
-              />
-              <TouchableOpacity
-                style={styles.pickerDoneButton}
-                onPress={() => setShowStartPicker(false)}
-                activeOpacity={0.75}
-              >
-                <Text style={styles.pickerDoneText}>Done</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          {Platform.OS !== 'android' && showEndPicker ? (
-            <View style={styles.pickerCard}>
-              <DateTimePicker
-                value={formData.endDatetime}
-                mode="datetime"
-                display="spinner"
-                maximumDate={MAX_EVENT_DATE}
-                textColor={Colors.text.primary}
-                themeVariant="light"
-                onChange={(_, d) => {
-                  if (d) setFormData((f) => ({ ...f, endDatetime: d }));
-                }}
-                style={styles.picker}
-              />
-              <TouchableOpacity
-                style={styles.pickerDoneButton}
-                onPress={() => setShowEndPicker(false)}
-                activeOpacity={0.75}
-              >
-                <Text style={styles.pickerDoneText}>Done</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          {errors.endDatetime ? <Text style={styles.errorText}>{errors.endDatetime}</Text> : null}
-
-          <TouchableOpacity
-            style={styles.recurrenceCard}
-            activeOpacity={0.82}
-            onPress={() => {
-              if (userBusiness?.subscription_tier !== 'premium') {
-                Alert.alert(
-                  'Premium Feature',
-                  'Recurring events are only available for Premium businesses. Upgrade to create recurring events.',
-                  [
-                    { text: 'OK' },
-                    {
-                      text: 'Upgrade',
-                      onPress: () => router.push('/(tabs)/profile'),
-                    },
-                  ]
-                );
-                return;
-              }
-              recurrencePickerRef.current?.present();
-            }}
-          >
-            <View style={styles.recurrenceIconWrap}>
-              <Repeat size={18} color={Design.primary} />
-            </View>
-            <View style={styles.recurrenceCopy}>
-              <Text style={styles.fieldEyebrow}>Repeat</Text>
-              <Text style={styles.recurrenceValue}>
-                {getRecurrenceLabel(formData.recurrence)}
-                {userBusiness?.subscription_tier !== 'premium' ? ' (Premium)' : ''}
-              </Text>
-            </View>
-          </TouchableOpacity>
         </View>
 
-        <View style={styles.sectionBlock}>
-          <View style={styles.locationCard}>
-            <View style={styles.locationSearchRow}>
-              <MapPin size={20} color={Design.primary} />
-              <View style={styles.locationInputWrap}>
-                <AddressSearchInput
-                  value={formData.address}
-                  onChangeText={(t) => setFormData((f) => ({ ...f, address: t }))}
-                  onSelect={(result) =>
-                    setFormData((f) => ({
-                      ...f,
-                      address: result.formattedAddress,
-                      lat: result.lat,
-                      lng: result.lng,
-                    }))
-                  }
-                  placeholder="Search for a venue or address..."
-                  approximate={false}
-                  showSetButton={false}
-                  showClearButton
-                  style={styles.addressSearch}
-                />
-              </View>
-            </View>
+        {/* End picker rendered OUTSIDE the card */}
+        {Platform.OS !== 'android' && showEndPicker && (
+          <View style={styles.pickerContainer}>
+            <DateTimePicker
+              value={formData.endDatetime}
+              mode="datetime"
+              display="spinner"
+              maximumDate={MAX_EVENT_DATE}
+              textColor={Colors.text.primary}
+              themeVariant="light"
+              onChange={(_, d) => {
+                if (d) setFormData((f) => ({ ...f, endDatetime: d }));
+              }}
+              style={styles.picker}
+            />
+            <TouchableOpacity
+              style={styles.pickerDoneButton}
+              onPress={() => setShowEndPicker(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.pickerDoneText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
-            <View style={styles.mapShell}>
+        {/* Recurrence (Premium only) */}
+        <View style={styles.dateCardSpacing}>
+          <View style={styles.card}>
+            <TouchableOpacity
+              style={styles.dateRow}
+              activeOpacity={0.6}
+              onPress={() => {
+                if (userBusiness?.subscription_tier !== 'premium') {
+                  Alert.alert(
+                    'Premium Feature',
+                    'Recurring events are only available for Premium businesses. Upgrade to create recurring events.',
+                    [
+                      { text: 'OK' },
+                      {
+                        text: 'Upgrade',
+                        onPress: () => router.push('/(tabs)/profile'),
+                      },
+                    ]
+                  );
+                  return;
+                }
+                recurrencePickerRef.current?.present();
+              }}
+            >
+              <View style={styles.fieldIcon}>
+                <Repeat size={16} color={Colors.primary} />
+              </View>
+              <View style={styles.dateTextBlock}>
+                <Text style={styles.dateLabel}>Repeat</Text>
+                <Text style={styles.dateValue}>
+                  {getRecurrenceLabel(formData.recurrence)}
+                  {userBusiness?.subscription_tier !== 'premium' && ' (Premium)'}
+                </Text>
+              </View>
+              <ChevronRight size={18} color={Colors.text.tertiary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ── Section: Location ── */}
+        <Text style={styles.sectionLabel}>Location</Text>
+        <View style={styles.card}>
+          <View style={styles.fieldRow}>
+            <View style={styles.fieldIcon}>
+              <MapPin size={16} color={Colors.primary} />
+            </View>
+            <View style={styles.fieldContent}>
+              <Text style={styles.locationNote}>
+                Defaults to your business address if left empty
+              </Text>
+              <AddressSearchInput
+                value={formData.address}
+                onChangeText={(t) =>
+                  setFormData((f) => ({ ...f, address: t }))
+                }
+                onSelect={(result) =>
+                  setFormData((f) => ({
+                    ...f,
+                    address: result.formattedAddress,
+                    lat: result.lat,
+                    lng: result.lng,
+                  }))
+                }
+                placeholder="Address or venue"
+                approximate={false}
+                showSetButton
+              />
+            </View>
+          </View>
+
+          {/* Map */}
+          <View style={styles.mapContainer}>
+            <View style={styles.mapCard}>
               <GoogleMapView
                 center={{ lat: formData.lat, lng: formData.lng }}
                 zoom={15}
@@ -599,7 +614,7 @@ export default function CreateScreen() {
                     title: formData.title || 'Event location',
                   },
                 ]}
-                style={styles.map}
+                style={styles.mapInner}
                 onMapPress={async (lat, lng) => {
                   const result = await geocodingService.reverseGeocode(lat, lng);
                   if (result) {
@@ -612,32 +627,54 @@ export default function CreateScreen() {
                   }
                 }}
               />
-              <View style={styles.mapPinBadge}>
-                <MapPin size={24} color="#FFFFFF" fill="#FFFFFF" />
+              <View style={styles.mapHintOverlay}>
+                <Navigation size={12} color={Colors.primary} />
+                <Text style={styles.mapHintText}>
+                  Tap to set location
+                </Text>
               </View>
-              <View style={styles.mapHint}>
-                <Navigation size={12} color={Design.primary} />
-                <Text style={styles.mapHintText}>Tap map to set exact location</Text>
-              </View>
+            </View>
+            {formData.address ? (
+              <Text style={styles.coordText}>
+                📍 {formData.lat.toFixed(4)}, {formData.lng.toFixed(4)}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+
+        {/* ── Section: Photos ── */}
+        <Text style={styles.sectionLabel}>Photos</Text>
+        <View style={styles.card}>
+          <View style={styles.fieldRow}>
+            <View style={styles.fieldIcon}>
+              <ImageIcon size={16} color={Colors.primary} />
+            </View>
+            <View style={styles.fieldContent}>
+              <Text style={styles.locationNote}>
+                First image becomes the cover photo
+              </Text>
+              <ImagePickerButton
+                images={formData.images}
+                onChange={(imgs) => setFormData((f) => ({ ...f, images: imgs }))}
+                maxImages={5}
+              />
             </View>
           </View>
         </View>
-      </ScrollView>
 
-      <View
-        style={[
-          styles.bottomBar,
-          { paddingBottom: Math.max(insets.bottom, 14), paddingHorizontal: 24 },
-        ]}
-      >
+        {/* ── Submit ── */}
         <TouchableOpacity
           style={styles.submitWrap}
           onPress={handleSubmit}
           disabled={loading}
-          activeOpacity={0.9}
+          activeOpacity={0.85}
         >
           <LinearGradient
-            colors={loading ? ['#C96B72', '#B96C57'] : [Design.primary, Design.secondary]}
+            colors={
+              loading
+                ? ['#A5B4FC', '#C4B5FD']
+                : [Colors.primary, Palette.gradientEnd]
+            }
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={styles.submitGradient}
@@ -646,13 +683,13 @@ export default function CreateScreen() {
               <ActivityIndicator color="#FFFFFF" />
             ) : (
               <>
-                <Text style={styles.submitText}>Launch Event</Text>
-                <Rocket size={20} color="#FFFFFF" />
+                <Sparkles size={18} color="#FFFFFF" />
+                <Text style={styles.submitText}>Publish Event</Text>
               </>
             )}
           </LinearGradient>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
 
       <RecurrencePicker
         ref={recurrencePickerRef}
@@ -663,469 +700,373 @@ export default function CreateScreen() {
   );
 }
 
+/* ────────────────────────── STYLES ────────────────────────── */
+
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Design.surface,
+    backgroundColor: Palette.surfaceMuted,
   },
   scroll: {
     flex: 1,
   },
-  headerWrap: {
-    position: 'absolute',
-    zIndex: 10,
+  scrollContent: {
+    paddingHorizontal: 20,
   },
-  header: {
-    height: 72,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.88)',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.05)',
+
+  /* ── Page header ── */
+  pageHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.06,
-    shadowRadius: 20,
-    elevation: 5,
+    gap: 14,
+    marginBottom: 28,
   },
-  headerButton: {
-    width: 40,
-    height: 40,
+  pageHeaderIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: Palette.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: BorderRadius.round,
   },
-  headerTitle: {
-    fontSize: 18,
+  pageHeaderLogo: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+  },
+  pageTitle: {
+    fontSize: 24,
     fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
-    color: Design.text,
+    color: Colors.text.primary,
   },
-  headerTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  pageSubtitle: {
+    fontSize: 13,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+    marginTop: 2,
   },
-  headerLogo: {
-    width: 20,
-    height: 20,
-    borderRadius: 5,
-  },
-  headerSpacer: {
-    width: 40,
-  },
-  sectionBlock: {
-    marginTop: 32,
-  },
-  sectionEyebrow: {
+
+  /* ── Section labels ── */
+  sectionLabel: {
+    fontSize: 13,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 10,
     marginLeft: 4,
-    marginBottom: 14,
-    color: Design.textMuted,
-    fontSize: 11,
-    letterSpacing: 1.8,
-    textTransform: 'uppercase',
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
+    marginTop: 24,
   },
-  fieldEyebrow: {
-    color: Design.text,
-    fontSize: 11,
-    letterSpacing: 1.6,
-    textTransform: 'uppercase',
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    marginBottom: 14,
-  },
-  bannerCard: {
-    gap: 12,
-  },
-  bannerPreview: {
-    aspectRatio: 16 / 9,
-    borderRadius: 30,
+
+  /* ── Card ── */
+  card: {
+    backgroundColor: Palette.cardBg,
+    borderRadius: 20,
     overflow: 'hidden',
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: 'rgba(172, 173, 173, 0.5)',
-    backgroundColor: Design.surfaceSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 10,
+      },
+      android: { elevation: 3 },
+    }),
   },
-  bannerImage: {
-    ...StyleSheet.absoluteFillObject,
-    width: '100%',
-    height: '100%',
+
+  /* ── Field rows ── */
+  fieldRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 14,
   },
-  bannerPlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  bannerPlaceholderOverlay: {
-    backgroundColor: 'rgba(255,255,255,0.48)',
-    paddingVertical: 24,
-    paddingHorizontal: 20,
-    borderRadius: 24,
-  },
-  bannerBadge: {
-    width: 56,
-    height: 56,
-    borderRadius: BorderRadius.round,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 18,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 4,
-  },
-  bannerTitle: {
-    fontSize: 15,
-    color: Design.text,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-  },
-  bannerSubtitle: {
-    marginTop: 6,
-    fontSize: 12,
-    color: Design.textMuted,
-    fontFamily: Typography.fontFamily,
-    textAlign: 'center',
-  },
-  bannerPickerRow: {
-    marginTop: -2,
-  },
-  infoCard: {
-    backgroundColor: Design.surfaceCard,
-    borderRadius: 24,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.05)',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.05,
-    shadowRadius: 20,
-    elevation: 4,
-  },
-  infoSection: {
-    paddingHorizontal: 20,
-    paddingVertical: 22,
-  },
-  infoDivider: {
-    height: 1,
-    backgroundColor: 'rgba(0,0,0,0.06)',
-  },
-  titleInput: {
-    fontSize: 22,
-    color: Design.text,
-    fontFamily: Typography.displayFontFamilies.extrabold,
-    fontWeight: '800',
-    paddingVertical: 0,
-  },
-  detailsInput: {
-    minHeight: 112,
-    fontSize: 16,
-    lineHeight: 30,
-    color: Design.textMuted,
-    fontFamily: Typography.fontFamily,
-    paddingVertical: 0,
-  },
-  categoryRow: {
+  fieldRowNoPad: {
+    flexDirection: 'row',
+    paddingLeft: 16,
+    paddingRight: 0,
     gap: 10,
-    paddingRight: 24,
   },
-  categoryChip: {
-    minHeight: 50,
-    paddingHorizontal: 20,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Design.surfaceCard,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.05)',
+  fieldIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: Palette.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fieldContent: {
+    flex: 1,
+  },
+  fieldSeparator: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Palette.separator,
+    marginLeft: 66,
+  },
+
+  textArea: {
+    minHeight: 90,
+    textAlignVertical: 'top',
+  },
+
+  /* ── Category chips ── */
+  catScroll: {
+    flex: 1,
+  },
+  catScrollContent: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingVertical: 14,
+    paddingRight: 16,
+  },
+  catChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 20,
+    backgroundColor: Palette.surfaceMuted,
+    borderWidth: 1.5,
+    borderColor: Palette.separator,
   },
-  categoryChipSelected: {
-    backgroundColor: Design.primary,
-    borderColor: Design.primary,
-    shadowColor: Design.primary,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    elevation: 4,
+  catChipSelected: {
+    backgroundColor: Palette.badge,
+    borderColor: Palette.badge,
   },
-  categoryChipText: {
-    fontSize: 15,
-    color: Design.text,
+  catChipText: {
+    fontSize: 13,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.text.primary,
+  },
+  catChipTextSelected: {
+    color: '#FFFFFF',
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
-  categoryChipTextSelected: {
-    color: '#FFFFFF',
-  },
-  dateTimeRow: {
+
+  /* ── Date rows ── */
+  dateRow: {
     flexDirection: 'row',
-    gap: 12,
-  },
-  dateTimeCard: {
-    flex: 1,
-    backgroundColor: Design.surfaceCard,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.05)',
+    alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.04,
-    shadowRadius: 16,
-    elevation: 3,
+    paddingVertical: 14,
+    gap: 14,
   },
-  dateIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Design.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dateTimeCopy: {
+  dateTextBlock: {
     flex: 1,
   },
-  dateTimeLabel: {
-    color: Design.textMuted,
-    fontSize: 11,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    marginBottom: 6,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
+  dateLabel: {
+    fontSize: 12,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.text.tertiary,
+    marginBottom: 2,
   },
-  dateTimeValue: {
-    color: Design.text,
-    fontSize: 16,
-    fontFamily: Typography.displayFontFamilies.bold,
-    fontWeight: Typography.weights.bold,
+  dateValue: {
+    fontSize: 15,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.text.primary,
   },
-  pickerCard: {
-    marginTop: 12,
-    backgroundColor: Design.surfaceCard,
-    borderRadius: 22,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.05)',
+  dateCardSpacing: {
+    marginTop: 8,
+  },
+
+  /* ── Picker container (outside card) ── */
+  pickerContainer: {
+    backgroundColor: Palette.cardBg,
+    borderRadius: 16,
+    marginTop: 8,
+    paddingBottom: 8,
+    overflow: 'visible',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 10,
+      },
+      android: { elevation: 3 },
+    }),
   },
   picker: {
-    height: 210,
+    height: 200,
     width: '100%',
   },
   pickerDoneButton: {
     alignSelf: 'center',
-    marginBottom: 16,
-    backgroundColor: Design.primarySoft,
-    paddingHorizontal: 22,
+    paddingHorizontal: 32,
     paddingVertical: 10,
-    borderRadius: BorderRadius.round,
+    backgroundColor: Palette.accentSoft,
+    borderRadius: 12,
+    marginTop: 4,
+    marginBottom: 8,
   },
   pickerDoneText: {
-    color: Design.primary,
-    fontSize: 14,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-  },
-  recurrenceCard: {
-    marginTop: 14,
-    backgroundColor: Design.surfaceCard,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.05)',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  recurrenceIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Design.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  recurrenceCopy: {
-    flex: 1,
-  },
-  recurrenceValue: {
     fontSize: 15,
-    color: Design.textMuted,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
+    color: Colors.primary,
   },
-  locationCard: {
-    backgroundColor: Design.surfaceCard,
-    borderRadius: 24,
+
+  /* ── Errors ── */
+  inlineError: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    paddingTop: 4,
+  },
+  errorText: {
+    fontSize: 12,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.error,
+  },
+
+  /* ── Location ── */
+  locationNote: {
+    fontSize: 12,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+    marginBottom: 8,
+  },
+  mapContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    paddingTop: 4,
+  },
+  mapCard: {
+    height: 220,
+    borderRadius: 16,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.05)',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.05,
-    shadowRadius: 20,
-    elevation: 4,
-  },
-  locationSearchRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 8,
-  },
-  locationInputWrap: {
-    flex: 1,
-    minWidth: 0,
-  },
-  addressSearch: {
-    marginBottom: 0,
-  },
-  mapShell: {
-    height: 240,
     position: 'relative',
-    overflow: 'hidden',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.05)',
+    borderWidth: 1,
+    borderColor: Palette.separator,
   },
-  map: {
+  mapInner: {
     flex: 1,
+    minHeight: 220,
   },
-  mapPinBadge: {
+  mapHintOverlay: {
     position: 'absolute',
-    top: '50%',
-    left: '50%',
-    width: 56,
-    height: 56,
-    marginLeft: -28,
-    marginTop: -28,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Design.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: Design.primary,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.22,
-    shadowRadius: 16,
-    elevation: 5,
-  },
-  mapHint: {
-    position: 'absolute',
-    bottom: 12,
+    bottom: 10,
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: BorderRadius.round,
+    gap: 5,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 6,
+      },
+      android: { elevation: 3 },
+    }),
   },
   mapHintText: {
-    color: Design.primary,
     fontSize: 12,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
+    color: Colors.primary,
   },
-  bottomBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingTop: 24,
-    backgroundColor: 'rgba(246,246,246,0.96)',
+  coordText: {
+    fontSize: 12,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+    marginTop: 8,
+    textAlign: 'center',
   },
+
+  /* ── Submit ── */
   submitWrap: {
-    borderRadius: BorderRadius.round,
+    marginTop: 32,
+    borderRadius: 16,
     overflow: 'hidden',
-    shadowColor: Design.primary,
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.24,
-    shadowRadius: 28,
-    elevation: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: Colors.primary,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.3,
+        shadowRadius: 14,
+      },
+      android: { elevation: 8 },
+    }),
   },
   submitGradient: {
-    minHeight: 60,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
+    paddingVertical: 17,
   },
   submitText: {
-    color: '#FFFFFF',
     fontSize: 16,
-    fontFamily: Typography.displayFontFamilies.extrabold,
-    fontWeight: '800',
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: '#FFFFFF',
+    letterSpacing: 0.3,
   },
-  errorText: {
-    marginTop: 10,
-    color: Colors.error,
-    fontSize: 12,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-  },
+
+  /* ── No-business state ── */
   noBizContainer: {
     flex: 1,
-    backgroundColor: Design.surface,
+    backgroundColor: Palette.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
+    paddingHorizontal: 40,
   },
-  noBizBadge: {
-    width: 88,
-    height: 88,
-    borderRadius: 28,
-    backgroundColor: Design.primarySoft,
+  noBizIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 24,
+    backgroundColor: Palette.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24,
   },
   noBizLogo: {
-    width: 54,
-    height: 54,
+    width: 48,
+    height: 48,
   },
   noBizTitle: {
-    color: Design.text,
-    fontSize: 28,
+    fontSize: 22,
     fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
-    marginBottom: 10,
+    color: Colors.text.primary,
+    marginBottom: 8,
   },
   noBizSubtitle: {
-    color: Design.textMuted,
     fontSize: 15,
-    textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 28,
     fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 28,
   },
-  noBizButton: {
-    borderRadius: BorderRadius.round,
+  noBizCta: {
+    borderRadius: 16,
     overflow: 'hidden',
   },
-  noBizButtonGradient: {
-    paddingHorizontal: 28,
-    paddingVertical: 16,
+  noBizCtaGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 15,
+    paddingHorizontal: 32,
   },
-  noBizButtonText: {
-    color: '#FFFFFF',
+  noBizCtaText: {
     fontSize: 16,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
+    color: '#FFFFFF',
   },
 });
