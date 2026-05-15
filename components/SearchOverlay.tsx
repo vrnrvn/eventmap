@@ -29,6 +29,18 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+function startOfDay(d: Date): Date {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function endOfDay(d: Date): Date {
+  const x = new Date(d);
+  x.setHours(23, 59, 59, 999);
+  return x;
+}
+
 export type SearchStep = 'where' | 'when' | 'who';
 
 type SearchOverlayProps = {
@@ -45,7 +57,7 @@ export function SearchOverlay({
   userLocation,
 }: SearchOverlayProps) {
   const insets = useSafeAreaInsets();
-  const { location, setLocation, clearAll, hasSelection } = useSearch();
+  const { location, setLocation, clearAll, hasSelection, setDateRange, dateRange } = useSearch();
   const [currentStep, setCurrentStep] = useState<SearchStep>('where');
   const [whereInput, setWhereInput] = useState('');
   const [suggestions, setSuggestions] = useState<AutocompletePrediction[]>([]);
@@ -120,6 +132,24 @@ export function SearchOverlay({
     setWhereInput('');
     setCurrentStep('where');
   }, [clearAll]);
+
+  const applyDatePreset = useCallback(
+    (preset: 'any' | 'today' | 'week') => {
+      if (preset === 'any') {
+        setDateRange(null);
+        return;
+      }
+      const now = new Date();
+      if (preset === 'today') {
+        setDateRange({ start: startOfDay(now), end: endOfDay(now) });
+        return;
+      }
+      const end = new Date(now);
+      end.setDate(end.getDate() + 7);
+      setDateRange({ start: startOfDay(now), end: endOfDay(end) });
+    },
+    [setDateRange]
+  );
 
   const handleClose = useCallback(() => {
     onClose();
@@ -224,10 +254,38 @@ export function SearchOverlay({
                   {summaryLabel}
                 </Text>
               </TouchableOpacity>
-              <View style={styles.placeholderSection}>
-                <EventmapCalendar size={32} color={Colors.text.tertiary} />
-                <Text style={styles.placeholderText}>When section</Text>
-                <Text style={styles.placeholderSubtext}>Coming soon</Text>
+              <View style={styles.whenSection}>
+                <Text style={styles.whenHint}>Filter events by date (applies to Discover list & map).</Text>
+                <View style={styles.dateChipRow}>
+                  <TouchableOpacity
+                    style={[styles.dateChip, !dateRange && styles.dateChipActive]}
+                    onPress={() => applyDatePreset('any')}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[styles.dateChipText, !dateRange && styles.dateChipTextActive]}>Any time</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.dateChip}
+                    onPress={() => applyDatePreset('today')}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.dateChipText}>Today</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.dateChip}
+                    onPress={() => applyDatePreset('week')}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.dateChipText}>Next 7 days</Text>
+                  </TouchableOpacity>
+                </View>
+                {dateRange ? (
+                  <Text style={styles.dateRangeSummary}>
+                    {dateRange.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    {' — '}
+                    {dateRange.end.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  </Text>
+                ) : null}
               </View>
             </Animated.View>
           )}
@@ -269,9 +327,9 @@ export function SearchBarCollapsed({ locationLabel, onPress }: SearchBarCollapse
           {locationLabel ?? 'Where'}
         </Text>
         <Text style={styles.collapsedDivider}>|</Text>
-        <Text style={styles.collapsedSegment}>When</Text>
+        <Text style={styles.collapsedSegment}>Dates</Text>
         <Text style={styles.collapsedDivider}>|</Text>
-        <Text style={styles.collapsedSegment}>Add guests</Text>
+        <Text style={styles.collapsedSegment}>Guests</Text>
       </View>
     </TouchableOpacity>
   );
@@ -385,21 +443,48 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.md,
     color: Colors.text.primary,
   },
-  placeholderSection: {
+  whenSection: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Spacing.xxl,
+    paddingHorizontal: Spacing.sm,
   },
-  placeholderText: {
-    fontSize: Typography.sizes.md,
-    color: Colors.text.tertiary,
-    marginTop: Spacing.md,
+  whenHint: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.text.secondary,
+    lineHeight: 20,
+    marginBottom: Spacing.lg,
   },
-  placeholderSubtext: {
+  dateChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  dateChip: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.background.secondary,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+  },
+  dateChipActive: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primary + '14',
+  },
+  dateChipText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.text.primary,
+    fontFamily: Typography.fontFamilies.medium,
+  },
+  dateChipTextActive: {
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+  },
+  dateRangeSummary: {
     fontSize: Typography.sizes.sm,
     color: Colors.text.tertiary,
-    marginTop: Spacing.xs,
+    fontFamily: Typography.fontFamilies.medium,
   },
   footer: {
     flexDirection: 'row',
