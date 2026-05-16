@@ -33,6 +33,7 @@ import {
   LogOut,
   ArrowLeftRight,
   SlidersHorizontal,
+  PlusCircle,
 } from 'lucide-react-native';
 
 const FALLBACK_CREATED_IMAGES = [
@@ -61,7 +62,8 @@ const Palette = {
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { profile, signOut, refreshProfile, user } = useAuth();
-  const { hasBusiness, userMode, setUserMode, userBusiness, refreshBusiness } = useApp();
+  const { hasBusiness, userMode, setUserMode, userBusiness, refreshBusiness, loading: appLoading } =
+    useApp();
   const { isPremium, currentPlan, canUse, refreshSubscription } = usePremium();
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
@@ -141,6 +143,10 @@ export default function ProfileScreen() {
       cancelled = true;
     };
   }, [hasBusiness, user?.id, userBusiness?.id, isBizMode, isPremium, canUse]);
+
+  useEffect(() => {
+    if (!isBizMode) setShowPremiumModal(false);
+  }, [isBizMode]);
 
   const handleSignOut = () => {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -319,6 +325,31 @@ export default function ProfileScreen() {
           )}
         </View>
 
+        {!appLoading && hasBusiness && (
+          <TouchableOpacity
+            style={styles.createEventWrap}
+            onPress={() => router.push('/(tabs)/create')}
+            activeOpacity={0.88}
+          >
+            <LinearGradient
+              colors={[Palette.primary, Palette.secondary]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.createEventGradient}
+            >
+              <View style={styles.createEventIconBg}>
+                <PlusCircle size={22} color={Palette.primary} />
+              </View>
+              <View style={styles.createEventTextCol}>
+                <Text style={styles.createEventTitle}>Create event</Text>
+                <Text style={styles.createEventSub}>Post a new event for your venue</Text>
+              </View>
+              <ChevronRight size={20} color="rgba(255,255,255,0.75)" />
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+
+        {hasBusiness && (
         <View style={styles.sectionWrap}>
           <View style={styles.sectionHead}>
             <Text style={styles.sectionTitle}>Events Created</Text>
@@ -369,6 +400,7 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           ))}
         </View>
+        )}
 
         <View style={styles.sectionWrap}>
           <View style={styles.sectionHead}>
@@ -416,7 +448,7 @@ export default function ProfileScreen() {
           ))}
         </View>
 
-        {!isPremium && hasBusiness && (
+        {!isPremium && isBizMode && (
           <TouchableOpacity
             style={styles.upgradeCard}
             onPress={() => setShowPremiumModal(true)}
@@ -442,7 +474,7 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {showPremiumModal && (
+      {showPremiumModal && isBizMode && (
         <View style={styles.premiumModalOverlay}>
           <TouchableOpacity
             style={styles.premiumModalBackdrop}
@@ -692,6 +724,42 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Palette.secondary,
     fontFamily: Typography.labelFontFamilies.medium,
+  },
+  createEventWrap: {
+    marginTop: 28,
+    borderRadius: BorderRadius.lg,
+    overflow: 'hidden',
+  },
+  createEventGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    gap: 14,
+  },
+  createEventIconBg: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  createEventTextCol: {
+    flex: 1,
+  },
+  createEventTitle: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+  },
+  createEventSub: {
+    color: 'rgba(255,255,255,0.88)',
+    fontSize: 13,
+    marginTop: 2,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
   },
   sectionWrap: {
     marginTop: 34,

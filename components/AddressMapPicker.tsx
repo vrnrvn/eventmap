@@ -158,6 +158,8 @@ export const AddressMapPicker = forwardRef<AddressMapPickerHandle, AddressMapPic
                 ref={mapRef}
                 center={{ lat, lng }}
                 zoom={17}
+                webViewScrollEnabled={false}
+                nestedScrollEnabled={false}
                 markers={[
                   {
                     id: 'business',
