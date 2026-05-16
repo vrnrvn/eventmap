@@ -35,7 +35,6 @@ import { ReviewCard } from '@/components/ReviewCard';
 import { ReviewForm } from '@/components/ReviewForm';
 import {
   ArrowLeft,
-  Building2,
   ExternalLink,
   Heart,
   Pencil,
@@ -48,6 +47,7 @@ import {
   Clock3,
   CalendarPlus,
   TrendingUp,
+  ChevronRight,
 } from 'lucide-react-native';
 import { EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView } from '@/components/GoogleMapView';
@@ -529,6 +529,24 @@ export default function EventDetail() {
             </View>
           </TouchableOpacity>
 
+          <TouchableOpacity
+            style={styles.hostBusinessRow}
+            onPress={() => router.push(`/business/${business.id}` as never)}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={`View business ${business.name}`}
+          >
+            <Avatar imageUrl={business.logo_url} name={business.name} size={48} />
+            <View style={styles.hostBusinessMeta}>
+              <Text style={styles.hostBusinessLabel}>Organizer</Text>
+              <Text style={styles.hostBusinessName} numberOfLines={2}>
+                {business.name}
+              </Text>
+              <Text style={styles.hostBusinessHint}>View business profile</Text>
+            </View>
+            <ChevronRight size={22} color={Colors.text.tertiary} />
+          </TouchableOpacity>
+
           <View style={styles.descriptionSection}>
             <Text style={styles.bigSectionTitle}>About Event</Text>
             <Text style={styles.descriptionText}>
@@ -567,6 +585,8 @@ export default function EventDetail() {
                   style={{ flex: 1, minHeight: 0 }}
                   center={{ lat: venueLat, lng: venueLng }}
                   zoom={15}
+                  webViewScrollEnabled={false}
+                  nestedScrollEnabled={false}
                   markers={[
                     {
                       id: event.id,
@@ -1064,6 +1084,42 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
+  },
+  hostBusinessRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.sm,
+    marginBottom: Spacing.lg,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: Colors.background.secondary,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+  },
+  hostBusinessMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  hostBusinessLabel: {
+    fontSize: Typography.sizes.xs,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    color: Colors.text.tertiary,
+    fontFamily: Typography.labelFontFamilies.semibold,
+    marginBottom: 2,
+  },
+  hostBusinessName: {
+    fontSize: Typography.sizes.md,
+    color: Colors.text.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+  },
+  hostBusinessHint: {
+    marginTop: 4,
+    fontSize: Typography.sizes.xs,
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.medium,
   },
   descriptionSection: {
     marginBottom: 18,

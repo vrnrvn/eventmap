@@ -244,6 +244,8 @@ export default function BusinessOnboarding() {
               <GoogleMapView
                 center={{ lat: formData.lat, lng: formData.lng }}
                 zoom={15}
+                webViewScrollEnabled={false}
+                nestedScrollEnabled={false}
                 markers={[
                   {
                     id: 'business',

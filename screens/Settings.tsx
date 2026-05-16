@@ -22,8 +22,8 @@ import { profilesService } from '@/services/profiles';
 import { businessesService } from '@/services/businesses';
 import { eventsService } from '@/services/events';
 import { Input } from '@/components/Input';
-import { AddressSearchInput } from '@/components/AddressSearchInput';
 import { businessLocationStore } from '@/stores/businessLocationStore';
+import { profileLocationStore } from '@/stores/profileLocationStore';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
@@ -146,13 +146,22 @@ export default function SettingsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      const result = businessLocationStore.consume();
-      if (result) {
+      const biz = businessLocationStore.consume();
+      if (biz) {
         setBusinessForm((p) => ({
           ...p,
-          address: result.formattedAddress,
-          lat: result.lat,
-          lng: result.lng,
+          address: biz.formattedAddress,
+          lat: biz.lat,
+          lng: biz.lng,
+        }));
+      }
+      const profileLoc = profileLocationStore.consume();
+      if (profileLoc) {
+        setUserForm((p) => ({
+          ...p,
+          city: profileLoc.formattedAddress,
+          lat: profileLoc.lat,
+          lng: profileLoc.lng,
         }));
       }
     }, [])
@@ -951,26 +960,52 @@ export default function SettingsScreen() {
                 {/* Location */}
                 <View style={styles.fieldRow}>
                   <View style={styles.fieldIcon}>
-                    <MapPin size={16} color={accentColor} />
+                    <Navigation size={16} color={accentColor} />
                   </View>
                   <View style={styles.fieldContent}>
-                    <AddressSearchInput
-                      label="Location"
-                      value={userForm.city}
-                      onChangeText={(t) =>
-                        setUserForm((p) => ({ ...p, city: t }))
+                    <Text style={styles.addressLabel}>Location</Text>
+                    <TouchableOpacity
+                      style={styles.addressTouchable}
+                      onPress={() =>
+                        router.push({
+                          pathname: '/business-location',
+                          params: {
+                            context: 'profile',
+                            address: userForm.city ?? '',
+                            lat:
+                              userForm.lat != null && !Number.isNaN(userForm.lat)
+                                ? String(userForm.lat)
+                                : '',
+                            lng:
+                              userForm.lng != null && !Number.isNaN(userForm.lng)
+                                ? String(userForm.lng)
+                                : '',
+                          },
+                        })
                       }
-                      onSelect={(r) =>
-                        setUserForm((p) => ({
-                          ...p,
-                          city: r.formattedAddress,
-                          lat: r.lat,
-                          lng: r.lng,
-                        }))
-                      }
-                      placeholder="City or area for event discovery"
-                      approximate
-                    />
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.addressTouchableRow}>
+                        <MapPin size={18} color={Colors.text.tertiary} />
+                        <Text
+                          style={[
+                            styles.addressTouchableText,
+                            !userForm.city && styles.addressPlaceholder,
+                          ]}
+                          numberOfLines={2}
+                        >
+                          {userForm.city || 'Tap to set location on map'}
+                        </Text>
+                      </View>
+                      {userForm.lat != null &&
+                        userForm.lng != null &&
+                        !Number.isNaN(userForm.lat) &&
+                        !Number.isNaN(userForm.lng) && (
+                          <Text style={styles.addressCoords}>
+                            {userForm.lat.toFixed(4)}, {userForm.lng.toFixed(4)}
+                          </Text>
+                        )}
+                    </TouchableOpacity>
                   </View>
                 </View>
               </View>
