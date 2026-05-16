@@ -25,7 +25,7 @@ import { RankedEvent, Category } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { getCategoryIconColor } from '@/constants/categoryIcons';
 import { CategoryIcon } from '@/components/CategoryIcon';
-import { Users, List, Repeat, X, Heart, Search, SlidersHorizontal, Plus, MapPin } from 'lucide-react-native';
+import { Users, List, Repeat, X, Search, SlidersHorizontal, Plus, MapPin } from 'lucide-react-native';
 import { EventmapFilter, EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView';
 import { EventCardCarousel } from '@/components/EventCardCarousel';
@@ -33,7 +33,6 @@ import { Avatar } from '@/components/Avatar';
 import { SearchOverlay } from '@/components/SearchOverlay';
 import { filterEventsByDateRange } from '@/utils/recurrence';
 import { bannersService, type AppBanner } from '@/services/banners';
-import { socialService } from '@/services/social';
 import { AppBannerCarousel } from '@/components/AppBannerCarousel';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -67,7 +66,6 @@ export default function DiscoverScreen() {
   const [sheetIndex, setSheetIndex] = useState(0);
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
   const [showFloatingCard, setShowFloatingCard] = useState(false);
-  const [savedEventIds, setSavedEventIds] = useState<Set<string>>(new Set());
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [banners, setBanners] = useState<AppBanner[]>([]);
 
@@ -264,26 +262,6 @@ export default function DiscoverScreen() {
     () => (activeMarkerId ? visibleEvents.find((e) => e.id === activeMarkerId) ?? null : null),
     [activeMarkerId, visibleEvents]
   );
-
-  const handleSaveEvent = useCallback(async (eventId: string) => {
-    if (!profile) return;
-    const isSaved = savedEventIds.has(eventId);
-    try {
-      if (isSaved) {
-        await socialService.unsaveEvent(eventId);
-        setSavedEventIds((prev) => {
-          const next = new Set(prev);
-          next.delete(eventId);
-          return next;
-        });
-      } else {
-        await socialService.saveEvent(eventId);
-        setSavedEventIds((prev) => new Set(prev).add(eventId));
-      }
-    } catch {
-      // Ignore - user may need to sign in
-    }
-  }, [profile, savedEventIds]);
 
   const handleMarkerPress = useCallback(
     (eventId: string) => {
@@ -497,20 +475,6 @@ export default function DiscoverScreen() {
                   </Text>
                 </View>
                 <View style={styles.floatingCardActionPill}>
-                  <TouchableOpacity
-                    style={styles.floatingCardActionBtn}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      handleSaveEvent(activeEvent.id);
-                    }}
-                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  >
-                    <Heart
-                      size={20}
-                      color={savedEventIds.has(activeEvent.id) ? Colors.primary : '#1a1a1a'}
-                      fill={savedEventIds.has(activeEvent.id) ? Colors.primary : 'transparent'}
-                    />
-                  </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.floatingCardActionBtn}
                     onPress={(e) => {
@@ -825,9 +789,9 @@ const styles = StyleSheet.create({
   overlayChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
     borderRadius: BorderRadius.round,
     backgroundColor: 'rgba(255,255,255,0.78)',
     borderWidth: 1,
@@ -838,8 +802,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
   },
   overlayChipText: {
-    fontSize: 10,
-    letterSpacing: 0.8,
+    fontSize: 9,
+    letterSpacing: 0,
     color: Colors.text.primary,
     fontFamily: Typography.labelFontFamilies.semibold,
   },

@@ -733,6 +733,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 14,
+    tintColor: Colors.primary,
   },
   pageTitle: {
     fontSize: 24,
@@ -1035,6 +1036,7 @@ const styles = StyleSheet.create({
   noBizLogo: {
     width: 48,
     height: 48,
+    tintColor: Colors.primary,
   },
   noBizTitle: {
     fontSize: 22,

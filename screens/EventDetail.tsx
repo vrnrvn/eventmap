@@ -37,7 +37,6 @@ import {
   ArrowLeft,
   Building2,
   ExternalLink,
-  Heart,
   Pencil,
   Trash2,
   CheckCircle2,
@@ -209,28 +208,6 @@ export default function EventDetail() {
       );
     } catch {
       Alert.alert('Error', 'Failed to remove RSVP');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSave = async () => {
-    if (!user || !id) return;
-    setSaving(true);
-    try {
-      if (details?.user_saved) {
-        await socialService.unsaveEvent(id);
-        setDetails((d) =>
-          d ? { ...d, user_saved: false, save_count: Math.max(0, d.save_count - 1) } : null
-        );
-      } else {
-        await socialService.saveEvent(id);
-        setDetails((d) =>
-          d ? { ...d, user_saved: true, save_count: d.save_count + 1 } : null
-        );
-      }
-    } catch {
-      Alert.alert('Error', 'Failed to update save');
     } finally {
       setSaving(false);
     }
@@ -683,25 +660,6 @@ export default function EventDetail() {
                   </>
                 )}
               </View>
-              <TouchableOpacity
-                style={styles.saveButton}
-                onPress={handleSave}
-                disabled={saving}
-              >
-                <Heart
-                  size={20}
-                  color={details.user_saved ? Colors.error : Colors.text.secondary}
-                  fill={details.user_saved ? Colors.error : 'transparent'}
-                />
-                <Text
-                  style={[
-                    styles.saveButtonText,
-                    details.user_saved && styles.saveButtonTextActive,
-                  ]}
-                >
-                  {details.user_saved ? 'Saved' : 'Save'}
-                </Text>
-              </TouchableOpacity>
             </View>
           )}
 
@@ -1298,21 +1256,6 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
-  },
-  saveButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.sm,
-  },
-  saveButtonText: {
-    fontSize: Typography.sizes.sm,
-    color: Colors.text.secondary,
-  },
-  saveButtonTextActive: {
-    color: Colors.error,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
   },
   insightsBanner: {
     flexDirection: 'row',
