@@ -318,6 +318,9 @@ export default function BusinessDetail() {
             <GoogleMapView
               center={{ lat: business.lat, lng: business.lng }}
               zoom={15}
+              mapGesturesEnabled={false}
+              webViewScrollEnabled={false}
+              nestedScrollEnabled={false}
               markers={[
                 {
                   id: business.id,
@@ -329,7 +332,6 @@ export default function BusinessDetail() {
               ]}
             />
           </View>
-
           {photos.length > 0 && (
             <View style={styles.venueCarouselWrap}>
               <Text style={styles.venuePhotosLabel}>Venue Photos</Text>

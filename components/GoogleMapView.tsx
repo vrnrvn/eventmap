@@ -4,7 +4,7 @@ import { WebView } from 'react-native-webview';
 import { CATEGORY_COLORS, DEFAULT_CATEGORY_COLOR } from '@/constants/categories';
 
 /** Bump when changing map icon logic or HTML structure to force WebView reload */
-const MAP_HTML_VERSION = 3;
+const MAP_HTML_VERSION = 4;
 
 export type GoogleMapHandle = {
   animateTo: (lat: number, lng: number, zoom?: number) => void;
@@ -35,6 +35,11 @@ type GoogleMapViewProps = {
     lng: number;
     bounds?: { ne: { lat: number; lng: number }; sw: { lat: number; lng: number } };
   }) => void;
+  /** Pass false on embedded read-only maps so parent ScrollView scrolls instead of the WebView. */
+  webViewScrollEnabled?: boolean;
+  nestedScrollEnabled?: boolean;
+  /** When false, the map cannot be panned or zoomed (static preview). Default true. */
+  mapGesturesEnabled?: boolean;
 };
 
 function buildMapHtml(
@@ -43,7 +48,8 @@ function buildMapHtml(
   zoom: number,
   selectable: boolean,
   hasMarkerPress: boolean,
-  hasRegionChange: boolean
+  hasRegionChange: boolean,
+  mapGesturesEnabled: boolean
 ) {
   const clickHandler = selectable
     ? `
@@ -135,7 +141,10 @@ function buildMapHtml(
         zoom: ${zoom},
         disableDefaultUI: true,
         keyboardShortcuts: false,
-        gestureHandling: 'greedy'
+        gestureHandling: ${mapGesturesEnabled} ? 'greedy' : 'none',
+        draggable: ${mapGesturesEnabled},
+        scrollwheel: ${mapGesturesEnabled},
+        disableDoubleClickZoom: ${!mapGesturesEnabled},
       });
       var hasMarkerPress = ${hasMarkerPress};
       window.__markerData = [];
@@ -211,6 +220,9 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
   onMarkerPress,
   onMarkerDetailsPress,
   onRegionChange,
+  webViewScrollEnabled = true,
+  nestedScrollEnabled: nestedScrollEnabledProp = true,
+  mapGesturesEnabled = true,
 }, ref) {
   const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
 
@@ -233,9 +245,10 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
         zoom,
         !!onMapPress,
         !!onMarkerPress,
-        !!onRegionChange
+        !!onRegionChange,
+        mapGesturesEnabled
       ),
-    [apiKey, center.lat, center.lng, zoom, !!onMapPress, !!onMarkerPress, !!onRegionChange, MAP_HTML_VERSION]
+    [apiKey, center.lat, center.lng, zoom, !!onMapPress, !!onMarkerPress, !!onRegionChange, mapGesturesEnabled, MAP_HTML_VERSION]
   );
 
   const webViewRef = useRef<WebView>(null);
@@ -294,8 +307,8 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
         source={{ html }}
         style={styles.webview}
         cacheEnabled={false}
-        scrollEnabled
-        nestedScrollEnabled
+        scrollEnabled={webViewScrollEnabled}
+        nestedScrollEnabled={nestedScrollEnabledProp}
         originWhitelist={['*']}
         javaScriptEnabled
         domStorageEnabled
