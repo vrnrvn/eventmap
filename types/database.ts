@@ -185,6 +185,19 @@ export type Notification = {
   created_at: string;
 };
 
+export type EventChatMessage = {
+  id: string;
+  event_id: string;
+  sender_id: string;
+  body: string;
+  created_at: string;
+  deleted_at: string | null;
+};
+
+export type EventChatMessageWithSender = EventChatMessage & {
+  sender: Pick<Profile, 'id' | 'name' | 'avatar_url'> | null;
+};
+
 export type RankedEvent = Event & {
   distance_km: number;
   is_premium: boolean;
@@ -256,6 +269,13 @@ export type Database = {
         Row: Follow;
         Insert: Omit<Follow, 'id' | 'created_at'>;
         Update: never;
+      };
+      event_chat_messages: {
+        Row: EventChatMessage;
+        Insert: Omit<EventChatMessage, 'id' | 'created_at' | 'deleted_at'> & {
+          deleted_at?: string | null;
+        };
+        Update: Partial<Pick<EventChatMessage, 'body' | 'deleted_at'>>;
       };
     };
   };

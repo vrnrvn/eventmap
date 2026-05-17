@@ -47,6 +47,7 @@ import {
   CalendarPlus,
   TrendingUp,
   ChevronRight,
+  MessageCircle,
 } from 'lucide-react-native';
 import { EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView } from '@/components/GoogleMapView';
@@ -182,12 +183,15 @@ export default function EventDetail() {
           ? {
               ...d,
               user_rsvp: status,
-              rsvp_count:
-                d.user_rsvp === status
-                  ? d.rsvp_count
-                  : d.user_rsvp
-                    ? d.rsvp_count
-                    : d.rsvp_count + 1,
+              rsvp_count: Math.max(
+                0,
+                d.rsvp_count +
+                  (d.user_rsvp !== 'going' && status === 'going'
+                    ? 1
+                    : d.user_rsvp === 'going' && status !== 'going'
+                      ? -1
+                      : 0)
+              ),
             }
           : null
       );
@@ -204,7 +208,14 @@ export default function EventDetail() {
     try {
       await socialService.deleteRsvp(id);
       setDetails((d) =>
-        d ? { ...d, user_rsvp: null, rsvp_count: Math.max(0, d.rsvp_count - 1) } : null
+        d
+          ? {
+              ...d,
+              user_rsvp: null,
+              rsvp_count:
+                d.user_rsvp === 'going' ? Math.max(0, d.rsvp_count - 1) : d.rsvp_count,
+            }
+          : null
       );
     } catch {
       Alert.alert('Error', 'Failed to remove RSVP');
@@ -352,6 +363,8 @@ export default function EventDetail() {
 
   const venueLat = Number.isFinite(event.lat) ? event.lat : business.lat;
   const venueLng = Number.isFinite(event.lng) ? event.lng : business.lng;
+  const canOpenEventChat = details.user_rsvp === 'going' && details.rsvp_count >= 2;
+  const shouldShowEventChatPrompt = details.user_rsvp === 'going';
 
   return (
     <View style={styles.container}>
@@ -505,6 +518,38 @@ export default function EventDetail() {
               </Text>
             </View>
           </TouchableOpacity>
+
+          {shouldShowEventChatPrompt && (
+            <TouchableOpacity
+              style={[styles.chatPromptRow, !canOpenEventChat && styles.chatPromptRowDisabled]}
+              onPress={() => {
+                if (canOpenEventChat) {
+                  router.push(`/event-chat/${event.id}` as never);
+                }
+              }}
+              activeOpacity={canOpenEventChat ? 0.85 : 1}
+              disabled={!canOpenEventChat}
+            >
+              <View style={styles.chatIconWrap}>
+                <MessageCircle
+                  size={20}
+                  color={canOpenEventChat ? Colors.primary : Colors.text.tertiary}
+                />
+              </View>
+              <View style={styles.chatPromptMeta}>
+                <Text style={styles.chatPromptTitle}>Event chat</Text>
+                <Text style={styles.chatPromptSubtitle}>
+                  {canOpenEventChat
+                    ? 'Chat with everyone going'
+                    : 'Unlocks when 2 people are going'}
+                </Text>
+              </View>
+              <ChevronRight
+                size={22}
+                color={canOpenEventChat ? Colors.text.tertiary : Colors.border.medium}
+              />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={styles.hostBusinessRow}
@@ -1042,6 +1087,46 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
+  },
+  chatPromptRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.sm,
+    marginBottom: Spacing.lg,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: Colors.accentLight,
+    borderWidth: 1,
+    borderColor: 'rgba(180,25,36,0.12)',
+  },
+  chatPromptRowDisabled: {
+    backgroundColor: Colors.background.secondary,
+    borderColor: Colors.border.light,
+  },
+  chatIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: BorderRadius.round,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatPromptMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  chatPromptTitle: {
+    fontSize: Typography.sizes.md,
+    color: Colors.text.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+  },
+  chatPromptSubtitle: {
+    marginTop: 3,
+    fontSize: Typography.sizes.xs,
+    color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.medium,
   },
   hostBusinessRow: {
     flexDirection: 'row',
