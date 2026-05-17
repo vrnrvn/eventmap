@@ -476,33 +476,17 @@ export default function DiscoverScreen() {
                       🔥 {activeEvent.rsvp_count} Going
                     </Text>
                   </View>
-                  <View style={styles.floatingCardActionPill}>
-                    <TouchableOpacity
-                      style={styles.floatingCardActionBtn}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        handleSaveEvent(activeEvent.id);
-                      }}
-                      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                    >
-                      <Heart
-                        size={20}
-                        color={savedEventIds.has(activeEvent.id) ? Colors.primary : '#1a1a1a'}
-                        fill={savedEventIds.has(activeEvent.id) ? Colors.primary : 'transparent'}
-                      />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.floatingCardActionBtn}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        setActiveMarkerId(null);
-                        setShowFloatingCard(false);
-                      }}
-                      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                    >
-                      <X size={22} color="#1a1a1a" />
-                    </TouchableOpacity>
-                  </View>
+                  <TouchableOpacity
+                    style={styles.floatingCardActionBtn}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setActiveMarkerId(null);
+                      setShowFloatingCard(false);
+                    }}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  >
+                    <X size={22} color="#1a1a1a" />
+                  </TouchableOpacity>
                 </View>
               </View>
               <View style={styles.floatingCardWhitePanel}>
@@ -1002,11 +986,6 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
     color: Colors.text.primary,
-  },
-  floatingCardActionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
   },
   floatingCardActionBtn: {
     width: 36,
