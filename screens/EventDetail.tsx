@@ -365,6 +365,7 @@ export default function EventDetail() {
   const venueLng = Number.isFinite(event.lng) ? event.lng : business.lng;
   const canOpenEventChat = details.user_rsvp === 'going' && details.rsvp_count >= 2;
   const shouldShowEventChatPrompt = details.user_rsvp === 'going';
+  const hasJoinedEvent = details.user_rsvp === 'going';
 
   return (
     <View style={styles.container}>
@@ -835,15 +836,18 @@ export default function EventDetail() {
       </ScrollView>
       <View style={[styles.bottomActionBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
         <TouchableOpacity
-          style={styles.joinButton}
+          style={[styles.joinButton, hasJoinedEvent && styles.joinButtonJoined]}
           onPress={() => {
-            if (!user || saving) return;
+            if (!user || saving || hasJoinedEvent) return;
             handleRsvp('going');
           }}
+          disabled={saving || hasJoinedEvent}
           activeOpacity={0.9}
         >
-          <Text style={styles.joinButtonText}>Join Event</Text>
-          <Text style={styles.joinArrow}>→</Text>
+          <Text style={styles.joinButtonText}>
+            {hasJoinedEvent ? 'Event Joined' : 'Join Event'}
+          </Text>
+          <Text style={styles.joinArrow}>{hasJoinedEvent ? '✓' : '→'}</Text>
         </TouchableOpacity>
       </View>
       {id && (
@@ -1518,6 +1522,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
+  },
+  joinButtonJoined: {
+    backgroundColor: Colors.success,
   },
   joinButtonText: {
     color: '#FFFFFF',

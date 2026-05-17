@@ -41,11 +41,6 @@ const FALLBACK_CREATED_IMAGES = [
   'https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1000&q=60',
 ];
 
-const FALLBACK_JOINED_IMAGES = [
-  'https://images.unsplash.com/photo-1543168256-418811576931?auto=format&fit=crop&w=600&q=60',
-  'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=600&q=60',
-];
-
 const Palette = {
   surface: Colors.background.primary,
   card: '#FFFFFF',
@@ -405,47 +400,58 @@ export default function ProfileScreen() {
         <View style={styles.sectionWrap}>
           <View style={styles.sectionHead}>
             <Text style={styles.sectionTitle}>Events Joined</Text>
-            <TouchableOpacity onPress={() => router.push('/saved-events')}>
-              <Text style={styles.sectionLink}>History</Text>
-            </TouchableOpacity>
           </View>
 
-          {(joinedEvents.length ? joinedEvents : [null, null]).slice(0, 2).map((event, index) => (
-            <TouchableOpacity
-              key={event?.id || `joined-${index}`}
-              style={styles.joinedCard}
-              activeOpacity={0.85}
-              onPress={() => {
-                if (event?.id) router.push(`/event/${event.id}`);
-              }}
-            >
-              <Image
-                source={{
-                  uri:
-                    event?.cover_image_url ||
-                    FALLBACK_JOINED_IMAGES[index % FALLBACK_JOINED_IMAGES.length],
-                }}
-                style={styles.joinedImage}
-              />
-              <View style={styles.joinedCopy}>
-                <Text style={styles.joinedTitle} numberOfLines={1}>
-                  {event?.title || (index === 0 ? 'Borough Market Tour' : 'React Masterclass')}
-                </Text>
-                <Text style={styles.joinedSub} numberOfLines={2}>
-                  {event?.business_name || (index === 0 ? 'Hosted by Elena G.' : 'TechHub Shoreditch')}
-                </Text>
+          {joinedEvents.length > 0 ? (
+            joinedEvents.slice(0, 2).map((event) => (
+              <TouchableOpacity
+                key={event.id}
+                style={styles.joinedCard}
+                activeOpacity={0.85}
+                onPress={() => router.push(`/event/${event.id}`)}
+              >
+                {event.cover_image_url ? (
+                  <Image source={{ uri: event.cover_image_url }} style={styles.joinedImage} />
+                ) : (
+                  <View style={[styles.joinedImage, styles.joinedImagePlaceholder]}>
+                    <CalendarDays size={22} color={Palette.primary} />
+                  </View>
+                )}
+                <View style={styles.joinedCopy}>
+                  <Text style={styles.joinedTitle} numberOfLines={1}>
+                    {event.title}
+                  </Text>
+                  <Text style={styles.joinedSub} numberOfLines={2}>
+                    {event.business_name}
+                  </Text>
+                </View>
+                <View style={styles.joinedTimeWrap}>
+                  <Text style={styles.joinedDay}>
+                    {formatEventDayLabel(event.start_datetime)}
+                  </Text>
+                  <Text style={styles.joinedTime}>{formatEventTime(event.start_datetime)}</Text>
+                </View>
+                <ChevronRight size={18} color={Palette.outline} />
+              </TouchableOpacity>
+            ))
+          ) : (
+            <View style={styles.joinedEmptyCard}>
+              <View style={styles.joinedEmptyIcon}>
+                <CalendarDays size={24} color={Palette.primary} />
               </View>
-              <View style={styles.joinedTimeWrap}>
-                <Text style={[styles.joinedDay, index === 0 && styles.joinedDayActive]}>
-                  {index === 0 ? 'TOMORROW' : 'SATURDAY'}
-                </Text>
-                <Text style={styles.joinedTime}>
-                  {event ? formatEventTime(event.start_datetime) : index === 0 ? '10:00 AM' : '2:00 PM'}
-                </Text>
-              </View>
-              <ChevronRight size={18} color={Palette.outline} />
-            </TouchableOpacity>
-          ))}
+              <Text style={styles.joinedEmptyTitle}>No events joined yet</Text>
+              <Text style={styles.joinedEmptyText}>
+                Events you join will appear here once you RSVP as going.
+              </Text>
+              <TouchableOpacity
+                style={styles.joinedEmptyButton}
+                onPress={() => router.push('/(tabs)/discover')}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.joinedEmptyButtonText}>Discover events</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {!isPremium && isBizMode && (
@@ -551,6 +557,26 @@ function formatEventTime(value: string) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '--:--';
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+function formatEventDayLabel(value: string) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return 'UPCOMING';
+
+  const today = new Date();
+  const tomorrow = new Date();
+  tomorrow.setDate(today.getDate() + 1);
+
+  if (d.toDateString() === today.toDateString()) return 'TODAY';
+  if (d.toDateString() === tomorrow.toDateString()) return 'TOMORROW';
+
+  return d
+    .toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    })
+    .toUpperCase();
 }
 
 const styles = StyleSheet.create({
@@ -860,6 +886,11 @@ const styles = StyleSheet.create({
     height: 58,
     borderRadius: 14,
   },
+  joinedImagePlaceholder: {
+    backgroundColor: Colors.accentLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   joinedCopy: {
     flex: 1,
   },
@@ -881,18 +912,61 @@ const styles = StyleSheet.create({
     marginRight: 2,
   },
   joinedDay: {
-    color: Palette.lightMuted,
+    color: Palette.primary,
     fontSize: 11,
     fontFamily: Typography.labelFontFamilies.semibold,
-  },
-  joinedDayActive: {
-    color: Palette.primary,
   },
   joinedTime: {
     marginTop: 2,
     color: Palette.muted,
     fontSize: 12,
     fontFamily: Typography.labelFontFamilies.medium,
+  },
+  joinedEmptyCard: {
+    alignItems: 'center',
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+    borderRadius: 18,
+    backgroundColor: Palette.card,
+    borderWidth: 1,
+    borderColor: Palette.softBorder,
+  },
+  joinedEmptyIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.accentLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  joinedEmptyTitle: {
+    color: Palette.text,
+    fontSize: 17,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+  },
+  joinedEmptyText: {
+    marginTop: 6,
+    color: Palette.muted,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+  },
+  joinedEmptyButton: {
+    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Palette.primary,
+  },
+  joinedEmptyButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
   },
   upgradeCard: {
     marginTop: 12,
