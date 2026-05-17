@@ -1,8 +1,12 @@
 import { Tabs } from 'expo-router';
 import { Colors } from '@/constants/theme';
 import { Compass, PlusCircle, Bell, User } from 'lucide-react-native';
+import { useApp } from '@/contexts/AppContext';
 
 export default function TabsLayout() {
+  const { hasBusiness, loading } = useApp();
+  const hideCreateTab = loading || !hasBusiness;
+
   return (
     <Tabs
       screenOptions={{
@@ -32,6 +36,7 @@ export default function TabsLayout() {
           tabBarIcon: ({ size, color }) => (
             <PlusCircle size={size} color={color} />
           ),
+          ...(hideCreateTab ? { href: null } : {}),
         }}
       />
       <Tabs.Screen

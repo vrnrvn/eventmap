@@ -19,6 +19,8 @@ import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView'
 import { geocodingService } from '@/services/geocoding';
 import { businessLocationStore } from '@/stores/businessLocationStore';
 import { onboardingLocationStore } from '@/stores/onboardingLocationStore';
+import { profileLocationStore } from '@/stores/profileLocationStore';
+import { eventLocationStore } from '@/stores/eventLocationStore';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -31,9 +33,11 @@ export default function BusinessLocationScreen() {
     address?: string;
     lat?: string;
     lng?: string;
-    context?: 'business' | 'onboarding';
+    context?: 'business' | 'onboarding' | 'profile' | 'event';
   }>();
   const isOnboarding = params.context === 'onboarding';
+  const isProfile = params.context === 'profile';
+  const isEvent = params.context === 'event';
   const insets = useSafeAreaInsets();
   const mapRef = useRef<GoogleMapHandle>(null);
 
@@ -96,13 +100,17 @@ export default function BusinessLocationScreen() {
 
   const handleConfirm = useCallback(() => {
     const result = { formattedAddress: address, lat, lng };
-    if (isOnboarding) {
+    if (isProfile) {
+      profileLocationStore.setPending(result);
+    } else if (isOnboarding) {
       onboardingLocationStore.setPending(result);
+    } else if (isEvent) {
+      eventLocationStore.setPending(result);
     } else {
       businessLocationStore.setPending(result);
     }
     router.back();
-  }, [address, lat, lng, isOnboarding]);
+  }, [address, lat, lng, isOnboarding, isProfile, isEvent]);
 
   const handleBack = useCallback(() => {
     router.back();
@@ -115,7 +123,13 @@ export default function BusinessLocationScreen() {
           <ArrowLeft size={22} color={Colors.text.primary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>
-          {isOnboarding ? 'Your Location' : 'Business Location'}
+          {isOnboarding
+            ? 'Your Location'
+            : isProfile
+              ? 'Your location'
+              : isEvent
+                ? 'Event location'
+                : 'Business Location'}
         </Text>
         <TouchableOpacity
           style={styles.confirmHeaderBtn}
@@ -139,16 +153,25 @@ export default function BusinessLocationScreen() {
         >
           <View style={styles.searchSection}>
             <AddressSearchInput
-              label={isOnboarding ? 'Search city or address' : 'Search address or business'}
+              label={
+                isOnboarding
+                  ? 'Search city or address'
+                  : isProfile
+                    ? 'Search city or area'
+                    : 'Search address or business'
+              }
               value={searchValue}
               onChangeText={setSearchValue}
               onSelect={handleSelectFromSearch}
               placeholder={
                 isOnboarding
                   ? 'Search city, area or address...'
-                  : 'Search business name or address...'
+                  : isProfile
+                    ? 'City or area for event discovery'
+                    : 'Search business name or address...'
               }
-              addressPrecision="business"
+              approximate={isProfile}
+              addressPrecision={isProfile ? 'any' : 'business'}
               showClearButton
             />
           </View>
@@ -160,12 +183,28 @@ export default function BusinessLocationScreen() {
                 ref={mapRef}
                 center={{ lat, lng }}
                 zoom={19}
+                webViewScrollEnabled={false}
+                nestedScrollEnabled={false}
                 markers={[
                   {
-                    id: 'business',
+                    id: isProfile
+                      ? 'profile'
+                      : isOnboarding
+                        ? 'onboarding'
+                        : isEvent
+                          ? 'event'
+                          : 'business',
                     lat,
                     lng,
-                    title: address || 'Business location',
+                    title:
+                      address ||
+                      (isProfile
+                        ? 'Your area'
+                        : isOnboarding
+                          ? 'Your location'
+                          : isEvent
+                            ? 'Event location'
+                            : 'Business location'),
                   },
                 ]}
                 onMapPress={handleMapPress}

@@ -9,7 +9,6 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
-  Dimensions,
   TouchableOpacity,
   Image,
 } from 'react-native';
@@ -38,24 +37,21 @@ import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { router } from 'expo-router';
 import { Input } from '@/components/Input';
-import { AddressSearchInput } from '@/components/AddressSearchInput';
 import { CategoryIcon } from '@/components/CategoryIcon';
-import { GoogleMapView } from '@/components/GoogleMapView';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import {
   RecurrencePicker,
   getRecurrenceLabel,
   type RecurrencePickerHandle,
 } from '@/components/RecurrencePicker';
-import { geocodingService } from '@/services/geocoding';
 import { eventsService } from '@/services/events';
 import { categoriesService } from '@/services/categories';
 import { businessesService } from '@/services/businesses';
 import { Category } from '@/types/database';
-import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { eventLocationStore } from '@/stores/eventLocationStore';
 import type { RecurrenceOption } from '@/utils/recurrence';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
 const MAX_EVENT_DATE = new Date();
 MAX_EVENT_DATE.setFullYear(MAX_EVENT_DATE.getFullYear() + 10);
@@ -151,6 +147,20 @@ export default function CreateScreen() {
       },
       []
     )
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      const loc = eventLocationStore.consume();
+      if (loc) {
+        setFormData((f) => ({
+          ...f,
+          address: loc.formattedAddress,
+          lat: loc.lat,
+          lng: loc.lng,
+        }));
+      }
+    }, [])
   );
 
   const validate = () => {
@@ -574,71 +584,48 @@ export default function CreateScreen() {
         <View style={styles.card}>
           <View style={styles.fieldRow}>
             <View style={styles.fieldIcon}>
-              <MapPin size={16} color={Colors.primary} />
+              <Navigation size={16} color={Colors.primary} />
             </View>
             <View style={styles.fieldContent}>
               <Text style={styles.locationNote}>
-                Defaults to your business address if left empty
+                Defaults to your business address if you do not set a different venue
               </Text>
-              <AddressSearchInput
-                value={formData.address}
-                onChangeText={(t) =>
-                  setFormData((f) => ({ ...f, address: t }))
+              <TouchableOpacity
+                style={styles.addressTouchable}
+                onPress={() =>
+                  router.push({
+                    pathname: '/business-location',
+                    params: {
+                      context: 'event',
+                      address: formData.address ?? '',
+                      lat: String(formData.lat),
+                      lng: String(formData.lng),
+                    },
+                  })
                 }
-                onSelect={(result) =>
-                  setFormData((f) => ({
-                    ...f,
-                    address: result.formattedAddress,
-                    lat: result.lat,
-                    lng: result.lng,
-                  }))
-                }
-                placeholder="Address or venue"
-                approximate={false}
-                showSetButton
-              />
+                activeOpacity={0.7}
+              >
+                <View style={styles.addressTouchableRow}>
+                  <MapPin size={18} color={Colors.text.tertiary} />
+                  <Text
+                    style={[
+                      styles.addressTouchableText,
+                      !formData.address?.trim() && styles.addressPlaceholder,
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {formData.address?.trim()
+                      ? formData.address
+                      : 'Tap to set venue on map'}
+                  </Text>
+                </View>
+                {!!formData.address?.trim() && (
+                  <Text style={styles.addressCoords}>
+                    {formData.lat.toFixed(4)}, {formData.lng.toFixed(4)}
+                  </Text>
+                )}
+              </TouchableOpacity>
             </View>
-          </View>
-
-          {/* Map */}
-          <View style={styles.mapContainer}>
-            <View style={styles.mapCard}>
-              <GoogleMapView
-                center={{ lat: formData.lat, lng: formData.lng }}
-                zoom={15}
-                markers={[
-                  {
-                    id: 'event',
-                    lat: formData.lat,
-                    lng: formData.lng,
-                    title: formData.title || 'Event location',
-                  },
-                ]}
-                style={styles.mapInner}
-                onMapPress={async (lat, lng) => {
-                  const result = await geocodingService.reverseGeocode(lat, lng);
-                  if (result) {
-                    setFormData((f) => ({
-                      ...f,
-                      address: result.formattedAddress,
-                      lat: result.lat,
-                      lng: result.lng,
-                    }));
-                  }
-                }}
-              />
-              <View style={styles.mapHintOverlay}>
-                <Navigation size={12} color={Colors.primary} />
-                <Text style={styles.mapHintText}>
-                  Tap to set location
-                </Text>
-              </View>
-            </View>
-            {formData.address ? (
-              <Text style={styles.coordText}>
-                📍 {formData.lat.toFixed(4)}, {formData.lng.toFixed(4)}
-              </Text>
-            ) : null}
           </View>
         </View>
 
@@ -932,58 +919,34 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
   },
-  mapContainer: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-    paddingTop: 4,
-  },
-  mapCard: {
-    height: 220,
-    borderRadius: 16,
-    overflow: 'hidden',
-    position: 'relative',
+  addressTouchable: {
     borderWidth: 1,
-    borderColor: Palette.separator,
+    borderColor: Colors.border.light,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 4,
+    backgroundColor: Colors.background.primary,
   },
-  mapInner: {
-    flex: 1,
-    minHeight: 220,
-  },
-  mapHintOverlay: {
-    position: 'absolute',
-    bottom: 10,
-    alignSelf: 'center',
+  addressTouchableRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 6,
-      },
-      android: { elevation: 3 },
-    }),
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
   },
-  mapHintText: {
-    fontSize: 12,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.primary,
+  addressTouchableText: {
+    fontSize: Typography.sizes.md,
+    color: Colors.text.primary,
+    flex: 1,
   },
-  coordText: {
-    fontSize: 12,
+  addressPlaceholder: {
+    color: Colors.text.tertiary,
+  },
+  addressCoords: {
+    fontSize: Typography.sizes.xs,
     fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
-    marginTop: 8,
-    textAlign: 'center',
+    marginTop: 4,
   },
 
   /* ── Submit ── */

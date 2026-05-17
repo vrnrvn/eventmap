@@ -18,6 +18,7 @@ import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BottomSheet, { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import { useAuth } from '@/contexts/AuthContext';
+import { useApp } from '@/contexts/AppContext';
 import { useSearch } from '@/contexts/SearchContext';
 import { eventsService } from '@/services/events';
 import { categoriesService } from '@/services/categories';
@@ -48,6 +49,7 @@ function truncateText(text: string, limit = 50): string {
 export default function DiscoverScreen() {
   const insets = useSafeAreaInsets();
   const { profile } = useAuth();
+  const { hasBusiness, loading: appLoading } = useApp();
   const { location: searchLocation, dateRange } = useSearch();
   const [events, setEvents] = useState<RankedEvent[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -447,61 +449,75 @@ export default function DiscoverScreen() {
             style={[styles.floatingCardWrapper, { bottom: insets.bottom + 20 }]}
             pointerEvents="box-none"
           >
-          <TouchableOpacity
-            style={styles.floatingCard}
-            onPress={() => router.push(`/event/${activeEvent.id}` as never)}
-            activeOpacity={1}
-          >
-            <View style={styles.floatingCardImageSection}>
-              {activeEvent.cover_image_url ? (
-                <Image
-                  source={{ uri: activeEvent.cover_image_url }}
-                  style={styles.floatingCardImage}
-                  resizeMode="cover"
-                />
-              ) : (
-                <View style={[styles.floatingCardImage, styles.floatingCardPlaceholder]}>
+            <TouchableOpacity
+              style={styles.floatingCard}
+              onPress={() => router.push(`/event/${activeEvent.id}` as never)}
+              activeOpacity={1}
+            >
+              <View style={styles.floatingCardImageSection}>
+                {activeEvent.cover_image_url ? (
                   <Image
-                    source={require('@/assets/images/EMlogo.png')}
-                    style={styles.floatingCardPlaceholderLogo}
-                    resizeMode="contain"
+                    source={{ uri: activeEvent.cover_image_url }}
+                    style={styles.floatingCardImage}
+                    resizeMode="cover"
                   />
+                ) : (
+                  <View style={[styles.floatingCardImage, styles.floatingCardPlaceholder]}>
+                    <Image
+                      source={require('@/assets/images/EMlogo.png')}
+                      style={styles.floatingCardPlaceholderLogo}
+                      resizeMode="contain"
+                    />
+                  </View>
+                )}
+                <View style={styles.floatingCardActionsOverlay}>
+                  <View style={styles.floatingCardBadge}>
+                    <Text style={styles.floatingCardBadgeText}>
+                      🔥 {activeEvent.rsvp_count} Going
+                    </Text>
+                  </View>
+                  <View style={styles.floatingCardActionPill}>
+                    <TouchableOpacity
+                      style={styles.floatingCardActionBtn}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleSaveEvent(activeEvent.id);
+                      }}
+                      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    >
+                      <Heart
+                        size={20}
+                        color={savedEventIds.has(activeEvent.id) ? Colors.primary : '#1a1a1a'}
+                        fill={savedEventIds.has(activeEvent.id) ? Colors.primary : 'transparent'}
+                      />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.floatingCardActionBtn}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        setActiveMarkerId(null);
+                        setShowFloatingCard(false);
+                      }}
+                      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    >
+                      <X size={22} color="#1a1a1a" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              )}
-              <View style={styles.floatingCardActionsOverlay}>
-                <View style={styles.floatingCardBadge}>
-                  <Text style={styles.floatingCardBadgeText}>
-                    🔥 {activeEvent.rsvp_count} Going
+              </View>
+              <View style={styles.floatingCardWhitePanel}>
+                <View style={styles.floatingCardCategoryRow}>
+                  <CategoryIcon category={activeEvent.category_slug} size="sm" />
+                  <Text style={styles.floatingCardTitle} numberOfLines={2}>
+                    {activeEvent.title}
                   </Text>
                 </View>
-                <View style={styles.floatingCardActionPill}>
-                  <TouchableOpacity
-                    style={styles.floatingCardActionBtn}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      setActiveMarkerId(null);
-                      setShowFloatingCard(false);
-                    }}
-                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  >
-                    <X size={22} color="#1a1a1a" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-            <View style={styles.floatingCardWhitePanel}>
-              <View style={styles.floatingCardCategoryRow}>
-                <CategoryIcon category={activeEvent.category_slug} size="sm" />
-                <Text style={styles.floatingCardTitle} numberOfLines={2}>
-                  {activeEvent.title}
+                <Text style={styles.floatingCardDescription} numberOfLines={1}>
+                  {truncateText(activeEvent.description ?? '')}
                 </Text>
               </View>
-              <Text style={styles.floatingCardDescription} numberOfLines={1}>
-                {truncateText(activeEvent.description ?? '')}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        </View>
+            </TouchableOpacity>
+          </View>
         </>
       )}
 
@@ -641,15 +657,17 @@ export default function DiscoverScreen() {
         <View style={styles.mapDimOverlay} pointerEvents="box-only" />
       )}
 
-      <View style={[styles.fabWrap, { bottom: insets.bottom + 104 }]}>
-        <TouchableOpacity
-          style={styles.fab}
-          activeOpacity={0.88}
-          onPress={() => router.push('/(tabs)/create')}
-        >
-          <Plus size={30} color="#FFFFFF" />
-        </TouchableOpacity>
-      </View>
+      {!appLoading && hasBusiness && (
+        <View style={[styles.fabWrap, { bottom: insets.bottom + 104 }]}>
+          <TouchableOpacity
+            style={styles.fab}
+            activeOpacity={0.88}
+            onPress={() => router.push('/(tabs)/create')}
+          >
+            <Plus size={30} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {!(activeEvent && showFloatingCard) && (
       <BottomSheet
