@@ -18,6 +18,8 @@ Completed October 18, 2026 for https://github.com/vrnrvn/eventmap.
   were not committed or published by this operation.
 - Removed the static Firebase config reference from the working app configuration.
   Android push remains an optional integration requiring a new project/config.
+- The separate app-preparation changes were subsequently committed and published
+  on `main` as `77c8e66df7a3851e4b4357bd9c0cc10e03717c5b`.
 
 ## Collaborator action
 
@@ -38,13 +40,19 @@ Suggested GitHub Support request (review before sending):
 > a Google/Firebase client API key from all 25 branch histories using
 > git-filter-repo. All original commits were retained with rewritten IDs.
 > Please assess removal of retained PR references/cached views for PRs #1-#13.
+> Repository: https://github.com/vrnrvn/eventmap (public).
+> Affected pull requests: 13, numbered #1 through #13 inclusive.
 > The first changed original commit was
 > 57e9055e4bfb55ec026dc49156d01dcb803dbd42.
+> No Git LFS objects were involved in this cleanup.
 > I no longer have access to the old Google project to revoke the key. It is no
 > longer used by the app. I can supply rewrite metadata privately if needed.
 
 GitHub decides whether this client key qualifies for support-assisted removal.
-No support request has been submitted automatically.
+Submit this through GitHub's support portal, linked from the reference below.
+Do not attach the original key, deleted configuration, or private history backup.
+No support request has been submitted automatically. Repeating the branch rewrite
+will not remove GitHub's read-only pull-request refs.
 
 ## Credential status
 

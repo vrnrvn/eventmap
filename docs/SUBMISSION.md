@@ -13,8 +13,12 @@ publish data, sign terms, or alter contributor ownership.
 - Current README, environment examples, third-party notices, and 30-44 hour roadmap.
 - Google/Firebase configuration and CLI temp files removed from the submitted
   tree and ignored for future use.
+- App-preparation changes published on `main` in commit
+  `77c8e66df7a3851e4b4357bd9c0cc10e03717c5b`.
+- Synthetic fixtures are accepted as the working assumption for this submission,
+  as directed by the owner. This is not a claim of organizer approval.
 
-## Owner actions before submission
+## Remaining considerations
 
 1. **GitHub pull-request copies:** on October 18, 2026, `google-services.json`
    was removed from the history of all 25 published branches, with all 59 commits
@@ -28,18 +32,17 @@ publish data, sign terms, or alter contributor ownership.
    The owner no longer has Google Cloud access, so the old key has NOT been
    revoked by this cleanup. Removing Git references does not revoke credentials
    or erase copies held by other people.
-2. **Eligibility:** disclose the actual ownership/contributor relationship. The
-   document excludes projects processing other people's personal data. This
-   setup uses synthetic data, but the intended profile/location/attendance/chat
-   features must be described honestly. Confirm acceptability with organizers;
-   licensing alone does not establish eligibility.
+2. **Submission description:** disclose the actual ownership/contributor
+   relationship and describe this as a local, synthetic-data demonstration.
+   Profile/location/attendance/chat features still need to be described honestly;
+   do not imply that production personal data is included.
 3. **Media rights:** confirm permission for existing logo assets and external
    media. Third-party assets retain their own terms.
 4. **Dependencies:** npm reports existing advisories. Review compatible upgrades
    separately; do not apply `npm audit fix --force` blindly.
-5. Review, commit, and push the separate app-preparation changes through the
-   normal Git workflow. Select MIT in the form. Do not describe GitHub's retained
-   pull-request history or the old credential as purged/revoked.
+5. **Form details:** submit the public repository URL and select MIT. The
+   app-preparation changes are already committed and published. Do not describe
+   GitHub's retained pull-request history or the old credential as purged/revoked.
 
 No hosted project has been deleted, migrated, resumed, or billed by this setup.
 The owner manages hosted subscriptions and private backups independently.
