@@ -76,7 +76,7 @@ export const eventChatService = {
       throw new Error(`Messages must be ${MAX_MESSAGE_LENGTH} characters or fewer`);
     }
 
-    const { data, error } = await (supabase as any)
+    const { data, error } = await supabase
       .from('event_chat_messages')
       .insert({
         event_id: eventId,

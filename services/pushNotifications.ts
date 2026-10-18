@@ -1,10 +1,12 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { supabase } from './supabase';
+import { pushEnabled } from './runtime';
 
 const isExpoGo = Constants.appOwnership === 'expo';
 
 function getNotifications(): typeof import('expo-notifications') | null {
+  if (!pushEnabled) return null;
   if (Platform.OS === 'web') return null;
   if (isExpoGo) return null;
   try {

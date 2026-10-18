@@ -20,7 +20,7 @@ export function Input({ label, error, style, onFocus, onBlur, rightAdornment, ..
             styles.input,
             focused && styles.inputFocused,
             error && styles.inputError,
-            rightAdornment && styles.inputWithAdornment,
+            !!rightAdornment && styles.inputWithAdornment,
             style,
           ]}
           placeholderTextColor={Colors.text.tertiary}

@@ -6,6 +6,7 @@
       "@/*": ["./*"]
     }
   },
+  "exclude": ["admin", "node_modules", "dist"],
   "include": [
     "**/*.ts",
     "**/*.tsx",

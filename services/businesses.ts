@@ -8,7 +8,7 @@ export const businessesService = {
     const { data, error } = await supabase.rpc('get_user_business');
 
     if (error) throw error;
-    return data && data.length > 0 ? data[0] : null;
+    return data && data.length > 0 ? data[0] as Business : null;
   },
 
   async getBusiness(businessId: string): Promise<Business | null> {
@@ -19,7 +19,7 @@ export const businessesService = {
       .maybeSingle();
 
     if (error) throw error;
-    return data;
+    return data as Business | null;
   },
 
   async createBusiness(businessData: {
@@ -56,7 +56,7 @@ export const businessesService = {
       .single();
 
     if (error) throw error;
-    return data;
+    return data as Business;
   },
 
   async updateBusiness(

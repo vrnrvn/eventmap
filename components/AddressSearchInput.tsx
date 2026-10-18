@@ -177,7 +177,6 @@ export function AddressSearchInput({
                   if (!selectingRef.current) setSuggestionsVisible(false);
                 }, 300);
               }}
-              keyboardShouldPersistTaps="handled"
             />
             {showClearButton && value ? (
               <TouchableOpacity
@@ -239,6 +238,7 @@ export function AddressSearchInput({
 }
 
 const styles = StyleSheet.create({
+  inputInner: { flex: 1 },
   container: {
     marginBottom: Spacing.md,
   },

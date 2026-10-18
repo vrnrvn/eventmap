@@ -7,7 +7,7 @@ type Event = {
   id: string;
   title: string;
   business_id: string;
-  businesses: { name: string } | null;
+  businesses: { name: string } | { name: string }[] | null;
 };
 
 type EventSelectorProps = {

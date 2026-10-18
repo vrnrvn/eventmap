@@ -22,6 +22,6 @@ export const bannersService = {
       .order('sort_order', { ascending: true });
 
     if (error) throw error;
-    return data ?? [];
+    return (data ?? []).map((banner) => ({ ...banner, content: banner.content ?? '' }));
   },
 };

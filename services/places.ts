@@ -1,3 +1,6 @@
+import { usesGoogleMaps } from './runtime';
+import { searchLocalPlaces } from './localPlaces';
+
 const AUTOCOMPLETE_URL = 'https://maps.googleapis.com/maps/api/place/autocomplete/json';
 const PLACE_DETAILS_URL = 'https://maps.googleapis.com/maps/api/place/details/json';
 
@@ -20,6 +23,9 @@ export const placesService = {
     input: string,
     opts?: { types?: AutocompleteTypes; /** Omit types filter for Google Maps–like results (addresses + businesses) */ allTypes?: boolean }
   ): Promise<AutocompletePrediction[]> {
+    if (!usesGoogleMaps) return input.trim() ? searchLocalPlaces(input).map((place) => ({
+      description: place.formattedAddress, placeId: place.formattedAddress,
+    })) : [];
     const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
     if (!key || !input.trim()) return [];
 
@@ -51,6 +57,7 @@ export const placesService = {
   },
 
   async getPlaceDetails(placeId: string): Promise<PlaceDetailsResult | null> {
+    if (!usesGoogleMaps) return searchLocalPlaces(placeId)[0] ?? null;
     const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
     if (!key || !placeId) return null;
 

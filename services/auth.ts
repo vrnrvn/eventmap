@@ -5,6 +5,7 @@ import * as AuthSession from 'expo-auth-session';
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import { supabase } from './supabase';
 import { getAuthRedirectUrl } from './authRedirect';
+import { oauthEnabled } from './runtime';
 
 const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim() || '';
 
@@ -12,6 +13,7 @@ const isExpoGo = Constants.appOwnership === 'expo';
 
 export const authService = {
   async signInWithOAuth(provider: 'google' | 'facebook') {
+    if (!oauthEnabled) throw new Error('Social sign-in is not configured. Please sign in with email.');
     const useNativeGoogle =
       provider === 'google' &&
       Platform.OS === 'android' &&

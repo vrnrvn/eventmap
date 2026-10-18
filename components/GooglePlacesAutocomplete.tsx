@@ -91,7 +91,9 @@ export function GooglePlacesAutocomplete({
 
   return (
     <Animated.View style={[styles.inputWrapper, animatedWrapperStyle]}>
-      <EventmapMapPin size={20} color={Colors.text.tertiary} style={styles.inputIcon} />
+      <View style={styles.inputIcon}>
+        <EventmapMapPin size={20} color={Colors.text.tertiary} />
+      </View>
       <TextInput
         style={styles.input}
         placeholder={placeholder}

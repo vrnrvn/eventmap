@@ -144,7 +144,7 @@ export const AttendeesBottomSheet = forwardRef<
       </View>
       <BottomSheetFlatList
         data={filteredAttendees}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item: PublicAttendee) => item.id}
         renderItem={renderItem}
         ListEmptyComponent={renderEmpty}
         contentContainerStyle={[

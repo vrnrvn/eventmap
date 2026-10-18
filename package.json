@@ -3,8 +3,22 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "dev": "EXPO_NO_TELEMETRY=1 expo start",
+    "dev:web": "EXPO_NO_TELEMETRY=1 expo start --web",
+    "backend:start": "supabase start -x logflare,vector,imgproxy,edge-runtime",
+    "backend:stop": "supabase stop",
+    "backend:reset": "supabase db reset --local",
+    "backend:env": "node scripts/local-env.mjs",
+    "backend:types": "node scripts/generate-db-types.mjs",
+    "test:backend": "node scripts/test-local-backend.mjs",
+    "typecheck:admin": "tsc --noEmit --project admin/tsconfig.json",
+    "audit:submission": "node scripts/audit-submission.mjs",
+    "vendor:map": "node scripts/vendor-map.mjs",
     "fix:promotions": "node scripts/run-promotions-fix.js",
     "build:web": "expo export --platform web",
     "lint": "expo lint",
@@ -51,6 +65,7 @@
     "expo-system-ui": "~6.0.7",
     "expo-updates": "~29.0.16",
     "expo-web-browser": "~15.0.7",
+    "leaflet": "1.9.4",
     "lucide-react-native": "^0.544.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -72,6 +87,7 @@
     "@types/react": "~19.1.10",
     "baseline-browser-mapping": "^2.9.19",
     "pg": "^8.13.0",
+    "supabase": "2.98.2",
     "typescript": "~5.9.2"
   }
 }

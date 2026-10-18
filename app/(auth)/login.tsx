@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { GoogleIcon } from '@/components/icons/BrandIcons';
+import { oauthEnabled } from '@/services/runtime';
 import { Colors, Typography, BorderRadius } from '@/constants/theme';
 import { ArrowLeft, Eye, EyeOff, Mail, Lock } from 'lucide-react-native';
 
@@ -152,7 +153,7 @@ export default function LoginScreen() {
               </LinearGradient>
             </TouchableOpacity>
 
-            <View style={styles.divider}>
+            {oauthEnabled && <><View style={styles.divider}>
               <View style={styles.dividerLine} />
               <Text style={styles.dividerText}>OR CONTINUE WITH</Text>
               <View style={styles.dividerLine} />
@@ -162,6 +163,7 @@ export default function LoginScreen() {
               <GoogleIcon size={20} />
               <Text style={styles.googleText}>{oauthLoading ? 'Signing in...' : 'Continue with Google'}</Text>
             </TouchableOpacity>
+            </>}
           </View>
 
           <View style={styles.footer}>

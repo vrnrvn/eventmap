@@ -119,7 +119,7 @@ export default function ManageSubscriptionScreen() {
 
   const handleUpgrade = useCallback(() => {
     router.push('/premium/plans' as never);
-  });
+  }, []);
 
   if (!isPremium && !subscription) {
     return (

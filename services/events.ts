@@ -14,15 +14,15 @@ export const eventsService = {
       user_lat: userLat,
       user_lng: userLng,
       radius_km: filters.radiusKm || 50,
-      category_ids: filters.categories?.length ? filters.categories : null,
-      start_date: filters.startDate?.toISOString() || null,
-      end_date: filters.endDate?.toISOString() || null,
-      search_query: filters.searchQuery || null,
+      category_ids: filters.categories?.length ? filters.categories : undefined,
+      start_date: filters.startDate?.toISOString(),
+      end_date: filters.endDate?.toISOString(),
+      search_query: filters.searchQuery || undefined,
       result_limit: 100,
     });
 
     if (error) throw error;
-    return data || [];
+    return (data || []) as RankedEvent[];
   },
 
   async getEventDetails(eventId: string): Promise<EventDetails | null> {
@@ -71,7 +71,7 @@ export const eventsService = {
       p_lat: eventData.lat,
       p_lng: eventData.lng,
       p_address: eventData.address,
-      p_cover_image_url: eventData.coverImageUrl || null,
+      p_cover_image_url: eventData.coverImageUrl || undefined,
       p_is_recurring: eventData.isRecurring ?? false,
       p_recurrence_pattern: eventData.recurrencePattern ?? null,
     });
@@ -115,7 +115,7 @@ export const eventsService = {
     const { data, error } = await query;
 
     if (error) throw error;
-    return data || [];
+    return (data || []) as Event[];
   },
 
   async getBusinessEventsCount(businessId: string): Promise<number> {

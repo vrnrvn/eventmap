@@ -22,7 +22,7 @@ export const profilesService = {
       .maybeSingle();
 
     if (error) throw error;
-    return data;
+    return data as Profile | null;
   },
 
   async getCurrentUserProfile(): Promise<Profile | null> {

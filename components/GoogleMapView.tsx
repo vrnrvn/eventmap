@@ -1,10 +1,12 @@
 import { useMemo, useRef, useImperativeHandle, forwardRef, useEffect, useCallback, memo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, Platform } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { CATEGORY_COLORS, DEFAULT_CATEGORY_COLOR } from '@/constants/categories';
+import { usesGoogleMaps } from '@/services/runtime';
+import { buildOpenMapHtml } from '@/utils/openMapHtml';
 
 /** Bump when changing map icon logic or HTML structure to force WebView reload */
-const MAP_HTML_VERSION = 4;
+const MAP_HTML_VERSION = 5;
 
 export type GoogleMapHandle = {
   animateTo: (lat: number, lng: number, zoom?: number) => void;
@@ -79,6 +81,9 @@ function buildMapHtml(
 <body>
   <div id="map"></div>
   <script>
+    if (!window.ReactNativeWebView) {
+      window.ReactNativeWebView = { postMessage: function(message) { window.parent.postMessage(message, '*'); } };
+    }
     var categoryColors = ${JSON.stringify(CATEGORY_COLORS)};
     var defaultColor = ${JSON.stringify(DEFAULT_CATEGORY_COLOR)};
     function circumIcon(paths, color, iconStroke, iconStrokeW, bgStroke) {
@@ -239,7 +244,7 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
 
   const html = useMemo(
     () =>
-      buildMapHtml(
+      usesGoogleMaps ? buildMapHtml(
         apiKey,
         center,
         zoom,
@@ -247,11 +252,26 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
         !!onMarkerPress,
         !!onRegionChange,
         mapGesturesEnabled
-      ),
+      ) : buildOpenMapHtml(center, zoom, mapGesturesEnabled, onRegionChange ? 180 : 0),
     [apiKey, center.lat, center.lng, zoom, !!onMapPress, !!onMarkerPress, !!onRegionChange, mapGesturesEnabled, MAP_HTML_VERSION]
   );
 
   const webViewRef = useRef<WebView>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const injectJavaScript = useCallback((script: string) => {
+    if (Platform.OS === 'web') {
+      const frame = iframeRef.current;
+      const doc = frame?.contentDocument;
+      if (doc) {
+        const element = doc.createElement('script');
+        element.textContent = script;
+        doc.body.appendChild(element);
+        element.remove();
+      }
+    } else {
+      webViewRef.current?.injectJavaScript(script);
+    }
+  }, []);
   const validMarkersRef = useRef(validMarkers);
   const activeMarkerIdRef = useRef(activeMarkerId);
   const lastInjectedIdsRef = useRef<string>('');
@@ -277,18 +297,18 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
       const activeRaw = JSON.stringify(activeId);
       const activeEscaped = activeRaw.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       const script = `(function(){if(typeof window.__updateMarkers==='function'){try{window.__updateMarkers(JSON.parse('${markersEscaped}'),JSON.parse('${activeEscaped}'));}catch(e){}}}());true;`;
-      webViewRef.current?.injectJavaScript(script);
+      injectJavaScript(script);
     } else {
       lastInjectedActiveRef.current = activeId;
       const activeEscaped = JSON.stringify(activeId).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       const script = `(function(){if(typeof window.__updateActiveMarker==='function'){try{window.__updateActiveMarker(JSON.parse('${activeEscaped}'));}catch(e){}}}());true;`;
-      webViewRef.current?.injectJavaScript(script);
+      injectJavaScript(script);
     }
   }, []);
 
   const animateTo = (lat: number, lng: number, zoom?: number) => {
     const zoomPart = typeof zoom === 'number' ? `m.setZoom(${zoom});` : '';
-    webViewRef.current?.injectJavaScript(
+    injectJavaScript(
       `(function(){var m=window.__map;if(m){m.panTo({lat:${lat},lng:${lng}});${zoomPart}}})();true;`
     );
   };
@@ -299,8 +319,39 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
 
   useImperativeHandle(ref, () => ({ animateTo }), []);
 
+  const handleMessage = useCallback((data: string) => {
+    try {
+      const payload = JSON.parse(data);
+      if (payload.type === 'mapReady') {
+        lastInjectedIdsRef.current = '';
+        lastInjectedActiveRef.current = '__none__';
+        injectMarkers();
+      } else if (payload.type === 'mapPress') {
+        onMapPress?.(payload.lat, payload.lng);
+      } else if (payload.type === 'markerPress') {
+        onMarkerPress?.(payload.eventId);
+      } else if (payload.type === 'regionChange') {
+        onRegionChange?.(payload);
+      }
+    } catch { /* Discard unrelated frame messages. */ }
+  }, [injectMarkers, onMapPress, onMarkerPress, onRegionChange]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const listener = (event: MessageEvent) => {
+      if (event.source === iframeRef.current?.contentWindow && typeof event.data === 'string') handleMessage(event.data);
+    };
+    window.addEventListener('message', listener);
+    return () => window.removeEventListener('message', listener);
+  }, [handleMessage]);
+
   return (
     <View style={[styles.container, style]}>
+      {Platform.OS === 'web' ? (
+        <iframe ref={iframeRef} title="Event map" srcDoc={html}
+          style={{ width: '100%', height: '100%', border: 0, flex: 1 }}
+          onLoad={() => handleMessage('{"type":"mapReady"}')} />
+      ) : (
       <WebView
         ref={webViewRef}
         key={`map-${MAP_HTML_VERSION}`}
@@ -312,6 +363,7 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
         originWhitelist={['*']}
         javaScriptEnabled
         domStorageEnabled
+        applicationNameForUserAgent="EventMap/1.0"
         onMessage={(event) => {
           try {
             const payload = JSON.parse(event.nativeEvent.data);
@@ -341,6 +393,7 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
           }
         }}
       />
+      )}
     </View>
   );
 });

@@ -55,7 +55,7 @@ export const socialService = {
       .maybeSingle();
 
     if (error) throw error;
-    return data?.status || null;
+    return data?.status === 'going' || data?.status === 'interested' ? data.status : null;
   },
 
   async getEventAttendees(eventId: string): Promise<PublicAttendee[]> {
@@ -94,7 +94,8 @@ export const socialService = {
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return data || [];
+    return (data || []).filter((rsvp): rsvp is typeof rsvp & { status: RsvpStatus } =>
+      rsvp.status === 'going' || rsvp.status === 'interested');
   },
 
   async saveEvent(eventId: string): Promise<void> {

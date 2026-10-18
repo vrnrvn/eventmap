@@ -1,5 +1,9 @@
 # Push Notification Debugging
 
+Device push is disabled in the default local setup. This guide only applies
+when explicitly enabled with your own newly configured push project; the old
+Firebase configuration is no longer used.
+
 If push notifications aren't appearing on your Android device, follow these steps.
 
 ## 1. Verify FCM Credentials (Required for Android)

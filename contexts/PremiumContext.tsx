@@ -31,7 +31,7 @@ import {
     eventCount: number;
     eventLimit: number;
     canUse: (feature: FeatureKey) => boolean;
-    canCreateEvent: (currentCount: number) => boolean;
+    canCreateEvent: (currentCount?: number) => boolean;
     refreshSubscription: () => Promise<void>;
   }
   
@@ -104,11 +104,11 @@ import {
     );
 
     const canCreateEvent = useCallback(
-      (currentCount: number) => {
+      (currentCount = eventCount) => {
         if (!currentPlan) return true;
         return premiumService.canCreateEvent(currentPlan, currentCount);
       },
-      [currentPlan]
+      [currentPlan, eventCount]
     );
 
     return (

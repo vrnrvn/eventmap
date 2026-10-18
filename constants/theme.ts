@@ -88,6 +88,7 @@ export const PlusJakartaSansFont = {
 
 /** DM Sans – body, UI, readable */
 export const DMSansFont = {
+  mono: 'monospace',
   regular: 'DMSans_400Regular',
   medium: 'DMSans_500Medium',
   semibold: 'DMSans_600SemiBold',

@@ -198,7 +198,8 @@ export type EventChatMessageWithSender = EventChatMessage & {
   sender: Pick<Profile, 'id' | 'name' | 'avatar_url'> | null;
 };
 
-export type RankedEvent = Event & {
+export type RankedEvent = Omit<Event, 'updated_at'> & {
+  updated_at?: string;
   distance_km: number;
   is_premium: boolean;
   rsvp_count: number;
@@ -222,61 +223,4 @@ export type EventDetails = {
   user_following_business: boolean;
 };
 
-export type Database = {
-  public: {
-    Tables: {
-      profiles: {
-        Row: Profile;
-        Insert: Omit<Profile, 'created_at'>;
-        Update: Partial<Omit<Profile, 'id' | 'created_at'>>;
-      };
-      businesses: {
-        Row: Business;
-        Insert: Omit<Business, 'id' | 'created_at' | 'events_created_this_month' | 'last_reset_date'>;
-        Update: Partial<Omit<Business, 'id' | 'owner_id' | 'created_at'>>;
-      };
-      categories: {
-        Row: Category;
-        Insert: Omit<Category, 'id' | 'created_at'>;
-        Update: Partial<Omit<Category, 'id' | 'created_at'>>;
-      };
-      events: {
-        Row: Event;
-        Insert: Omit<Event, 'id' | 'created_at' | 'updated_at'>;
-        Update: Partial<Omit<Event, 'id' | 'business_id' | 'created_at' | 'updated_at'>>;
-      };
-      event_links: {
-        Row: EventLink;
-        Insert: Omit<EventLink, 'id' | 'created_at'>;
-        Update: Partial<Omit<EventLink, 'id' | 'event_id' | 'created_at'>>;
-      };
-      event_photos: {
-        Row: EventPhoto;
-        Insert: Omit<EventPhoto, 'id' | 'created_at'>;
-        Update: Partial<Omit<EventPhoto, 'id' | 'event_id' | 'created_at'>>;
-      };
-      rsvps: {
-        Row: Rsvp;
-        Insert: Omit<Rsvp, 'id' | 'created_at'>;
-        Update: Partial<Omit<Rsvp, 'id' | 'user_id' | 'event_id' | 'created_at'>>;
-      };
-      saves: {
-        Row: Save;
-        Insert: Omit<Save, 'id' | 'created_at'>;
-        Update: never;
-      };
-      follows: {
-        Row: Follow;
-        Insert: Omit<Follow, 'id' | 'created_at'>;
-        Update: never;
-      };
-      event_chat_messages: {
-        Row: EventChatMessage;
-        Insert: Omit<EventChatMessage, 'id' | 'created_at' | 'deleted_at'> & {
-          deleted_at?: string | null;
-        };
-        Update: Partial<Pick<EventChatMessage, 'body' | 'deleted_at'>>;
-      };
-    };
-  };
-};
+export type { Database } from './supabase.generated';

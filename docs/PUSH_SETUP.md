@@ -1,5 +1,10 @@
 # Push Notifications Setup (Dev & Prod)
 
+This is an optional hosted-integration guide. The default local app disables
+device push and does not use Firebase. The old project's Firebase configuration
+has been removed. Only follow this guide if you deliberately re-enable Android
+push with your own new Firebase project and credentials.
+
 FCM credentials are shared across all build profiles (development, preview, production). One setup works for both.
 
 ## 1. Firebase Console
@@ -30,7 +35,7 @@ This config applies to all Android builds (dev, preview, prod).
 
 ## 4. Verify
 
-- `app.json` has `googleServicesFile: "./google-services.json"`
+- `app.config.ts` picks up your ignored `google-services.json` only when provided
 - `google-services.json` exists in project root
 - FCM key uploaded via `eas credentials`
 

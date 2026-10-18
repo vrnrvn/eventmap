@@ -19,6 +19,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Colors, Typography, BorderRadius } from '@/constants/theme';
 import { ArrowLeft, Eye, EyeOff, ArrowRight } from 'lucide-react-native';
 import { GoogleIcon } from '@/components/icons/BrandIcons';
+import { oauthEnabled } from '@/services/runtime';
 
 export default function SignupScreen() {
   const insets = useSafeAreaInsets();
@@ -142,7 +143,7 @@ export default function SignupScreen() {
               </LinearGradient>
             </TouchableOpacity>
 
-            <View style={styles.divider}>
+            {oauthEnabled && <><View style={styles.divider}>
               <View style={styles.dividerLine} />
               <Text style={styles.dividerText}>OR CONTINUE WITH</Text>
               <View style={styles.dividerLine} />
@@ -152,6 +153,7 @@ export default function SignupScreen() {
               <GoogleIcon size={20} />
               <Text style={styles.googleText}>{oauthLoading ? 'Signing up...' : 'Sign up with Google'}</Text>
             </TouchableOpacity>
+            </>}
           </View>
 
           <View style={styles.footer}>

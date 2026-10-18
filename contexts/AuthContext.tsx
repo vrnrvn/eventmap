@@ -51,6 +51,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await loadProfile(currentSession.user.id);
       }
       setLoading(false);
+    }).catch((error) => {
+      console.error('Unable to restore session:', error);
+      setLoading(false);
     });
 
     const { data: authListener } = authService.onAuthStateChange(
@@ -119,6 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithOAuth = async (provider: 'google' | 'facebook') => {
     const data = await authService.signInWithOAuth(provider);
+    if (!data) return;
     setSession(data.session);
     setUser(data.user);
     if (data.user) {

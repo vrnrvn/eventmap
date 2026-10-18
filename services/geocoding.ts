@@ -1,3 +1,6 @@
+import { usesGoogleMaps } from './runtime';
+import { searchLocalPlaces } from './localPlaces';
+
 const GEOCODE_URL = 'https://maps.googleapis.com/maps/api/geocode/json';
 
 export type GeocodeResult = {
@@ -8,6 +11,7 @@ export type GeocodeResult = {
 
 export const geocodingService = {
   async search(query: string): Promise<GeocodeResult[]> {
+    if (!usesGoogleMaps) return searchLocalPlaces(query);
     const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
     if (!key) return [];
 
@@ -37,6 +41,7 @@ export const geocodingService = {
     lng: number,
     opts?: { preferAddress?: boolean }
   ): Promise<GeocodeResult | null> {
+    if (!usesGoogleMaps) return { lat, lng, formattedAddress: `${lat.toFixed(6)}, ${lng.toFixed(6)}` };
     const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
     if (!key) return null;
 
