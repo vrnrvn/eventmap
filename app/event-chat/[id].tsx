@@ -4,136 +4,1192 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  Pressable,
   ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
+  Linking,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
+  ScrollView,
   TextInput,
-  Alert,
+  AppState,
 } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ArrowLeft, MessageCircle, SendHorizontal, Users } from 'lucide-react-native';
+import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
+import {
+  ArrowLeft,
+  Bell,
+  BellOff,
+  ChevronDown,
+  Info,
+  Lock,
+  MessageCircle,
+  SendHorizontal,
+  ShieldAlert,
+  ShieldCheck,
+  Users,
+} from 'lucide-react-native';
+import { socialService } from '@/services/social';
+import { ChatModerationSheet } from '@/components/ChatModerationSheet';
 import { useAuth } from '@/contexts/AuthContext';
 import { eventsService } from '@/services/events';
-import { eventChatService } from '@/services/eventChat';
-import { EventChatMessageWithSender, EventDetails } from '@/types/database';
+import {
+  eventChatService,
+  isChatAccessError,
+  isChatDuplicateReportError,
+  isChatRateLimitError,
+  isChatSlowModeError,
+  ChatConnectionStatus,
+  ChatPostStatus,
+  ChatReportReason,
+  ChatSlowModeSeconds,
+  ChatSubscription,
+  CHAT_MESSAGE_PAGE_SIZE,
+} from '@/services/eventChat';
+import { EventChatMessageWithSender, EventDetails, PublicAttendee } from '@/types/database';
 import { Avatar } from '@/components/Avatar';
+import {
+  ChatMessageActionsSheet,
+  ChatMessageActionsTarget,
+} from '@/components/ChatMessageActionsSheet';
+import { uuidv4 } from '@/utils/uuid';
+import {
+  MENTION_TRIGGER,
+  dayKey,
+  dayLabel,
+  isGrouped,
+  resolveMentions,
+  segmentBody,
+  sortMessages,
+  timeLabel,
+  tombstoneLabel,
+  typingLabel,
+} from '@/utils/chatMessages';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 
+const NEAR_BOTTOM_THRESHOLD = 80;
+const MAX_MESSAGE_LENGTH = 1000;
+const COUNTER_VISIBLE_FROM = MAX_MESSAGE_LENGTH - 100;
+const AVATAR_SIZE = 32;
+const TYPING_IDLE_MS = 2500;
+const TYPING_EXPIRE_MS = 4000;
+const MARK_READ_DEBOUNCE_MS = 800;
+// The notification trigger skips recipients who read within the last minute;
+// heartbeat well inside that window while the user is watching the chat.
+const READ_HEARTBEAT_MS = 30000;
+const TYPING_REBROADCAST_MS = 2000;
+const NOTICE_MS = 3500;
+const MAX_MENTION_SUGGESTIONS = 6;
+const HIGHLIGHT_MS = 2500;
+const DEEP_LINK_MAX_PAGES = 5;
+const UNREAD_JUMP_MIN_DISTANCE = 6;
+
+type ChatMessage = EventChatMessageWithSender & {
+  localStatus?: 'sending' | 'failed';
+};
+
+type ListRow =
+  | { kind: 'day'; id: string; label: string }
+  | { kind: 'divider'; id: string; label: string }
+  | {
+      kind: 'message';
+      id: string;
+      message: ChatMessage;
+      mine: boolean;
+      firstOfGroup: boolean;
+      lastOfGroup: boolean;
+    };
+
+function haptic(kind: 'send' | 'press' | 'error') {
+  if (Platform.OS === 'web') return;
+  if (kind === 'send') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  else if (kind === 'press') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  else void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+}
+
+/** Message body with tappable URLs and highlighted @mentions. */
+function LinkifiedText({
+  body,
+  mine,
+  mentionNames,
+}: {
+  body: string;
+  mine: boolean;
+  mentionNames: string[];
+}) {
+  const segments = segmentBody(body, mentionNames);
+  return (
+    <Text style={[styles.messageText, mine && styles.messageTextMine]} selectable>
+      {segments.map((segment, index) => {
+        if (segment.kind === 'text') return segment.text;
+        if (segment.kind === 'mention') {
+          return (
+            <Text key={`m-${index}`} style={[styles.mention, mine && styles.mentionMine]}>
+              {segment.text}
+            </Text>
+          );
+        }
+        return (
+          <Text
+            key={`l-${index}`}
+            style={[styles.messageLink, mine && styles.messageLinkMine]}
+            onPress={() => void Linking.openURL(segment.href)}
+            accessibilityRole="link"
+          >
+            {segment.text}
+          </Text>
+        );
+      })}
+    </Text>
+  );
+}
+
 export default function EventChatScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, messageId: targetMessageId } = useLocalSearchParams<{ id: string; messageId?: string }>();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
-  const listRef = useRef<FlatList<EventChatMessageWithSender>>(null);
+  const { user, profile } = useAuth();
+  const listRef = useRef<FlatList<ListRow>>(null);
   const [details, setDetails] = useState<EventDetails | null>(null);
-  const [messages, setMessages] = useState<EventChatMessageWithSender[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [unseenCount, setUnseenCount] = useState(0);
+  const [connectionStatus, setConnectionStatus] = useState<ChatConnectionStatus>('connecting');
+  const [reloadKey, setReloadKey] = useState(0);
+  const [hereCount, setHereCount] = useState(0);
+  const [typingUsers, setTypingUsers] = useState<Record<string, { name: string; expiresAt: number }>>({});
+  const [notice, setNotice] = useState<string | null>(null);
+  const [actionTarget, setActionTarget] = useState<ChatMessageActionsTarget | null>(null);
+  const [postStatus, setPostStatus] = useState<ChatPostStatus | null>(null);
+  const [moderationOpen, setModerationOpen] = useState(false);
+  const [mentionCandidates, setMentionCandidates] = useState<PublicAttendee[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const draftMentionsRef = useRef<{ name: string; id: string }[]>([]);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [slowRemaining, setSlowRemaining] = useState(0);
+  const [unreadJump, setUnreadJump] = useState<{ count: number; dividerId: string } | null>(null);
+  const openedLastReadRef = useRef<string | null | undefined>(undefined);
+  const lastSentAtRef = useRef<number>(0);
+  const deepLinkHandledRef = useRef<string | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const canChat = details?.user_rsvp === 'going' && (details?.rsvp_count ?? 0) >= 2;
+  const hasLoadedRef = useRef(false);
+  const nearBottomRef = useRef(true);
+  const isFocusedRef = useRef(false);
+  const latestCreatedAtRef = useRef<string | null>(null);
+  const oldestCursorRef = useRef<{ createdAt: string; id: string } | null>(null);
+  const messageIdsRef = useRef<Set<string>>(new Set());
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const typingLastSentRef = useRef(0);
+  const loadingOlderRef = useRef(false);
+  const userIdRef = useRef(user?.id);
+  const selfNameRef = useRef(profile?.name ?? 'Someone');
+  const canChatRef = useRef(false);
+  const subscriptionRef = useRef<ChatSubscription | null>(null);
+  const supersededRef = useRef(false);
+  const typingSentRef = useRef(false);
+  const typingIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const markReadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const attendeeAccess = details?.user_rsvp === 'going' && (details?.rsvp_count ?? 0) >= 2;
+  // Reading: attendees, plus hosts/admins moderating. Posting: server-decided
+  // (attendee access minus bans and per-chat blocks).
+  const canChat = attendeeAccess || (postStatus?.can_read ?? false);
+  const canPost = postStatus ? postStatus.can_post : attendeeAccess;
+  const isModerator = Boolean(postStatus?.is_host || postStatus?.is_admin);
+  const isMuted = postStatus?.muted ?? false;
+
+  useEffect(() => {
+    userIdRef.current = user?.id;
+  }, [user?.id]);
+
+  useEffect(() => {
+    selfNameRef.current = profile?.name ?? 'Someone';
+  }, [profile?.name]);
+
+  useEffect(() => {
+    canChatRef.current = canChat;
+  }, [canChat]);
+
+  useEffect(() => {
+    // Pagination and gap recovery cursors come from server-confirmed messages
+    // only; optimistic ones have client clocks.
+    const server = messages.filter((item) => !item.localStatus);
+    latestCreatedAtRef.current =
+      server.length > 0 ? server[server.length - 1].created_at : null;
+    oldestCursorRef.current =
+      server.length > 0 ? { createdAt: server[0].created_at, id: server[0].id } : null;
+    messageIdsRef.current = new Set(messages.map((item) => item.id));
+    messagesRef.current = messages;
+  }, [messages]);
+
+  const showNotice = useCallback((text: string) => {
+    setNotice(text);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(null), NOTICE_MS);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+      if (typingIdleTimer.current) clearTimeout(typingIdleTimer.current);
+      if (markReadTimer.current) clearTimeout(markReadTimer.current);
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    },
+    []
+  );
 
   const eventTitle = details?.event.title ?? 'Event chat';
   const subtitle = useMemo(() => {
     if (!details) return '';
-    return `${details.rsvp_count} going`;
-  }, [details]);
+    const parts = [`${details.rsvp_count} going`];
+    if (hereCount > 1) parts.push(`${hereCount} here now`);
+    if (isModerator) parts.push(postStatus?.is_admin ? 'Admin' : 'Host');
+    return parts.join(' · ');
+  }, [details, hereCount, isModerator, postStatus?.is_admin]);
 
-  const appendMessage = useCallback((message: EventChatMessageWithSender) => {
-    setMessages((current) => {
-      if (current.some((item) => item.id === message.id)) return current;
-      return [...current, message];
-    });
-    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+  // The list renders inverted (newest at offset 0), so rows are decorated in
+  // chronological order, then reversed.
+  const rows = useMemo<ListRow[]>(() => {
+    const out: ListRow[] = [];
+    // "New messages" divider sits before the first message from others that
+    // arrived after the read marker captured when the screen opened.
+    const openedLastRead = openedLastReadRef.current;
+    const openedLastReadMs = openedLastRead ? new Date(openedLastRead).getTime() : null;
+    let dividerPlaced = false;
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i];
+      const prev = i > 0 ? messages[i - 1] : null;
+      const next = i < messages.length - 1 ? messages[i + 1] : null;
+      const day = dayKey(message.created_at);
+      if (!prev || dayKey(prev.created_at) !== day) {
+        out.push({ kind: 'day', id: `day-${day}`, label: dayLabel(message.created_at) });
+      }
+      if (
+        !dividerPlaced &&
+        openedLastReadMs !== null &&
+        !message.localStatus &&
+        message.sender_id !== user?.id &&
+        new Date(message.created_at).getTime() > openedLastReadMs
+      ) {
+        dividerPlaced = true;
+        out.push({ kind: 'divider', id: 'unread-divider', label: 'New messages' });
+      }
+      out.push({
+        kind: 'message',
+        id: message.id,
+        message,
+        mine: message.sender_id === user?.id,
+        firstOfGroup: !prev || !isGrouped(prev, message),
+        lastOfGroup: !next || !isGrouped(message, next),
+      });
+    }
+    return out.reverse();
+  }, [messages, user?.id]);
+
+  const scrollToLatest = useCallback((animated: boolean) => {
+    requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated }));
+    setUnseenCount(0);
   }, []);
+
+  const rowsRef = useRef<ListRow[]>([]);
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
+
+  const scrollToRow = useCallback((rowId: string, animated = true) => {
+    const index = rowsRef.current.findIndex((row) => row.id === rowId);
+    if (index < 0) return false;
+    requestAnimationFrame(() =>
+      listRef.current?.scrollToIndex({ index, animated, viewPosition: 0.5 })
+    );
+    return true;
+  }, []);
+
+  const flashMessage = useCallback((messageId: string) => {
+    setHighlightedId(messageId);
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    highlightTimer.current = setTimeout(() => setHighlightedId(null), HIGHLIGHT_MS);
+  }, []);
+
+  // Server copies share ids with their optimistic originals, so a merge of a
+  // known id simply clears the local status (realtime echo or REST response,
+  // whichever lands first).
+  const mergeMessages = useCallback(
+    (incoming: EventChatMessageWithSender[], options?: { allowRestore?: boolean }) => {
+    if (incoming.length === 0) return;
+    setMessages((current) => {
+      const byId = new Map(current.map((item) => [item.id, item]));
+      let changed = false;
+      for (const item of incoming) {
+        const existing = byId.get(item.id);
+        if (existing && !existing.localStatus && existing.deleted_at === item.deleted_at) continue;
+        // A late INSERT echo must never resurrect a tombstone; only the
+        // explicit restore path (UPDATE) may clear deleted_at.
+        if (existing?.deleted_at && !item.deleted_at && !options?.allowRestore) continue;
+        byId.set(item.id, item);
+        changed = true;
+      }
+      return changed ? sortMessages(Array.from(byId.values())) : current;
+    });
+    },
+    []
+  );
+
+  const removeMessage = useCallback((messageId: string) => {
+    setMessages((current) => current.filter((item) => item.id !== messageId));
+  }, []);
+
+  // Removed messages stay in the timeline as tombstones so conversations
+  // don't read as gaps; the body is dropped locally too.
+  const markDeleted = useCallback((messageId: string, deletedBy: string | null) => {
+    setMessages((current) =>
+      current.map((item) =>
+        item.id === messageId && !item.deleted_at
+          ? { ...item, body: '', deleted_at: new Date().toISOString(), deleted_by: deletedBy }
+          : item
+      )
+    );
+  }, []);
+
+  // Read receipts: debounce while messages stream in, only when the user is
+  // actually looking at the latest messages.
+  const scheduleMarkRead = useCallback(() => {
+    if (!id || !canChatRef.current || !isFocusedRef.current || !nearBottomRef.current) return;
+    if (markReadTimer.current) clearTimeout(markReadTimer.current);
+    markReadTimer.current = setTimeout(() => {
+      eventChatService.markRead(id).catch(() => {});
+    }, MARK_READ_DEBOUNCE_MS);
+  }, [id]);
+
+  // Leaving/backgrounding records the read position only if the user was at
+  // the latest messages; anything they scrolled past unseen stays unread.
+  const markReadNow = useCallback(() => {
+    if (!id || !canChatRef.current || !nearBottomRef.current) return;
+    if (markReadTimer.current) clearTimeout(markReadTimer.current);
+    eventChatService.markRead(id).catch(() => {});
+  }, [id]);
+
+  const handleIncoming = useCallback(
+    (message: EventChatMessageWithSender) => {
+      mergeMessages([message]);
+      setTypingUsers((current) => {
+        if (!current[message.sender_id]) return current;
+        const next = { ...current };
+        delete next[message.sender_id];
+        return next;
+      });
+      if (nearBottomRef.current || message.sender_id === userIdRef.current) {
+        scrollToLatest(true);
+        scheduleMarkRead();
+      } else {
+        // Don't yank the user down while they're reading history; offer the
+        // jump pill instead.
+        setUnseenCount((count) => count + 1);
+      }
+    },
+    [mergeMessages, scrollToLatest, scheduleMarkRead]
+  );
+
+  // Realtime doesn't replay messages missed while disconnected or backgrounded;
+  // fetch everything since the newest message we have.
+  const catchUp = useCallback(async () => {
+    if (!id) return;
+    try {
+      const since = latestCreatedAtRef.current;
+      if (!since) {
+        mergeMessages(await eventChatService.getMessages(id));
+        return;
+      }
+      const recent = await eventChatService.getMessagesSince(id, since);
+      const freshLive = recent.filter(
+        (item) => !item.deleted_at && !messageIdsRef.current.has(item.id)
+      );
+
+      if (recent.length >= CHAT_MESSAGE_PAGE_SIZE) {
+        // The gap may exceed one page; rebuild from the latest page so the
+        // visible timeline stays contiguous (older pages reload on scroll).
+        const latest = await eventChatService.getMessages(id);
+        setMessages((current) => {
+          const byId = new Map<string, ChatMessage>(latest.map((item) => [item.id, item]));
+          for (const item of current) {
+            if (item.localStatus && !byId.has(item.id)) byId.set(item.id, item);
+          }
+          return sortMessages(Array.from(byId.values()));
+        });
+        setHasMoreHistory(latest.length >= CHAT_MESSAGE_PAGE_SIZE);
+      } else {
+        // Includes rows removed during the gap (as tombstones) and any
+        // restored ones; the server is the source of truth here.
+        mergeMessages(recent, { allowRestore: true });
+      }
+
+      // Recovered messages bypass the realtime handler, so surface them here:
+      // follow them when the user is at the bottom, otherwise offer the pill.
+      if (freshLive.length > 0) {
+        if (nearBottomRef.current) {
+          scrollToLatest(false);
+          scheduleMarkRead();
+        } else {
+          const fromOthers = freshLive.filter(
+            (item) => item.sender_id !== userIdRef.current
+          ).length;
+          if (fromOthers > 0) setUnseenCount((count) => count + fromOthers);
+        }
+      }
+    } catch {
+      // The reconnect loop fires onSubscribed again on the next recovery.
+    }
+  }, [id, mergeMessages, scrollToLatest, scheduleMarkRead]);
+
+  const loadOlder = useCallback(async () => {
+    const before = oldestCursorRef.current;
+    if (!id || !before || loadingOlderRef.current) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    try {
+      const older = await eventChatService.getMessages(id, { before });
+      mergeMessages(older);
+      if (older.length < CHAT_MESSAGE_PAGE_SIZE) setHasMoreHistory(false);
+    } catch {
+      // Scrolling up again retries.
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [id, mergeMessages]);
+
+  const refreshDetails = useCallback(async () => {
+    if (!id) return;
+    try {
+      const [next, status] = await Promise.all([
+        eventsService.getEventDetails(id),
+        eventChatService.getPostStatus(id).catch(() => null),
+      ]);
+      const hasAccess =
+        (next?.user_rsvp === 'going' && (next?.rsvp_count ?? 0) >= 2) || Boolean(status?.can_read);
+      const gainedAccess = hasAccess && !canChatRef.current;
+      setDetails(next);
+      if (status) setPostStatus(status);
+      setLoadError(false);
+      // Chat just unlocked: run the full load so messages and the realtime
+      // subscription come up too. Mark the ref immediately so concurrent
+      // refreshes (focus + foreground) don't double-trigger the reload.
+      if (gainedAccess) {
+        canChatRef.current = true;
+        setReloadKey((key) => key + 1);
+      }
+    } catch {
+      // Keep showing current details on a transient failure.
+    }
+  }, [id]);
+
+  const handlePresence = useCallback((members: { userId: string }[]) => {
+    setHereCount(members.length);
+  }, []);
+
+  const handleTyping = useCallback((event: { userId: string; name: string; typing: boolean }) => {
+    setTypingUsers((current) => {
+      const next = { ...current };
+      if (event.typing) next[event.userId] = { name: event.name, expiresAt: Date.now() + TYPING_EXPIRE_MS };
+      else delete next[event.userId];
+      return next;
+    });
+  }, []);
+
+  // Slow mode countdown for the composer (server enforces too).
+  const slowSeconds = postStatus?.slow_mode_seconds ?? 0;
+  useEffect(() => {
+    if (!slowSeconds || isModerator) {
+      setSlowRemaining(0);
+      return;
+    }
+    const tick = () => {
+      const remaining = Math.ceil((lastSentAtRef.current + slowSeconds * 1000 - Date.now()) / 1000);
+      setSlowRemaining(remaining > 0 ? remaining : 0);
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [slowSeconds, isModerator, messages.length]);
+
+  // Expire stale typing indicators (a client that lost connection never sends
+  // its "stopped typing").
+  useEffect(() => {
+    const ids = Object.keys(typingUsers);
+    if (ids.length === 0) return;
+    const soonest = Math.min(...ids.map((key) => typingUsers[key].expiresAt));
+    const timer = setTimeout(() => {
+      const now = Date.now();
+      setTypingUsers((current) => {
+        const next: typeof current = {};
+        for (const key of Object.keys(current)) {
+          if (current[key].expiresAt > now) next[key] = current[key];
+        }
+        return next;
+      });
+    }, Math.max(50, soonest - Date.now()));
+    return () => clearTimeout(timer);
+  }, [typingUsers]);
 
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
-    let unsubscribe: (() => void) | null = null;
 
     const load = async () => {
       setLoading(true);
+      setLoadError(false);
       try {
-        const nextDetails = await eventsService.getEventDetails(id);
+        const [nextDetails, status] = await Promise.all([
+          eventsService.getEventDetails(id),
+          eventChatService.getPostStatus(id).catch(() => null),
+        ]);
         if (cancelled) return;
         setDetails(nextDetails);
+        if (status) setPostStatus(status);
 
-        const hasAccess = nextDetails?.user_rsvp === 'going' && nextDetails.rsvp_count >= 2;
+        const hasAccess =
+          (nextDetails?.user_rsvp === 'going' && nextDetails.rsvp_count >= 2) ||
+          Boolean(status?.can_read);
         if (!hasAccess) {
           setMessages([]);
           return;
         }
 
-        const initialMessages = await eventChatService.getMessages(id);
-        if (cancelled) return;
-        setMessages(initialMessages);
-        requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
+        // Read marker as of opening, so the divider doesn't move while the
+        // user reads (markRead advances the server-side marker right away).
+        if (openedLastReadRef.current === undefined) {
+          openedLastReadRef.current = status?.last_read_at ?? null;
+        }
+        if (status?.last_post_at) {
+          lastSentAtRef.current = Math.max(lastSentAtRef.current, new Date(status.last_post_at).getTime());
+        }
 
-        unsubscribe = eventChatService.subscribeToMessages(id, appendMessage);
+        let initialMessages = await eventChatService.getMessages(id);
+        if (cancelled) return;
+
+        // Deep link: make sure the target message is loaded (bounded).
+        if (targetMessageId && deepLinkHandledRef.current !== targetMessageId) {
+          let pages = 0;
+          while (
+            !initialMessages.some((item) => item.id === targetMessageId) &&
+            initialMessages.length > 0 &&
+            pages < DEEP_LINK_MAX_PAGES
+          ) {
+            const oldest = initialMessages[0];
+            const older = await eventChatService.getMessages(id, {
+              before: { createdAt: oldest.created_at, id: oldest.id },
+            });
+            if (cancelled) return;
+            if (older.length === 0) break;
+            initialMessages = sortMessages([...older, ...initialMessages]);
+            pages += 1;
+          }
+        }
+
+        setMessages(initialMessages);
+        setHasMoreHistory(initialMessages.length >= CHAT_MESSAGE_PAGE_SIZE);
+        nearBottomRef.current = true;
+        setUnseenCount(0);
+        canChatRef.current = true;
+
+        const openedLastRead = openedLastReadRef.current;
+        if (openedLastRead && !targetMessageId) {
+          const lastReadMs = new Date(openedLastRead).getTime();
+          const unread = initialMessages.filter(
+            (item) => item.sender_id !== userIdRef.current && new Date(item.created_at).getTime() > lastReadMs
+          );
+          if (unread.length >= UNREAD_JUMP_MIN_DISTANCE) {
+            setUnreadJump({ count: unread.length, dividerId: 'unread-divider' });
+          }
+        }
+
+        if (targetMessageId && deepLinkHandledRef.current !== targetMessageId) {
+          deepLinkHandledRef.current = targetMessageId;
+          const found = initialMessages.some((item) => item.id === targetMessageId);
+          setTimeout(() => {
+            if (cancelled) return;
+            if (found && scrollToRow(targetMessageId, false)) {
+              nearBottomRef.current = false;
+              flashMessage(targetMessageId);
+            } else if (!found) {
+              showNotice("Couldn't find that message — it may have been removed.");
+            }
+          }, 350);
+        } else {
+          scheduleMarkRead();
+        }
+
+        subscriptionRef.current = eventChatService.subscribeToMessages(
+          id,
+          {
+            onMessage: handleIncoming,
+            onMessageDeleted: markDeleted,
+            onMessageUpdated: (message) => mergeMessages([message], { allowRestore: true }),
+            onSettingsChanged: () => {
+              if (!cancelled) void refreshDetails();
+            },
+            onSuperseded: () => {
+              if (cancelled) return;
+              supersededRef.current = true;
+              // If this copy of the screen is the one on screen, take the
+              // room back right away; otherwise wait until it regains focus.
+              if (isFocusedRef.current) setReloadKey((key) => key + 1);
+            },
+            onStatusChange: (status) => {
+              if (!cancelled) setConnectionStatus(status);
+            },
+            // Covers both the initial fetch→subscribe window and gaps from
+            // reconnects; merge dedupes anything we already have.
+            onSubscribed: () => {
+              if (!cancelled) void catchUp();
+            },
+            onPresence: handlePresence,
+            onTyping: handleTyping,
+          },
+          // Only posters join presence/typing; blocked or read-only viewers
+          // shouldn't be able to show "is typing…".
+          userIdRef.current
+            ? {
+                self: { userId: userIdRef.current, name: selfNameRef.current },
+                participate: status ? status.can_post : hasAccess,
+              }
+            : {}
+        );
+        supersededRef.current = false;
       } catch {
         if (!cancelled) {
           setDetails(null);
           setMessages([]);
+          setLoadError(true);
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          hasLoadedRef.current = true;
+        }
       }
     };
 
     load();
 
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (cancelled || !hasLoadedRef.current) return;
+      if (state === 'active') {
+        void refreshDetails();
+        void catchUp();
+      } else {
+        markReadNow();
+      }
+    });
+
+    const readHeartbeat = setInterval(() => {
+      if (!cancelled && hasLoadedRef.current && AppState.currentState === 'active') {
+        scheduleMarkRead();
+      }
+    }, READ_HEARTBEAT_MS);
+
     return () => {
       cancelled = true;
-      unsubscribe?.();
+      clearInterval(readHeartbeat);
+      appStateSubscription.remove();
+      subscriptionRef.current?.unsubscribe();
+      subscriptionRef.current = null;
+      setHereCount(0);
+      setTypingUsers({});
     };
-  }, [id, appendMessage]);
+  }, [
+    id,
+    reloadKey,
+    handleIncoming,
+    markDeleted,
+    mergeMessages,
+    catchUp,
+    refreshDetails,
+    handlePresence,
+    handleTyping,
+    scheduleMarkRead,
+    markReadNow,
+    targetMessageId,
+    scrollToRow,
+    flashMessage,
+    showNotice,
+  ]);
 
-  const handleSend = async () => {
-    if (!id || sending) return;
-    const body = draft.trim();
-    if (!body) return;
-
-    setDraft('');
-    setSending(true);
-    try {
-      const message = await eventChatService.sendMessage(id, body);
-      appendMessage(message);
-    } catch (err) {
-      setDraft(body);
-      Alert.alert(
-        'Message not sent',
-        err instanceof Error ? err.message : 'Please try again in a moment.'
-      );
-    } finally {
-      setSending(false);
+  // Attendees for @mention autocomplete (public, non-anonymous, not self).
+  useEffect(() => {
+    if (!id || !canPost) {
+      setMentionCandidates([]);
+      return;
     }
+    let cancelled = false;
+    socialService
+      .getEventAttendees(id)
+      .then((list) => {
+        if (cancelled) return;
+        setMentionCandidates(
+          list.filter((attendee) => !attendee.is_anonymous && attendee.id !== userIdRef.current)
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setMentionCandidates([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, canPost, details?.rsvp_count]);
+
+  // Access can change while this screen is in the stack (RSVPs elsewhere);
+  // re-check it and fill any message gap whenever the screen regains focus.
+  // Leaving the screen records the read position.
+  useFocusEffect(
+    useCallback(() => {
+      isFocusedRef.current = true;
+      if (supersededRef.current) {
+        // Another copy of this chat owned the realtime room; reclaim it.
+        supersededRef.current = false;
+        setReloadKey((key) => key + 1);
+      } else if (hasLoadedRef.current) {
+        void refreshDetails();
+        void catchUp();
+      }
+      return () => {
+        isFocusedRef.current = false;
+        markReadNow();
+      };
+    }, [refreshDetails, catchUp, markReadNow])
+  );
+
+  const handleScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      // Inverted list: offset 0 is the newest message.
+      const nearBottom = event.nativeEvent.contentOffset.y <= NEAR_BOTTOM_THRESHOLD;
+      const wasNearBottom = nearBottomRef.current;
+      nearBottomRef.current = nearBottom;
+      if (nearBottom) {
+        setUnseenCount((count) => (count === 0 ? count : 0));
+        if (!wasNearBottom) scheduleMarkRead();
+      }
+    },
+    [scheduleMarkRead]
+  );
+
+  const sendNow = useCallback(
+    async (pending: ChatMessage) => {
+      if (!id) return;
+      setMessages((current) => {
+        const exists = current.some((item) => item.id === pending.id);
+        const next = exists
+          ? current.map((item) =>
+              item.id === pending.id ? { ...item, localStatus: 'sending' as const } : item
+            )
+          : sortMessages([...current, pending]);
+        return next;
+      });
+      scrollToLatest(true);
+      try {
+        const sent = await eventChatService.sendMessage(id, pending.body, pending.id, pending.mentions);
+        lastSentAtRef.current = Math.max(lastSentAtRef.current, new Date(sent.created_at).getTime());
+        mergeMessages([sent]);
+        scheduleMarkRead();
+      } catch (err) {
+        // If the insert committed and the realtime echo already replaced the
+        // optimistic row, the server copy must not be stamped as failed.
+        setMessages((current) =>
+          current.map((item) =>
+            item.id === pending.id && item.localStatus === 'sending'
+              ? { ...item, localStatus: 'failed' as const }
+              : item
+          )
+        );
+        haptic('error');
+        if (isChatSlowModeError(err)) {
+          showNotice('Slow mode is on — wait a moment before posting again.');
+          void refreshDetails();
+        } else if (isChatRateLimitError(err)) {
+          showNotice("You're sending messages too quickly — give it a moment.");
+        } else if (isChatAccessError(err)) {
+          showNotice('You can no longer post in this chat.');
+          void refreshDetails();
+        } else {
+          showNotice("Message not sent — tap it to retry.");
+        }
+      }
+    },
+    [id, scrollToLatest, mergeMessages, scheduleMarkRead, refreshDetails, showNotice]
+  );
+
+  const stopTyping = useCallback(() => {
+    if (typingIdleTimer.current) {
+      clearTimeout(typingIdleTimer.current);
+      typingIdleTimer.current = null;
+    }
+    if (typingSentRef.current) {
+      typingSentRef.current = false;
+      subscriptionRef.current?.sendTyping(false);
+    }
+  }, []);
+
+  const handleDraftChange = (text: string) => {
+    setDraft(text);
+    const trigger = MENTION_TRIGGER.exec(text);
+    setMentionQuery(trigger && mentionCandidates.length > 0 ? trigger[2].toLowerCase() : null);
+    if (!text.trim()) {
+      stopTyping();
+      return;
+    }
+    // Receivers expire indicators after a few seconds; keep re-broadcasting
+    // while the user is still composing.
+    const now = Date.now();
+    if (!typingSentRef.current || now - typingLastSentRef.current >= TYPING_REBROADCAST_MS) {
+      typingSentRef.current = true;
+      typingLastSentRef.current = now;
+      subscriptionRef.current?.sendTyping(true);
+    }
+    if (typingIdleTimer.current) clearTimeout(typingIdleTimer.current);
+    typingIdleTimer.current = setTimeout(stopTyping, TYPING_IDLE_MS);
   };
 
-  const renderMessage = ({ item }: { item: EventChatMessageWithSender }) => {
-    const mine = item.sender_id === user?.id;
-    const senderName = item.sender?.name ?? 'Someone';
+  const insertMention = (attendee: PublicAttendee) => {
+    const next = draft.replace(MENTION_TRIGGER, (_match, lead: string) => `${lead}@${attendee.name} `);
+    if (!draftMentionsRef.current.some((entry) => entry.id === attendee.id)) {
+      draftMentionsRef.current.push({ name: attendee.name, id: attendee.id });
+    }
+    setDraft(next);
+    setMentionQuery(null);
+    haptic('send');
+  };
+
+  const mentionSuggestions =
+    mentionQuery === null
+      ? []
+      : mentionCandidates
+          .filter((attendee) => attendee.name.toLowerCase().includes(mentionQuery))
+          .slice(0, MAX_MENTION_SUGGESTIONS);
+
+  const handleSend = () => {
+    if (!id || !user) return;
+    const body = draft.trim();
+    if (!body || body.length > MAX_MESSAGE_LENGTH) return;
+    if (slowRemaining > 0) {
+      showNotice(`Slow mode — you can post again in ${slowRemaining}s.`);
+      return;
+    }
+    // Optimistically start the slow-mode clock; corrected from the server copy.
+    if (slowSeconds && !isModerator) lastSentAtRef.current = Date.now();
+
+    setDraft('');
+    setMentionQuery(null);
+    stopTyping();
+    haptic('send');
+    // Clamp to just after the newest known server message so a lagging device
+    // clock can't sort the optimistic bubble into the middle of history.
+    const latestKnown = latestCreatedAtRef.current
+      ? new Date(latestCreatedAtRef.current).getTime() + 1
+      : 0;
+    // Only names still present in the text count as mentions.
+    const mentionNames = resolveMentions(body, draftMentionsRef.current);
+    const mentions = Array.from(mentionNames.keys());
+    const pending: ChatMessage = {
+      // Client-generated id: the server row shares it, so retries are
+      // idempotent and the realtime echo dedupes by id.
+      id: uuidv4(),
+      event_id: id,
+      sender_id: user.id,
+      body,
+      created_at: new Date(Math.max(Date.now(), latestKnown)).toISOString(),
+      deleted_at: null,
+      deleted_by: null,
+      mentions,
+      mention_names: Object.fromEntries(
+        mentions.map((userId) => [userId, mentionNames.get(userId) ?? ''])
+      ),
+      sender: profile
+        ? { id: profile.id, name: profile.name, avatar_url: profile.avatar_url }
+        : null,
+      localStatus: 'sending',
+    };
+    draftMentionsRef.current = [];
+    void sendNow(pending);
+  };
+
+  const toggleMute = useCallback(async () => {
+    if (!id || !postStatus) return;
+    const nextMuted = !postStatus.muted;
+    haptic('send');
+    setPostStatus({ ...postStatus, muted: nextMuted });
+    try {
+      await eventChatService.setMuted(id, nextMuted);
+      showNotice(nextMuted ? 'Notifications muted for this chat' : 'Notifications on for this chat');
+    } catch {
+      setPostStatus(postStatus);
+      showNotice("Couldn't update notifications. Please try again.");
+    }
+  }, [id, postStatus, showNotice]);
+
+  const openActions = useCallback(
+    (message: ChatMessage, mine: boolean) => {
+      haptic('press');
+      setActionTarget({
+        id: message.id,
+        body: message.body,
+        senderId: message.sender_id,
+        senderName: mine ? 'You' : (message.sender?.name ?? 'Someone'),
+        mine,
+        failed: message.localStatus === 'failed',
+        sending: message.localStatus === 'sending',
+        deleted: Boolean(message.deleted_at),
+        deletedBySender: Boolean(message.deleted_at) && message.deleted_by === message.sender_id,
+        canModerate: isModerator,
+      });
+    },
+    [isModerator]
+  );
+
+  const handleCopy = useCallback(
+    (target: ChatMessageActionsTarget) => {
+      void Clipboard.setStringAsync(target.body);
+      showNotice('Copied to clipboard');
+    },
+    [showNotice]
+  );
+
+  const handleReport = useCallback(
+    async (target: ChatMessageActionsTarget, reason: ChatReportReason) => {
+      try {
+        await eventChatService.reportMessage(target.id, reason);
+        showNotice('Thanks — the message has been reported.');
+      } catch (err) {
+        if (isChatDuplicateReportError(err)) {
+          showNotice("You've already reported this message.");
+        } else {
+          showNotice("Couldn't send the report. Please try again.");
+        }
+      }
+    },
+    [showNotice]
+  );
+
+  const handleBlockUser = useCallback(
+    async (target: ChatMessageActionsTarget, durationMinutes: number | null) => {
+      if (!id) return;
+      try {
+        await eventChatService.blockUser(id, target.senderId, 'Removed from chat by moderator', durationMinutes);
+        showNotice(
+          durationMinutes
+            ? `${target.senderName} can't post for the next ${durationMinutes >= 60 ? `${durationMinutes / 60}h` : `${durationMinutes}m`}.`
+            : `${target.senderName} can no longer post in this chat.`
+        );
+      } catch {
+        showNotice("Couldn't remove this person. Please try again.");
+      }
+    },
+    [id, showNotice]
+  );
+
+  const handleRestore = useCallback(
+    async (target: ChatMessageActionsTarget) => {
+      try {
+        const restored = await eventChatService.restoreMessage(target.id);
+        if (!restored) throw new Error('not restored');
+        // The restored row is older than the gap cursor, so fetch it directly
+        // rather than relying on the realtime UPDATE alone.
+        const fresh = await eventChatService.getMessage(target.id);
+        if (fresh) mergeMessages([fresh], { allowRestore: true });
+        showNotice('Message restored.');
+      } catch {
+        showNotice("Couldn't restore the message. Please try again.");
+      }
+    },
+    [showNotice, mergeMessages]
+  );
+
+  // A timed block lifting while the screen is open should re-enable the composer.
+  useEffect(() => {
+    const expires = postStatus?.is_blocked ? postStatus.block_expires_at : null;
+    if (!expires) return;
+    const delay = new Date(expires).getTime() - Date.now();
+    if (delay <= 0) {
+      void refreshDetails();
+      return;
+    }
+    const timer = setTimeout(() => void refreshDetails(), Math.min(delay + 500, 2 ** 31 - 1));
+    return () => clearTimeout(timer);
+  }, [postStatus?.is_blocked, postStatus?.block_expires_at, refreshDetails]);
+
+  const handleUpdateSettings = useCallback(
+    async (settings: { locked?: boolean; slowModeSeconds?: ChatSlowModeSeconds }) => {
+      if (!id) return;
+      await eventChatService.setSettings(id, settings);
+      setPostStatus((current) =>
+        current
+          ? {
+              ...current,
+              locked: settings.locked ?? current.locked,
+              slow_mode_seconds: settings.slowModeSeconds ?? current.slow_mode_seconds,
+            }
+          : current
+      );
+      showNotice(
+        settings.locked === true
+          ? 'Chat locked. Only you can post.'
+          : settings.locked === false
+            ? 'Chat unlocked.'
+            : settings.slowModeSeconds === 0
+              ? 'Slow mode off.'
+              : `Slow mode on: one message every ${settings.slowModeSeconds}s.`
+      );
+    },
+    [id, showNotice]
+  );
+
+  const handleDelete = useCallback(
+    async (target: ChatMessageActionsTarget) => {
+      const original = messagesRef.current.find((item) => item.id === target.id);
+      markDeleted(target.id, userIdRef.current ?? null);
+      try {
+        const deleted = await eventChatService.deleteMessage(target.id);
+        if (!deleted) throw new Error('not deleted');
+      } catch {
+        showNotice("Couldn't delete the message. Please try again.");
+        if (original) {
+          setMessages((current) => current.map((item) => (item.id === original.id ? original : item)));
+        }
+      }
+    },
+    [markDeleted, showNotice]
+  );
+
+  const handleRetry = useCallback(
+    (target: ChatMessageActionsTarget) => {
+      const message = messages.find((item) => item.id === target.id);
+      if (message) void sendNow(message);
+    },
+    [messages, sendNow]
+  );
+
+  const handleDiscard = useCallback(
+    (target: ChatMessageActionsTarget) => removeMessage(target.id),
+    [removeMessage]
+  );
+
+  const renderRow = ({ item }: { item: ListRow }) => {
+    if (item.kind === 'day') {
+      return (
+        <View style={styles.dayRow}>
+          <Text style={styles.dayLabel}>{item.label}</Text>
+        </View>
+      );
+    }
+    if (item.kind === 'divider') {
+      return (
+        <View style={styles.dividerRow} accessibilityRole="header">
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerLabel}>{item.label}</Text>
+          <View style={styles.dividerLine} />
+        </View>
+      );
+    }
+
+    const { message, mine, firstOfGroup, lastOfGroup } = item;
+    const senderName = message.sender?.name ?? 'Someone';
+    const failed = message.localStatus === 'failed';
+    const sending = message.localStatus === 'sending';
+    const mentionsMe = !mine && !!user?.id && message.mentions.includes(user.id);
+
+    if (message.deleted_at) {
+      const tombstone = (
+        <View style={[styles.tombstone, mine && styles.tombstoneMine]} accessibilityRole="text">
+          <Text style={styles.tombstoneText}>
+            {tombstoneLabel(message, user?.id, isModerator)}
+            {!mine ? ` · ${senderName}` : ''}
+            {isModerator ? ' · hold for options' : ''}
+          </Text>
+        </View>
+      );
+      return (
+        <View style={[styles.messageRow, mine && styles.messageRowMine, styles.messageRowGroupEnd]}>
+          {!mine ? <View style={styles.avatarSpacer} /> : null}
+          {isModerator ? (
+            <Pressable
+              onLongPress={() => openActions(message, mine)}
+              delayLongPress={300}
+              accessibilityRole="button"
+              accessibilityLabel="Removed message, long press for moderator options"
+            >
+              {tombstone}
+            </Pressable>
+          ) : (
+            tombstone
+          )}
+        </View>
+      );
+    }
 
     return (
-      <View style={[styles.messageRow, mine && styles.messageRowMine]}>
+      <View
+        style={[
+          styles.messageRow,
+          mine && styles.messageRowMine,
+          // Inverted list: cells are flipped twice, so a row's bottom margin
+          // still renders below it — the gap to the next (newer) message.
+          lastOfGroup ? styles.messageRowGroupEnd : styles.messageRowGrouped,
+        ]}
+      >
         {!mine ? (
-          <Avatar imageUrl={item.sender?.avatar_url ?? null} name={senderName} size={32} />
+          lastOfGroup ? (
+            <Avatar imageUrl={message.sender?.avatar_url ?? null} name={senderName} size={AVATAR_SIZE} />
+          ) : (
+            <View style={styles.avatarSpacer} />
+          )
         ) : null}
-        <View style={[styles.messageBubble, mine && styles.messageBubbleMine]}>
-          {!mine ? (
+        <Pressable
+          onLongPress={() => openActions(message, mine)}
+          onPress={failed ? () => openActions(message, mine) : undefined}
+          delayLongPress={300}
+          style={({ pressed }) => [
+            styles.messageBubble,
+            mine && styles.messageBubbleMine,
+            !lastOfGroup && styles.messageBubbleGrouped,
+            mentionsMe && styles.messageBubbleMentioned,
+            highlightedId === message.id && styles.messageBubbleHighlighted,
+            failed && styles.messageBubbleFailed,
+            pressed && styles.messageBubblePressed,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={
+            failed
+              ? 'Message not sent, tap for options'
+              : `${mine ? 'Your' : `${senderName}'s`} message, long press for options`
+          }
+          accessibilityHint={message.body}
+        >
+          {!mine && firstOfGroup ? (
             <Text style={styles.senderName} numberOfLines={1}>
               {senderName}
             </Text>
           ) : null}
-          <Text style={[styles.messageText, mine && styles.messageTextMine]}>{item.body}</Text>
-          <Text style={[styles.messageTime, mine && styles.messageTimeMine]}>
-            {new Date(item.created_at).toLocaleTimeString('en-US', {
-              hour: 'numeric',
-              minute: '2-digit',
-            })}
-          </Text>
-        </View>
+          <LinkifiedText body={message.body} mine={mine} mentionNames={Object.values(message.mention_names)} />
+          {lastOfGroup || sending || failed ? (
+            <Text
+              style={[
+                styles.messageMeta,
+                mine && styles.messageMetaMine,
+                failed && styles.messageMetaFailed,
+              ]}
+            >
+              {failed ? 'Not sent · tap to retry' : sending ? 'Sending…' : timeLabel(message.created_at)}
+            </Text>
+          ) : null}
+        </Pressable>
       </View>
     );
   };
@@ -143,7 +1199,25 @@ export default function EventChatScreen() {
       return (
         <View style={styles.centerState}>
           <ActivityIndicator size="large" color={Colors.primary} />
-          <Text style={styles.centerText}>Loading chat...</Text>
+          <Text style={styles.centerText}>Loading chat…</Text>
+        </View>
+      );
+    }
+
+    if (loadError) {
+      return (
+        <View style={styles.centerState}>
+          <MessageCircle size={44} color={Colors.text.tertiary} />
+          <Text style={styles.centerTitle}>Couldn&apos;t load the chat</Text>
+          <Text style={styles.centerText}>Check your connection and try again.</Text>
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={() => setReloadKey((key) => key + 1)}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+          >
+            <Text style={styles.primaryButtonText}>Try again</Text>
+          </TouchableOpacity>
         </View>
       );
     }
@@ -167,12 +1241,23 @@ export default function EventChatScreen() {
             RSVP as going, then this room opens once at least two people are going.
           </Text>
           <TouchableOpacity
-            style={styles.backToEventButton}
+            style={styles.primaryButton}
             onPress={() => router.replace(`/event/${details.event.id}` as never)}
             activeOpacity={0.85}
+            accessibilityRole="button"
           >
-            <Text style={styles.backToEventText}>Back to event</Text>
+            <Text style={styles.primaryButtonText}>Back to event</Text>
           </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (!canPost) {
+      return (
+        <View style={styles.centerState}>
+          <MessageCircle size={44} color={Colors.text.tertiary} />
+          <Text style={styles.centerTitle}>No messages yet</Text>
+          <Text style={styles.centerText}>Messages from attendees will show up here.</Text>
         </View>
       );
     }
@@ -181,10 +1266,42 @@ export default function EventChatScreen() {
       <View style={styles.centerState}>
         <MessageCircle size={44} color={Colors.text.tertiary} />
         <Text style={styles.centerTitle}>Start the conversation</Text>
-        <Text style={styles.centerText}>Everyone here is going to this event.</Text>
+        <Text style={styles.centerText}>Everyone here is going to this event. Say hi!</Text>
       </View>
     );
   };
+
+  // In the inverted list the footer renders at the visual top, above the
+  // oldest loaded message.
+  const renderHistoryFooter = () => {
+    if (loadingOlder) {
+      return (
+        <View style={styles.historyFooter}>
+          <ActivityIndicator size="small" color={Colors.text.tertiary} />
+        </View>
+      );
+    }
+    if (!hasMoreHistory && messages.length >= CHAT_MESSAGE_PAGE_SIZE) {
+      return (
+        <View style={styles.historyFooter}>
+          <Text style={styles.historyFooterText}>Beginning of the event chat</Text>
+        </View>
+      );
+    }
+    return null;
+  };
+
+  const showLockedNotice = !loading && !loadError && details && !canChat && messages.length > 0;
+  const remainingChars = MAX_MESSAGE_LENGTH - draft.length;
+  const typingText = typingLabel(Object.values(typingUsers).map((entry) => entry.name));
+  const slowText =
+    slowRemaining > 0
+      ? `Slow mode · you can post again in ${slowRemaining}s`
+      : isModerator && postStatus?.locked
+        ? 'Chat is locked — only you can post'
+        : '';
+  const statusLine = notice ?? (typingText || slowText);
+  const sendDisabled = !draft.trim() || slowRemaining > 0;
 
   return (
     <KeyboardAvoidingView
@@ -192,65 +1309,251 @@ export default function EventChatScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity style={styles.headerButton} onPress={() => router.back()}>
+        <TouchableOpacity
+          style={styles.headerButton}
+          hitSlop={4}
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <ArrowLeft size={24} color={Colors.text.primary} />
         </TouchableOpacity>
         <View style={styles.headerTextWrap}>
           <Text style={styles.headerTitle} numberOfLines={1}>
             {eventTitle}
           </Text>
-          {subtitle ? <Text style={styles.headerSubtitle}>{subtitle}</Text> : null}
+          {subtitle ? (
+            <Text style={styles.headerSubtitle} numberOfLines={1}>
+              {subtitle}
+            </Text>
+          ) : null}
         </View>
+        {isModerator && id ? (
+          <TouchableOpacity
+            style={styles.headerButton}
+            hitSlop={4}
+            onPress={() => setModerationOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Manage chat"
+          >
+            <ShieldCheck size={20} color={Colors.primary} />
+          </TouchableOpacity>
+        ) : null}
+        {canChat && (attendeeAccess || isModerator) && postStatus ? (
+          <TouchableOpacity
+            style={styles.headerButton}
+            hitSlop={4}
+            onPress={() => void toggleMute()}
+            accessibilityRole="button"
+            accessibilityLabel={isMuted ? 'Unmute chat notifications' : 'Mute chat notifications'}
+            accessibilityState={{ selected: isMuted }}
+          >
+            {isMuted ? (
+              <BellOff size={20} color={Colors.text.secondary} />
+            ) : (
+              <Bell size={20} color={Colors.text.primary} />
+            )}
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity
           style={styles.headerButton}
+            hitSlop={4}
           onPress={() => details && router.replace(`/event/${details.event.id}` as never)}
           disabled={!details}
+          accessibilityRole="button"
+          accessibilityLabel="View event details"
         >
-          <MessageCircle size={22} color={details ? Colors.primary : Colors.text.disabled} />
+          <Info size={22} color={details ? Colors.primary : Colors.text.disabled} />
         </TouchableOpacity>
       </View>
 
-      <FlatList
-        ref={listRef}
-        data={messages}
-        keyExtractor={(item) => item.id}
-        renderItem={renderMessage}
-        ListEmptyComponent={renderEmpty}
-        contentContainerStyle={[
-          styles.listContent,
-          messages.length === 0 && styles.listContentEmpty,
-        ]}
-        keyboardShouldPersistTaps="handled"
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-      />
+      {canChat && !loading && connectionStatus !== 'connected' ? (
+        <View style={styles.connectionBanner}>
+          <ActivityIndicator size="small" color={Colors.text.secondary} />
+          <Text style={styles.connectionBannerText}>
+            {connectionStatus === 'connecting' ? 'Connecting to chat…' : 'Reconnecting…'}
+          </Text>
+        </View>
+      ) : null}
 
-      {canChat ? (
+      <View style={styles.listWrap}>
+        <FlatList
+          ref={listRef}
+          data={rows}
+          inverted={rows.length > 0}
+          keyExtractor={(item) => item.id}
+          renderItem={renderRow}
+          ListEmptyComponent={renderEmpty}
+          ListFooterComponent={renderHistoryFooter}
+          contentContainerStyle={[
+            styles.listContent,
+            rows.length === 0 && styles.listContentEmpty,
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          onScroll={handleScroll}
+          scrollEventThrottle={100}
+          onEndReached={hasMoreHistory ? loadOlder : undefined}
+          onEndReachedThreshold={0.6}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          onScrollToIndexFailed={({ index, averageItemLength }) => {
+            listRef.current?.scrollToOffset({ offset: averageItemLength * index, animated: false });
+            setTimeout(() => listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0.5 }), 120);
+          }}
+        />
+        {unseenCount === 0 && unreadJump ? (
+          <TouchableOpacity
+            style={[styles.unseenPill, styles.unreadJumpPill]}
+            onPress={() => {
+              if (scrollToRow(unreadJump.dividerId)) nearBottomRef.current = false;
+              setUnreadJump(null);
+            }}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={`${unreadJump.count} unread messages, jump to first unread`}
+          >
+            <ChevronDown size={16} color={Colors.primary} style={styles.unreadJumpIcon} />
+            <Text style={[styles.unseenPillText, styles.unreadJumpText]}>
+              {unreadJump.count} unread · Jump to first
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+        {unseenCount > 0 ? (
+          <TouchableOpacity
+            style={styles.unseenPill}
+            onPress={() => {
+              scrollToLatest(true);
+              scheduleMarkRead();
+            }}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={`${unseenCount} new ${unseenCount === 1 ? 'message' : 'messages'}, jump to latest`}
+          >
+            <ChevronDown size={16} color={Colors.text.inverse} />
+            <Text style={styles.unseenPillText}>
+              {unseenCount} new {unseenCount === 1 ? 'message' : 'messages'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      {showLockedNotice ? (
+        <View style={[styles.lockedNotice, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+          <Lock size={16} color={Colors.text.secondary} />
+          <Text style={styles.lockedNoticeText}>
+            Chat is locked — it reopens when at least 2 people are going.
+          </Text>
+        </View>
+      ) : null}
+
+      {canChat && !canPost && !loading ? (
+        <View style={[styles.lockedNotice, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+          <ShieldAlert size={16} color={Colors.text.secondary} />
+          <Text style={styles.lockedNoticeText}>
+            {postStatus?.is_banned
+              ? 'Your account is suspended, so you can read but not post.'
+              : postStatus?.is_blocked
+                ? postStatus.block_expires_at
+                  ? `The host paused your posting until ${new Date(postStatus.block_expires_at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}. You can still read along.`
+                  : 'The host removed you from this chat. You can still read along.'
+                : postStatus?.locked
+                  ? 'The host locked this chat. You can read, but new messages are paused.'
+                  : details?.user_rsvp === 'going'
+                  ? 'Waiting for one more attendee before the chat opens.'
+                  : 'RSVP as going to join the conversation.'}
+          </Text>
+        </View>
+      ) : null}
+
+      {canChat && canPost ? (
         <View style={[styles.composerWrap, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+          {mentionSuggestions.length > 0 ? (
+            <ScrollView
+              horizontal
+              keyboardShouldPersistTaps="always"
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.mentionStrip}
+            >
+              {mentionSuggestions.map((attendee) => (
+                <Pressable
+                  key={attendee.id}
+                  onPress={() => insertMention(attendee)}
+                  hitSlop={2}
+                  style={({ pressed }) => [styles.mentionChip, pressed && styles.messageBubblePressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Mention ${attendee.name}`}
+                >
+                  <Avatar imageUrl={attendee.avatar_url} name={attendee.name} size={26} />
+                  <Text style={styles.mentionChipText} numberOfLines={1}>
+                    {attendee.name}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : null}
+          <View style={styles.statusRow}>
+            <Text
+              style={[styles.statusText, notice && styles.statusTextNotice]}
+              numberOfLines={1}
+              accessibilityLiveRegion="polite"
+            >
+              {statusLine}
+            </Text>
+            {remainingChars <= MAX_MESSAGE_LENGTH - COUNTER_VISIBLE_FROM ? (
+              <Text style={[styles.charCounter, remainingChars <= 20 && styles.charCounterWarn]}>
+                {remainingChars}
+              </Text>
+            ) : null}
+          </View>
           <View style={styles.composer}>
             <TextInput
               style={styles.input}
               value={draft}
-              onChangeText={setDraft}
+              onChangeText={handleDraftChange}
+              onBlur={stopTyping}
               placeholder="Message the event chat"
               placeholderTextColor={Colors.text.tertiary}
               multiline
-              maxLength={1000}
+              maxLength={MAX_MESSAGE_LENGTH}
+              accessibilityLabel="Message input"
             />
             <TouchableOpacity
-              style={[styles.sendButton, (!draft.trim() || sending) && styles.sendButtonDisabled]}
+              style={[styles.sendButton, sendDisabled && styles.sendButtonDisabled]}
               onPress={handleSend}
-              disabled={!draft.trim() || sending}
+              disabled={sendDisabled}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Send message"
             >
-              {sending ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <SendHorizontal size={20} color="#FFFFFF" />
-              )}
+              <SendHorizontal size={20} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
         </View>
       ) : null}
+
+      {id ? (
+        <ChatModerationSheet
+          eventId={id}
+          visible={moderationOpen}
+          locked={postStatus?.locked ?? false}
+          slowModeSeconds={postStatus?.slow_mode_seconds ?? 0}
+          onClose={() => setModerationOpen(false)}
+          onNotice={showNotice}
+          onUpdateSettings={handleUpdateSettings}
+        />
+      ) : null}
+
+      <ChatMessageActionsSheet
+        target={actionTarget}
+        onClose={() => setActionTarget(null)}
+        onCopy={handleCopy}
+        onReport={(target, reason) => void handleReport(target, reason)}
+        onDelete={(target) => void handleDelete(target)}
+        onRestore={(target) => void handleRestore(target)}
+        onBlockUser={(target, minutes) => void handleBlockUser(target, minutes)}
+        onRetry={handleRetry}
+        onDiscard={handleDiscard}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -265,14 +1568,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.sm,
     paddingHorizontal: Spacing.md,
-    paddingBottom: Spacing.md,
+    paddingBottom: Spacing.sm + 4,
     backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.border.light,
   },
   headerButton: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     borderRadius: BorderRadius.round,
     alignItems: 'center',
     justifyContent: 'center',
@@ -281,22 +1584,43 @@ const styles = StyleSheet.create({
   headerTextWrap: {
     flex: 1,
     minWidth: 0,
+    paddingHorizontal: Spacing.xs,
   },
   headerTitle: {
     fontSize: Typography.sizes.lg,
+    lineHeight: 22,
     color: Colors.text.primary,
-    fontFamily: Typography.displayFontFamilies.extrabold,
-    fontWeight: '800',
+    fontFamily: Typography.displayFontFamilies.bold,
   },
   headerSubtitle: {
-    marginTop: 2,
+    marginTop: 1,
+    fontSize: Typography.sizes.xs,
+    lineHeight: 16,
+    color: Colors.text.secondary,
+    fontFamily: Typography.labelFontFamilies.medium,
+  },
+  connectionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    paddingVertical: 6,
+    backgroundColor: Colors.background.secondary,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border.light,
+  },
+  connectionBannerText: {
     fontSize: Typography.sizes.xs,
     color: Colors.text.secondary,
     fontFamily: Typography.labelFontFamilies.medium,
   },
+  listWrap: {
+    flex: 1,
+  },
   listContent: {
-    padding: Spacing.md,
-    paddingBottom: Spacing.xl,
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.sm,
+    paddingBottom: Spacing.sm,
   },
   listContentEmpty: {
     flexGrow: 1,
@@ -310,9 +1634,9 @@ const styles = StyleSheet.create({
   centerTitle: {
     marginTop: Spacing.md,
     fontSize: Typography.sizes.lg,
+    lineHeight: 24,
     color: Colors.text.primary,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
+    fontFamily: Typography.displayFontFamilies.semibold,
     textAlign: 'center',
   },
   centerText: {
@@ -320,37 +1644,71 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.sm,
     lineHeight: 20,
     color: Colors.text.secondary,
-    fontFamily: Typography.fontFamilies.medium,
+    fontFamily: Typography.fontFamilies.regular,
     textAlign: 'center',
   },
-  backToEventButton: {
+  primaryButton: {
     marginTop: Spacing.lg,
     paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
+    height: 44,
+    justifyContent: 'center',
     borderRadius: BorderRadius.round,
     backgroundColor: Colors.primary,
   },
-  backToEventText: {
-    color: Colors.text.inverse,
+  primaryButtonText: {
+    color: '#FFFFFF',
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
+  },
+  dayRow: {
+    alignItems: 'center',
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  dayLabel: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.background.tertiary,
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: 0.2,
+    color: Colors.text.secondary,
+    fontFamily: Typography.labelFontFamilies.semibold,
+    overflow: 'hidden',
+  },
+  historyFooter: {
+    alignItems: 'center',
+    paddingVertical: Spacing.md,
+  },
+  historyFooterText: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.text.tertiary,
+    fontFamily: Typography.labelFontFamilies.medium,
   },
   messageRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: Spacing.sm,
-    marginBottom: Spacing.md,
   },
   messageRowMine: {
     justifyContent: 'flex-end',
   },
+  messageRowGroupEnd: {
+    marginBottom: 12,
+  },
+  messageRowGrouped: {
+    marginBottom: Spacing.xs,
+  },
+  avatarSpacer: {
+    width: AVATAR_SIZE,
+  },
   messageBubble: {
-    maxWidth: '78%',
+    maxWidth: '80%',
     borderRadius: BorderRadius.lg,
     borderBottomLeftRadius: BorderRadius.sm,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     backgroundColor: '#FFFFFF',
     ...Shadows.sm,
   },
@@ -359,9 +1717,110 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: BorderRadius.sm,
     backgroundColor: Colors.primary,
   },
+  messageBubbleGrouped: {
+    borderBottomLeftRadius: BorderRadius.lg,
+    borderBottomRightRadius: BorderRadius.lg,
+  },
+  messageBubbleFailed: {
+    opacity: 0.7,
+  },
+  messageBubbleHighlighted: {
+    borderWidth: 2,
+    borderColor: Colors.primary,
+    transform: [{ scale: 1.02 }],
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.xs,
+    marginBottom: Spacing.md,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.primary,
+    opacity: 0.5,
+  },
+  dividerLabel: {
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    color: Colors.primary,
+    fontFamily: Typography.labelFontFamilies.semibold,
+  },
+  unreadJumpPill: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: Colors.primary,
+  },
+  unreadJumpIcon: {
+    transform: [{ rotate: '180deg' }],
+  },
+  unreadJumpText: {
+    color: Colors.primary,
+  },
+  messageBubbleMentioned: {
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.primary,
+    backgroundColor: Colors.accentLight,
+  },
+  tombstone: {
+    maxWidth: '80%',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: Colors.border.medium,
+  },
+  tombstoneMine: {
+    alignSelf: 'flex-end',
+  },
+  tombstoneText: {
+    fontSize: Typography.sizes.sm,
+    lineHeight: 18,
+    fontStyle: 'italic',
+    color: Colors.text.tertiary,
+    fontFamily: Typography.fontFamilies.regular,
+  },
+  mention: {
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+  },
+  mentionMine: {
+    color: '#FFFFFF',
+    textDecorationLine: 'underline',
+  },
+  mentionStrip: {
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.xs,
+    paddingBottom: Spacing.xs,
+  },
+  mentionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 36,
+    paddingLeft: 5,
+    paddingRight: 12,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.background.secondary,
+  },
+  mentionChipText: {
+    maxWidth: 140,
+    fontSize: Typography.sizes.sm,
+    color: Colors.text.primary,
+    fontFamily: Typography.fontFamilies.medium,
+  },
+  messageBubblePressed: {
+    opacity: 0.85,
+  },
   senderName: {
     marginBottom: 2,
     fontSize: Typography.sizes.xs,
+    lineHeight: 16,
     color: Colors.primary,
     fontFamily: Typography.labelFontFamilies.semibold,
   },
@@ -369,27 +1828,103 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.md,
     lineHeight: 22,
     color: Colors.text.primary,
-    fontFamily: Typography.fontFamilies.medium,
+    fontFamily: Typography.fontFamilies.regular,
   },
   messageTextMine: {
     color: '#FFFFFF',
   },
-  messageTime: {
+  messageLink: {
+    color: Colors.primary,
+    textDecorationLine: 'underline',
+  },
+  messageLinkMine: {
+    color: '#FFFFFF',
+  },
+  messageMeta: {
     marginTop: 4,
     alignSelf: 'flex-end',
-    fontSize: 10,
+    fontSize: 11,
+    lineHeight: 14,
     color: Colors.text.tertiary,
     fontFamily: Typography.labelFontFamilies.medium,
   },
-  messageTimeMine: {
-    color: 'rgba(255,255,255,0.72)',
+  messageMetaMine: {
+    color: 'rgba(255,255,255,0.75)',
+  },
+  messageMetaFailed: {
+    color: Colors.error,
+  },
+  unseenPill: {
+    position: 'absolute',
+    bottom: Spacing.md,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingLeft: 10,
+    paddingRight: 14,
+    height: 34,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.primary,
+    ...Shadows.md,
+  },
+  unseenPillText: {
+    color: Colors.text.inverse,
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.labelFontFamilies.semibold,
+  },
+  lockedNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.sm + 4,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border.light,
+  },
+  lockedNoticeText: {
+    flex: 1,
+    fontSize: Typography.sizes.sm,
+    lineHeight: 20,
+    color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.regular,
   },
   composerWrap: {
     paddingHorizontal: Spacing.md,
-    paddingTop: Spacing.sm,
+    paddingTop: Spacing.xs,
     backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.border.light,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 18,
+    paddingHorizontal: Spacing.xs,
+    marginBottom: 2,
+  },
+  statusText: {
+    flex: 1,
+    fontSize: Typography.sizes.xs,
+    lineHeight: 16,
+    color: Colors.text.tertiary,
+    fontFamily: Typography.labelFontFamilies.medium,
+  },
+  statusTextNotice: {
+    color: Colors.text.secondary,
+  },
+  charCounter: {
+    marginLeft: Spacing.sm,
+    fontSize: Typography.sizes.xs,
+    lineHeight: 16,
+    color: Colors.text.tertiary,
+    fontFamily: Typography.labelFontFamilies.medium,
+  },
+  charCounterWarn: {
+    color: Colors.error,
   },
   composer: {
     flexDirection: 'row',
@@ -400,13 +1935,15 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 44,
     maxHeight: 120,
-    borderRadius: BorderRadius.xl,
+    borderRadius: 22,
     paddingHorizontal: Spacing.md,
-    paddingVertical: Platform.OS === 'ios' ? 12 : 8,
+    paddingTop: Platform.OS === 'ios' ? 12 : 10,
+    paddingBottom: Platform.OS === 'ios' ? 12 : 10,
     backgroundColor: Colors.background.secondary,
     color: Colors.text.primary,
     fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.medium,
+    lineHeight: 20,
+    fontFamily: Typography.fontFamilies.regular,
   },
   sendButton: {
     width: 44,

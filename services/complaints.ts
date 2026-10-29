@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 
-export type ComplaintTargetType = 'event' | 'business' | 'user' | 'review';
+export type ComplaintTargetType = 'event' | 'business' | 'user' | 'review' | 'chat_message';
 
 export const complaintsService = {
   async createComplaint(

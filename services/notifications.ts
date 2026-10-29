@@ -12,7 +12,9 @@ export type NotificationType =
   | 'event_update'
   | 'rsvp'
   | 'nearby_event'
-  | 'promotion';
+  | 'promotion'
+  | 'chat_message'
+  | 'chat_mention';
 
 export interface Notification {
   id: string;
@@ -23,6 +25,7 @@ export interface Notification {
   read: boolean;
   eventId?: string;
   businessId?: string;
+  messageId?: string;
 }
 
 type RealtimeNotificationHandler = {
@@ -41,6 +44,7 @@ function mapRowToNotification(row: any): Notification {
     read: row.read ?? false,
     eventId: row.event_id ?? undefined,
     businessId: row.business_id ?? undefined,
+    messageId: typeof row.data?.messageId === 'string' ? row.data.messageId : undefined,
   };
 }
 
@@ -55,7 +59,7 @@ export async function getNotifications(): Promise<Notification[]> {
 
   const { data, error } = await supabase
     .from('notifications')
-    .select('id, type, title, body, read, event_id, business_id, created_at')
+    .select('id, type, title, body, read, event_id, business_id, created_at, data')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
     .limit(100);

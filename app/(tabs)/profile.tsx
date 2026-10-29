@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -16,12 +16,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import { usePremium } from '@/contexts/PremiumContext';
 import { premiumService } from '@/services/premium';
+import { eventChatService } from '@/services/eventChat';
 import { analyticsService } from '@/services/analytics';
 import { profilesService } from '@/services/profiles';
 import { businessesService } from '@/services/businesses';
 import { eventsService } from '@/services/events';
 import { socialService } from '@/services/social';
-import { router } from 'expo-router';
+import { useFocusEffect, router } from 'expo-router';
 import { Colors, Typography, BorderRadius } from '@/constants/theme';
 import { Event, RankedEvent } from '@/types/database';
 import {
@@ -34,6 +35,7 @@ import {
   ArrowLeftRight,
   SlidersHorizontal,
   PlusCircle,
+  MessageCircle,
 } from 'lucide-react-native';
 
 const FALLBACK_CREATED_IMAGES = [
@@ -65,6 +67,27 @@ export default function ProfileScreen() {
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [createdEvents, setCreatedEvents] = useState<Event[]>([]);
   const [joinedEvents, setJoinedEvents] = useState<RankedEvent[]>([]);
+  const [chatUnread, setChatUnread] = useState<Record<string, number>>({});
+
+  // Unread chat badges go stale while this tab stays mounted; refresh on focus.
+  useFocusEffect(
+    useCallback(() => {
+      const ids = joinedEvents.map((event) => event.id);
+      if (ids.length === 0) return;
+      let cancelled = false;
+      eventChatService
+        .getUnreadCounts(ids)
+        .then((counts) => {
+          if (!cancelled) {
+            setChatUnread(Object.fromEntries(counts.map((row) => [row.event_id, row.unread_count])));
+          }
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }, [joinedEvents])
+  );
   const [stats, setStats] = useState<{
     attended: string;
     created: string;
@@ -119,6 +142,17 @@ export default function ProfileScreen() {
 
         setCreatedEvents(created || []);
         setJoinedEvents((upcoming || []).slice(0, 4));
+        const joinedIds = (upcoming || []).slice(0, 4).map((event) => event.id);
+        if (joinedIds.length > 0) {
+          eventChatService
+            .getUnreadCounts(joinedIds)
+            .then((counts) => {
+              setChatUnread(Object.fromEntries(counts.map((row) => [row.event_id, row.unread_count])));
+            })
+            .catch(() => setChatUnread({}));
+        } else {
+          setChatUnread({});
+        }
         setStats({
           attended: String(upcoming?.length || 0),
           created: String(created?.length || 0),
@@ -418,9 +452,19 @@ export default function ProfileScreen() {
                   </View>
                 )}
                 <View style={styles.joinedCopy}>
-                  <Text style={styles.joinedTitle} numberOfLines={1}>
-                    {event.title}
-                  </Text>
+                  <View style={styles.joinedTitleRow}>
+                    <Text style={styles.joinedTitle} numberOfLines={1}>
+                      {event.title}
+                    </Text>
+                    {chatUnread[event.id] ? (
+                      <View style={styles.joinedUnreadBadge} accessibilityLabel={`${chatUnread[event.id]} unread chat messages`}>
+                        <MessageCircle size={10} color="#FFFFFF" />
+                        <Text style={styles.joinedUnreadText}>
+                          {chatUnread[event.id] > 99 ? '99+' : chatUnread[event.id]}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
                   <Text style={styles.joinedSub} numberOfLines={2}>
                     {event.business_name}
                   </Text>
@@ -894,7 +938,28 @@ const styles = StyleSheet.create({
   joinedCopy: {
     flex: 1,
   },
+  joinedTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  joinedUnreadBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    height: 18,
+    paddingHorizontal: 6,
+    borderRadius: 9999,
+    backgroundColor: Colors.primary,
+  },
+  joinedUnreadText: {
+    fontSize: 10,
+    lineHeight: 12,
+    color: '#FFFFFF',
+    fontFamily: Typography.labelFontFamilies.semibold,
+  },
   joinedTitle: {
+    flexShrink: 1,
     color: Palette.text,
     fontSize: 16,
     fontFamily: Typography.fontFamilies.bold,

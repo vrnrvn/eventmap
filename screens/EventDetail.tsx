@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,14 +14,19 @@ import {
   Dimensions,
   Share,
 } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import { eventsService } from '@/services/events';
+import { eventChatService } from '@/services/eventChat';
 import { socialService } from '@/services/social';
 import { reviewsService, type ReviewWithProfile } from '@/services/reviews';
-import { EventDetails, type PublicAttendee } from '@/types/database';
+import {
+  EventDetails,
+  type EventChatMessageWithSender,
+  type PublicAttendee,
+} from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { ImageViewer } from '@/components/ImageViewer';
 import { Avatar } from '@/components/Avatar';
@@ -73,8 +78,11 @@ export default function EventDetail() {
   const [showReviewForm, setShowReviewForm] = useState(false);
   const attendeesSheetRef = useRef<AttendeesBottomSheetHandle>(null);
   const [previewAttendees, setPreviewAttendees] = useState<PublicAttendee[]>([]);
+  const [chatPreview, setChatPreview] = useState<EventChatMessageWithSender | null>(null);
+  const [chatUnread, setChatUnread] = useState(0);
 
   const isOwner = !!(userBusiness && details?.event.business_id === userBusiness.id);
+  const chatIsOpen = details?.user_rsvp === 'going' && (details?.rsvp_count ?? 0) >= 2;
 
   const allPhotoUrls = useMemo(() => {
     if (!details) return [];
@@ -106,6 +114,38 @@ export default function EventDetail() {
     };
     load();
   }, [id]);
+
+  // A one-line preview of the latest chat message for the chat-entry row.
+  // Focus-driven so it also refreshes when the user comes back from the chat.
+  useFocusEffect(
+    useCallback(() => {
+      if (!id || !chatIsOpen) {
+        setChatPreview(null);
+        setChatUnread(0);
+        return;
+      }
+      let cancelled = false;
+      eventChatService
+        .getLatestMessage(id)
+        .then((message) => {
+          if (!cancelled) setChatPreview(message);
+        })
+        .catch(() => {
+          // Keep the generic subtitle when the preview can't load.
+        });
+      eventChatService
+        .getUnreadCounts([id])
+        .then((counts) => {
+          if (!cancelled) setChatUnread(counts.find((row) => row.event_id === id)?.unread_count ?? 0);
+        })
+        .catch(() => {
+          if (!cancelled) setChatUnread(0);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [id, chatIsOpen])
+  );
 
   const businessId = details?.business.id;
 
@@ -538,10 +578,24 @@ export default function EventDetail() {
                 />
               </View>
               <View style={styles.chatPromptMeta}>
-                <Text style={styles.chatPromptTitle}>Event chat</Text>
-                <Text style={styles.chatPromptSubtitle}>
+                <View style={styles.chatPromptTitleRow}>
+                  <Text style={styles.chatPromptTitle}>Event chat</Text>
+                  {chatUnread > 0 ? (
+                    <View style={styles.chatUnreadBadge} accessibilityLabel={`${chatUnread} unread messages`}>
+                      <Text style={styles.chatUnreadBadgeText}>
+                        {chatUnread > 99 ? '99+' : chatUnread}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Text
+                  style={[styles.chatPromptSubtitle, chatUnread > 0 && styles.chatPromptSubtitleUnread]}
+                  numberOfLines={1}
+                >
                   {canOpenEventChat
-                    ? 'Chat with everyone going'
+                    ? chatPreview
+                      ? `${chatPreview.sender?.name ?? 'Someone'}: ${chatPreview.body}`
+                      : 'Chat with everyone going'
                     : 'Unlocks when 2 people are going'}
                 </Text>
               </View>
@@ -1126,11 +1180,35 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
+  chatPromptTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  chatUnreadBadge: {
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 6,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatUnreadBadgeText: {
+    fontSize: 11,
+    lineHeight: 14,
+    color: '#FFFFFF',
+    fontFamily: Typography.labelFontFamilies.semibold,
+  },
   chatPromptSubtitle: {
     marginTop: 3,
     fontSize: Typography.sizes.xs,
     color: Colors.text.secondary,
     fontFamily: Typography.fontFamilies.medium,
+  },
+  chatPromptSubtitleUnread: {
+    color: Colors.text.primary,
+    fontFamily: Typography.fontFamilies.semibold,
   },
   hostBusinessRow: {
     flexDirection: 'row',

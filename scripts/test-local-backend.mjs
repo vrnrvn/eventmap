@@ -10,8 +10,14 @@ const client = () => createClient(status.API_URL, status.ANON_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 const host = client(), alex = client(), sam = client(), anonymous = client(), newcomer = client();
+const serviceRole = createClient(status.API_URL, status.SERVICE_ROLE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
 const clients = [host, alex, sam, anonymous, newcomer];
 function ok(result) { assert.ifError(result.error); return result.data; }
+// Sam sends many messages across test blocks; backdate recent ones so the
+// 10-messages-per-10-seconds limit only fires in the test that targets it.
+const coolDownSender = async (userId) =>
+  ok(await serviceRole.from('event_chat_messages').update({ created_at: new Date(Date.now() - 60000).toISOString() })
+    .eq('sender_id', userId).gt('created_at', new Date(Date.now() - 30000).toISOString()));
 let eventId;
 let channel;
 let photoPath;
@@ -80,9 +86,262 @@ try {
   ok(await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: 'Hello from Sam' }));
   await delivery;
   assert.equal(ok(await alex.from('event_chat_messages').select('*').eq('event_id', eventId)).length, 1);
-  assert.equal(ok(await host.from('event_chat_messages').select('*').eq('event_id', eventId)).length, 0, 'Non-attending host must not read chat');
+  assert.equal(ok(await host.from('event_chat_messages').select('*').eq('event_id', eventId)).length, 1, 'Non-attending admin can read chat for moderation');
+  assert.equal(ok(await newcomer.from('event_chat_messages').select('*').eq('event_id', eventId)).length, 0, 'Non-attending non-admin must not read chat');
   assert.equal(ok(await anonymous.from('event_chat_messages').select('*').eq('event_id', eventId)).length, 0);
   assert.ok((await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: alexId, body: 'Spoofed' })).error);
+
+  // --- Chat features: client ids (idempotent sends), soft delete, reads/unread, notifications, reports, rate limit ---
+  const clientMessageId = crypto.randomUUID();
+  ok(await sam.from('event_chat_messages').insert({ id: clientMessageId, event_id: eventId, sender_id: samId, body: 'Client id message' }));
+  const dupe = await sam.from('event_chat_messages').insert({ id: clientMessageId, event_id: eventId, sender_id: samId, body: 'Client id message' });
+  assert.equal(dupe.error?.code, '23505', 'Re-sending with the same client id must be a unique violation, not a second message');
+  assert.equal(ok(await alex.from('event_chat_messages').select('id').eq('event_id', eventId)).length, 2);
+
+  const unreadBefore = ok(await alex.rpc('get_event_chat_unread_counts', { p_event_ids: [eventId] }));
+  assert.equal(unreadBefore.find((row) => row.event_id === eventId)?.unread_count, 2, 'Alex has not read either of Sam\'s messages');
+  ok(await alex.rpc('mark_event_chat_read', { p_event_id: eventId }));
+  const unreadAfter = ok(await alex.rpc('get_event_chat_unread_counts', { p_event_ids: [eventId] }));
+  assert.equal(unreadAfter.find((row) => row.event_id === eventId)?.unread_count, 0, 'Marking read clears the unread count');
+  assert.equal(ok(await sam.rpc('get_event_chat_unread_counts', { p_event_ids: [eventId] })).find((row) => row.event_id === eventId)?.unread_count, 0, 'Own messages never count as unread');
+
+  const alexChatNotifications = ok(await alex.from('notifications').select('id,type,body,data').eq('type', 'chat_message').eq('event_id', eventId));
+  assert.equal(alexChatNotifications.length, 1, 'Exactly one throttled chat notification for Alex');
+  const samName = ok(await sam.from('profiles').select('name').eq('id', samId).single()).name;
+  assert.ok(alexChatNotifications[0].body.startsWith(`${samName}: `), 'Chat notification names the sender');
+  assert.equal(alexChatNotifications[0].data?.kind, 'chat');
+  assert.equal(ok(await sam.from('notifications').select('id').eq('type', 'chat_message').eq('event_id', eventId)).length, 0, 'Senders are not notified about their own messages');
+
+  assert.equal(ok(await alex.rpc('delete_event_chat_message', { p_message_id: clientMessageId })), false, 'Cannot delete someone else\'s message');
+  assert.equal(ok(await sam.rpc('delete_event_chat_message', { p_message_id: clientMessageId })), true, 'Can delete own message');
+  assert.equal(ok(await alex.from('event_chat_messages').select('id').eq('event_id', eventId).is('deleted_at', null)).length, 1, 'Soft-deleted message hidden');
+
+  ok(await alex.from('complaints').insert({ reporter_id: alexId, target_type: 'chat_message', target_id: clientMessageId, reason: 'test report' }));
+
+  // --- Moderation: host/admin reads, blocks, bans, host delete + audit log, auto-hide, one report per user, mute, post status ---
+  await coolDownSender(samId);
+  const hostId = (await host.auth.getUser()).data.user.id;
+  // Exercise the host-only path: the seeded host is also an admin, so drop admin for this section.
+  ok(await serviceRole.from('profiles').update({ is_admin: false }).eq('id', hostId));
+  assert.equal(ok(await host.rpc('get_event_chat_post_status', { event_uuid: eventId }))[0].is_admin, false, 'Admin flag cleared for host-only checks');
+  assert.ok(ok(await host.from('event_chat_messages').select('id').eq('event_id', eventId)).length >= 1, 'Host can read own event chat without attending');
+  const hostStatus = ok(await host.rpc('get_event_chat_post_status', { event_uuid: eventId }))[0];
+  assert.equal(hostStatus.can_read, true); assert.equal(hostStatus.can_post, false, 'Host must RSVP going to post'); assert.equal(hostStatus.is_host, true);
+
+  const modMsgId = crypto.randomUUID();
+  ok(await sam.from('event_chat_messages').insert({ id: modMsgId, event_id: eventId, sender_id: samId, body: 'To be moderated' }));
+  assert.equal(ok(await host.rpc('delete_event_chat_message', { p_message_id: modMsgId })), true, 'Host can delete a message in own event');
+  const log1 = ok(await host.from('event_chat_moderation_actions').select('message_id,action,actor_id').eq('event_id', eventId));
+  assert.ok(log1.some((row) => row.message_id === modMsgId && row.action === 'delete' && row.actor_id === hostId), 'Moderator delete is logged and visible to the host via RLS');
+  assert.equal(ok(await alex.from('event_chat_moderation_actions').select('id').eq('event_id', eventId)).length, 0, 'Attendees cannot read the moderation log');
+
+  ok(await host.rpc('block_event_chat_user', { p_event_id: eventId, p_user_id: samId, p_reason: 'test block' }));
+  const blockedStatus = ok(await sam.rpc('get_event_chat_post_status', { event_uuid: eventId }))[0];
+  assert.equal(blockedStatus.is_blocked, true); assert.equal(blockedStatus.can_post, false); assert.equal(blockedStatus.can_read, true, 'Blocked users can still read');
+  assert.ok((await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: 'blocked' })).error, 'Blocked user cannot post');
+  assert.ok((await alex.rpc('block_event_chat_user', { p_event_id: eventId, p_user_id: samId })).error, 'Attendees cannot block others');
+  ok(await host.rpc('unblock_event_chat_user', { p_event_id: eventId, p_user_id: samId }));
+  assert.equal(ok(await sam.rpc('get_event_chat_post_status', { event_uuid: eventId }))[0].can_post, true, 'Unblocked user can post again');
+  assert.equal(ok(await alex.rpc('delete_event_chat_message', { p_message_id: (ok(await alex.from('event_chat_messages').select('id').eq('event_id', eventId).eq('sender_id', samId).is('deleted_at', null).limit(1)))[0].id })), false, 'Attendees cannot delete others\' messages');
+  assert.ok((await host.rpc('admin_get_chat_moderation_log', { p_limit: 5 })).error === null && ok(await host.rpc('admin_get_chat_moderation_log', { p_limit: 5 })).length === 0, 'Non-admin host gets an empty admin log');
+  ok(await serviceRole.from('profiles').update({ is_admin: true }).eq('id', hostId));
+
+  ok(await host.rpc('admin_ban_user', { p_user_id: samId, p_reason: 'test ban' }));
+  assert.ok((await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: 'banned' })).error, 'Banned user cannot post');
+  assert.equal(ok(await sam.rpc('get_event_chat_post_status', { event_uuid: eventId }))[0].is_banned, true);
+  ok(await host.rpc('admin_unban_user', { p_user_id: samId }));
+
+  const reportedId = crypto.randomUUID();
+  ok(await sam.from('event_chat_messages').insert({ id: reportedId, event_id: eventId, sender_id: samId, body: 'Reported by many' }));
+  ok(await alex.from('complaints').insert({ reporter_id: alexId, target_type: 'chat_message', target_id: reportedId, reason: 'Spam' }));
+  assert.equal((await alex.from('complaints').insert({ reporter_id: alexId, target_type: 'chat_message', target_id: reportedId, reason: 'Spam again' })).error?.code, '23505', 'One report per user per message');
+  const queue = ok(await host.rpc('admin_get_chat_reports', { p_status: 'pending' }));
+  const queued = queue.find((row) => row.message_id === reportedId);
+  assert.ok(queued && queued.report_count === 1 && queued.reasons.includes('Spam') && queued.sender_id === samId, 'Admin report queue aggregates reports');
+  const nonAdminQueue = await alex.rpc('admin_get_chat_reports', { p_status: 'pending' });
+  assert.ok(!nonAdminQueue.error && nonAdminQueue.data.length === 0, 'Non-admins see no report queue');
+  assert.ok((await sam.from('complaints').insert({ reporter_id: samId, target_type: 'chat_message', target_id: reportedId, reason: 'Spam' })).error?.message.includes('chat_report_not_allowed'), 'Cannot report your own message');
+  assert.ok((await newcomer.from('complaints').insert({ reporter_id: newUserId, target_type: 'chat_message', target_id: reportedId, reason: 'Other' })).error?.message.includes('chat_report_not_allowed'), 'Users without chat access cannot report');
+  ok(await host.from('complaints').insert({ reporter_id: hostId, target_type: 'chat_message', target_id: reportedId, reason: 'Harassment' }));
+  assert.equal(ok(await host.rpc('admin_dismiss_chat_reports', { p_message_id: reportedId })), 2, 'Dismiss clears the two pending reports');
+  ok(await newcomer.from('rsvps').upsert({ event_id: eventId, user_id: newUserId, status: 'going' }));
+  ok(await newcomer.from('complaints').insert({ reporter_id: newUserId, target_type: 'chat_message', target_id: reportedId, reason: 'Other' }));
+  assert.equal(ok(await host.from('event_chat_messages').select('deleted_at').eq('id', reportedId).single()).deleted_at, null, 'Dismissed reports do not count toward auto-hide');
+  ok(await serviceRole.from('complaints').update({ status: 'pending' }).eq('target_type', 'chat_message').eq('target_id', reportedId));
+  const hidden = ok(await host.from('event_chat_messages').select('deleted_at').eq('id', reportedId).single());
+  assert.ok(hidden.deleted_at === null, 'Auto-hide is evaluated on report insert, not on status edits');
+  ok(await serviceRole.from('complaints').delete().eq('target_type', 'chat_message').eq('target_id', reportedId).eq('reporter_id', newUserId));
+  ok(await newcomer.from('complaints').insert({ reporter_id: newUserId, target_type: 'chat_message', target_id: reportedId, reason: 'Other' }));
+  assert.ok(ok(await host.from('event_chat_messages').select('deleted_at').eq('id', reportedId).single()).deleted_at, 'Message auto-hidden after 3 distinct pending reporters');
+  assert.ok(ok(await host.rpc('admin_get_chat_moderation_log', { p_limit: 20 })).some((row) => row.message_id === reportedId && row.action === 'auto_hide'), 'Auto-hide is logged');
+  assert.equal(ok(await host.rpc('admin_resolve_chat_reports', { p_message_id: reportedId })), 3, 'Confirming a hide resolves all pending reports');
+  assert.equal(ok(await host.rpc('admin_restore_chat_message', { p_message_id: reportedId })), true, 'Admin can restore a hidden message');
+  assert.equal(ok(await alex.from('event_chat_messages').select('id').eq('id', reportedId).is('deleted_at', null)).length, 1, 'Restored message visible again');
+  assert.ok(ok(await host.rpc('admin_get_chat_moderation_log', { p_limit: 20 })).some((row) => row.message_id === reportedId && row.action === 'restore'), 'Restore is logged');
+  ok(await newcomer.from('rsvps').delete().eq('event_id', eventId).eq('user_id', newUserId));
+
+  ok(await alex.rpc('set_event_chat_muted', { p_event_id: eventId, p_muted: true }));
+  assert.equal(ok(await alex.rpc('get_event_chat_post_status', { event_uuid: eventId }))[0].muted, true);
+  ok(await serviceRole.from('notifications').delete().eq('type', 'chat_message').eq('event_id', eventId));
+  ok(await serviceRole.from('event_chat_reads').update({ last_read_at: new Date(Date.now() - 3600000).toISOString() }).eq('event_id', eventId).eq('user_id', alexId));
+  ok(await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: 'Muted test' }));
+  assert.equal(ok(await alex.from('notifications').select('id').eq('type', 'chat_message').eq('event_id', eventId)).length, 0, 'Muted chats do not notify');
+  ok(await alex.rpc('set_event_chat_muted', { p_event_id: eventId, p_muted: false }));
+  ok(await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: 'Unmuted test' }));
+  assert.equal(ok(await alex.from('notifications').select('id').eq('type', 'chat_message').eq('event_id', eventId)).length, 1, 'Unmuted chats notify again');
+
+  // --- Tombstones, mentions, admin report details ---
+  await coolDownSender(samId);
+  const tombId = crypto.randomUUID();
+  ok(await sam.from('event_chat_messages').insert({ id: tombId, event_id: eventId, sender_id: samId, body: 'Secret to be removed' }));
+  ok(await host.rpc('delete_event_chat_message', { p_message_id: tombId }));
+  const page = ok(await alex.rpc('get_event_chat_messages', { event_uuid: eventId, p_limit: 50 }));
+  const tomb = page.find((row) => row.id === tombId);
+  assert.ok(tomb && tomb.deleted_at && tomb.body === '' && tomb.deleted_by === hostId, 'Removed messages are returned as tombstones with the body masked');
+  const since = ok(await alex.rpc('get_event_chat_messages_since', { event_uuid: eventId, p_since: new Date(Date.now() - 600000).toISOString(), p_limit: 50 }));
+  assert.ok(since.some((row) => row.id === tombId && row.body === ''), 'Gap recovery also masks removed bodies');
+  assert.equal(ok(await host.rpc('admin_restore_chat_message', { p_message_id: tombId })), true);
+  assert.ok(ok(await alex.rpc('get_event_chat_messages', { event_uuid: eventId, p_limit: 50 })).some((row) => row.id === tombId && row.body === 'Secret to be removed' && row.deleted_by === null), 'Restore clears deleted_by and returns the body again');
+  assert.equal(ok(await newcomer.rpc('get_event_chat_messages', { event_uuid: eventId, p_limit: 50 })).length, 0, 'Message RPC still honours RLS for outsiders');
+
+  ok(await serviceRole.from('notifications').delete().in('type', ['chat_message', 'chat_mention']).eq('event_id', eventId));
+  ok(await serviceRole.from('event_chat_reads').upsert({ user_id: alexId, event_id: eventId, last_read_at: new Date(Date.now() - 3600000).toISOString(), muted: true }));
+  ok(await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: '@Demo Alex are you coming?', mentions: [alexId] }));
+  const mentionNotes = ok(await alex.from('notifications').select('type,title,data').eq('event_id', eventId).in('type', ['chat_message', 'chat_mention']));
+  assert.ok(mentionNotes.length === 1 && mentionNotes[0].type === 'chat_mention' && mentionNotes[0].data?.kind === 'chat', 'Mentions notify even when the chat is muted');
+  ok(await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: '@Demo Alex second ping', mentions: [alexId] }));
+  assert.equal(ok(await alex.from('notifications').select('id').eq('event_id', eventId).eq('type', 'chat_mention')).length, 1, 'A sender can only ping the same person once per 5 minutes');
+  ok(await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: 'plain message after mention' }));
+  assert.equal(ok(await alex.from('notifications').select('id').eq('event_id', eventId).eq('type', 'chat_message')).length, 0, 'Mention pushes count toward the regular 15-minute throttle');
+  ok(await serviceRole.from('event_chat_reads').update({ muted: false }).eq('user_id', alexId).eq('event_id', eventId));
+  const overflow = ok(await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: 'too many', mentions: Array.from({ length: 21 }, () => crypto.randomUUID()) }).select('mentions').single());
+  assert.deepEqual(overflow.mentions, [], 'Unknown mention ids are stripped server-side');
+
+  const detailsRow = (ok(await host.rpc('admin_get_chat_reports', { p_status: 'all' })))[0];
+  const detail = ok(await host.rpc('admin_get_chat_report_details', { p_message_id: detailsRow.message_id }));
+  assert.ok(Array.isArray(detail.reporters) && detail.reporters.length >= 1 && Array.isArray(detail.context) && detail.context.some((m) => m.is_target) && detail.sender_history, 'Admin report details include reporters, context and sender history');
+  assert.equal(ok(await alex.rpc('admin_get_chat_report_details', { p_message_id: detailsRow.message_id })), null, 'Non-admins get no report details');
+  assert.equal(typeof ok(await host.rpc('admin_count_pending_chat_reports')), 'number');
+  assert.equal(ok(await alex.rpc('admin_count_pending_chat_reports')), 0, 'Non-admins see a zero pending count');
+  console.log('PASS: tombstones, mention notifications, admin report details');
+
+  // --- Hardening 2: removed bodies unreadable, mention sanitizing/throttle, host report tools ---
+  await coolDownSender(samId);
+  const secretId = crypto.randomUUID();
+  ok(await sam.from('event_chat_messages').insert({ id: secretId, event_id: eventId, sender_id: samId, body: 'Secret body text' }));
+  ok(await host.rpc('delete_event_chat_message', { p_message_id: secretId }));
+  const rawRow = ok(await alex.from('event_chat_messages').select('body,deleted_at').eq('id', secretId).single());
+  assert.ok(rawRow.deleted_at && rawRow.body === '', 'Removed body is not readable through the table API');
+  assert.equal(ok(await alex.from('event_chat_removed_bodies').select('*').eq('message_id', secretId)).length, 0, 'Removed bodies are admin-only');
+  assert.equal(ok(await host.rpc('admin_restore_chat_message', { p_message_id: secretId })), true);
+  assert.equal(ok(await alex.from('event_chat_messages').select('body').eq('id', secretId).single()).body, 'Secret body text', 'Restore brings the body back');
+  const adminQueueRow = ok(await host.rpc('admin_get_chat_reports', { p_status: 'all' })).find((row) => row.deleted_at);
+  if (adminQueueRow) assert.ok(typeof adminQueueRow.body === 'string', 'Admin queue still exposes removed bodies to admins');
+
+  const spam = ok(await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: 'mention spam', mentions: [samId, hostId, crypto.randomUUID(), alexId] }).select('mentions').single());
+  assert.deepEqual([...spam.mentions].sort(), [alexId].sort(), 'Mentions are limited to going attendees other than the sender');
+  ok(await serviceRole.from('notifications').delete().in('type', ['chat_message', 'chat_mention']).eq('event_id', eventId));
+  ok(await serviceRole.from('event_chat_reads').upsert({ user_id: alexId, event_id: eventId, last_read_at: new Date(Date.now() - 3600000).toISOString(), muted: false }));
+  ok(await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: 'ping 1', mentions: [alexId] }));
+  ok(await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: 'ping 2', mentions: [alexId] }));
+  assert.equal(ok(await alex.from('notifications').select('id').eq('event_id', eventId).eq('type', 'chat_mention')).length, 1, 'Same sender cannot ping the same person twice within 5 minutes');
+
+  const hostReportedId = crypto.randomUUID();
+  ok(await sam.from('event_chat_messages').insert({ id: hostReportedId, event_id: eventId, sender_id: samId, body: 'Please review me' }));
+  ok(await alex.from('complaints').insert({ reporter_id: alexId, target_type: 'chat_message', target_id: hostReportedId, reason: 'Spam' }));
+  ok(await serviceRole.from('profiles').update({ is_admin: false }).eq('id', hostId));
+  const hostReported = ok(await host.rpc('get_event_chat_reported_messages', { event_uuid: eventId }));
+  assert.ok(hostReported.some((row) => row.message_id === hostReportedId && row.report_count === 1 && row.body === 'Please review me'), 'Non-admin host sees pending reports for own event');
+  assert.equal(ok(await alex.rpc('get_event_chat_reported_messages', { event_uuid: eventId })).length, 0, 'Attendees cannot see the report list');
+  assert.equal(ok(await host.rpc('dismiss_event_chat_reports', { p_message_id: hostReportedId })), 1, 'Host can keep a reported message and clear its reports');
+  assert.ok((await alex.rpc('dismiss_event_chat_reports', { p_message_id: hostReportedId })).error, 'Attendees cannot dismiss reports');
+  ok(await serviceRole.from('profiles').update({ is_admin: true }).eq('id', hostId));
+  console.log('PASS: removed bodies hidden, mention sanitizing and throttle, host report tools');
+
+  // --- Host controls: lock, slow mode, timed blocks, host restore, post status fields ---
+  await coolDownSender(samId);
+  ok(await serviceRole.from('profiles').update({ is_admin: false }).eq('id', hostId));
+  assert.ok((await alex.rpc('set_event_chat_settings', { p_event_id: eventId, p_locked: true })).error, 'Attendees cannot change chat settings');
+  ok(await host.rpc('set_event_chat_settings', { p_event_id: eventId, p_locked: true }));
+  const lockedStatus = ok(await sam.rpc('get_event_chat_post_status', { event_uuid: eventId }))[0];
+  assert.equal(lockedStatus.locked, true); assert.equal(lockedStatus.can_post, false, 'Locked chat blocks attendee posting');
+  assert.ok((await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: 'while locked' })).error, 'Insert rejected while locked');
+  ok(await host.rpc('set_event_chat_settings', { p_event_id: eventId, p_locked: false, p_slow_mode_seconds: 30 }));
+  ok(await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: 'slow 1' }));
+  const slowErr = (await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: 'slow 2' })).error;
+  assert.ok(slowErr?.message.includes('chat_slow_mode'), 'Slow mode rejects a second message within the window');
+  const slowStatus = ok(await sam.rpc('get_event_chat_post_status', { event_uuid: eventId }))[0];
+  assert.equal(slowStatus.slow_mode_seconds, 30); assert.ok(slowStatus.last_post_at, 'Status exposes the caller\'s last post time');
+  ok(await host.rpc('set_event_chat_settings', { p_event_id: eventId, p_slow_mode_seconds: 0 }));
+  assert.ok(ok(await host.from('event_chat_moderation_actions').select('action').eq('event_id', eventId)).some((row) => row.action === 'lock'), 'Lock is logged');
+
+  ok(await host.rpc('block_event_chat_user', { p_event_id: eventId, p_user_id: samId, p_reason: 'timed', p_duration_minutes: 60 }));
+  const timed = ok(await sam.rpc('get_event_chat_post_status', { event_uuid: eventId }))[0];
+  assert.ok(timed.is_blocked && timed.block_expires_at, 'Timed block exposes its expiry');
+  ok(await serviceRole.from('event_chat_blocks').update({ expires_at: new Date(Date.now() - 1000).toISOString() }).eq('event_id', eventId).eq('user_id', samId));
+  assert.equal(ok(await sam.rpc('get_event_chat_post_status', { event_uuid: eventId }))[0].is_blocked, false, 'Expired blocks no longer apply');
+  ok(await host.rpc('unblock_event_chat_user', { p_event_id: eventId, p_user_id: samId }));
+
+  const hostRestoreId = crypto.randomUUID();
+  await coolDownSender(samId);
+  ok(await sam.from('event_chat_messages').insert({ id: hostRestoreId, event_id: eventId, sender_id: samId, body: 'host restore me' }));
+  ok(await host.rpc('delete_event_chat_message', { p_message_id: hostRestoreId }));
+  assert.ok((await alex.rpc('restore_event_chat_message', { p_message_id: hostRestoreId })).error, 'Attendees cannot restore');
+  assert.equal(ok(await host.rpc('restore_event_chat_message', { p_message_id: hostRestoreId })), true, 'Non-admin host can restore');
+  assert.equal(ok(await alex.from('event_chat_messages').select('body').eq('id', hostRestoreId).single()).body, 'host restore me');
+  ok(await serviceRole.from('profiles').update({ is_admin: true }).eq('id', hostId));
+  ok(await alex.rpc('mark_event_chat_read', { p_event_id: eventId }));
+  assert.ok(ok(await alex.rpc('get_event_chat_post_status', { event_uuid: eventId }))[0].last_read_at, 'Status exposes the read marker');
+  console.log('PASS: host controls (lock, slow mode, timed blocks, host restore, status fields)');
+
+  // --- Final hardening: server-controlled timestamps, self-delete retraction, admin block expiry, slow-mode exemption ---
+  await coolDownSender(samId);
+  assert.ok((await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: 'spoofed time', created_at: '2000-01-01T00:00:00Z' })).error, 'Clients cannot supply created_at');
+  assert.ok((await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: 'spoofed delete', deleted_by: samId })).error, 'Clients cannot supply deleted_by');
+  const selfDelId = crypto.randomUUID();
+  ok(await sam.from('event_chat_messages').insert({ id: selfDelId, event_id: eventId, sender_id: samId, body: 'retract me' }));
+  ok(await sam.rpc('delete_event_chat_message', { p_message_id: selfDelId }));
+  assert.equal(ok(await host.rpc('restore_event_chat_message', { p_message_id: selfDelId })), false, 'Self-deleted messages cannot be restored by moderators');
+  assert.equal(ok(await serviceRole.from('event_chat_removed_bodies').select('message_id').eq('message_id', selfDelId)).length, 0, 'Self-deleted bodies are not retained');
+  ok(await host.rpc('block_event_chat_user', { p_event_id: eventId, p_user_id: samId, p_reason: 'expiry test', p_duration_minutes: 60 }));
+  ok(await serviceRole.from('event_chat_blocks').update({ expires_at: new Date(Date.now() - 1000).toISOString() }).eq('event_id', eventId).eq('user_id', samId));
+  const queueRows = ok(await host.rpc('admin_get_chat_reports', { p_status: 'all' })).filter((row) => row.event_id === eventId);
+  assert.ok(queueRows.every((row) => row.sender_blocked === false), 'Admin queue treats expired blocks as inactive');
+  ok(await host.rpc('unblock_event_chat_user', { p_event_id: eventId, p_user_id: samId }));
+  ok(await host.rpc('set_event_chat_settings', { p_event_id: eventId, p_slow_mode_seconds: 60 }));
+  ok(await host.from('rsvps').upsert({ event_id: eventId, user_id: hostId, status: 'going' }));
+  ok(await host.from('event_chat_messages').insert({ event_id: eventId, sender_id: hostId, body: 'host 1' }));
+  ok(await host.from('event_chat_messages').insert({ event_id: eventId, sender_id: hostId, body: 'host 2' }));
+  ok(await host.from('rsvps').delete().eq('event_id', eventId).eq('user_id', hostId));
+  ok(await host.rpc('set_event_chat_settings', { p_event_id: eventId, p_slow_mode_seconds: 0 }));
+  console.log('PASS: server-controlled timestamps, self-delete retraction, admin block expiry, slow-mode host exemption');
+
+  // Presence: every client must land in the same realtime room for "here now" / typing to work.
+  const roomTopic = `event-chat:${eventId}`;
+  // realtime-js only enables presence on a channel that binds a presence listener (as the app does).
+  const alexRoom = alex.channel(roomTopic, { config: { presence: { key: alexId } } }).on('presence', { event: 'sync' }, () => {});
+  const samRoom = sam.channel(roomTopic, { config: { presence: { key: samId } } }).on('presence', { event: 'sync' }, () => {});
+  const joined = (ch) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Presence subscription timed out')), 10000);
+    ch.subscribe((state) => { if (state === 'SUBSCRIBED') { clearTimeout(timer); resolve(); } if (state === 'CHANNEL_ERROR') { clearTimeout(timer); reject(new Error('Presence channel error')); } });
+  });
+  await Promise.all([joined(alexRoom), joined(samRoom)]);
+  await Promise.all([alexRoom.track({ name: 'Alex' }), samRoom.track({ name: 'Sam' })]);
+  let members = 0;
+  for (let i = 0; i < 40 && members < 2; i++) { await new Promise((r) => setTimeout(r, 250)); members = Object.keys(alexRoom.presenceState()).length; }
+  assert.equal(members, 2, 'Both attendees are visible in the shared chat room presence');
+  await Promise.all([alex.removeChannel(alexRoom), sam.removeChannel(samRoom)]);
+  console.log('PASS: chat moderation (host-only path, blocks, bans, audit log, report validation, auto-hide, resolve/restore, mute, shared presence room)');
+
+  const burst = [];
+  await coolDownSender(samId);
+  for (let i = 0; i < 12; i++) {
+    burst.push(await sam.from('event_chat_messages').insert({ event_id: eventId, sender_id: samId, body: `burst ${i}` }));
+  }
+  const limited = burst.filter((r) => r.error?.message?.includes('chat_rate_limited'));
+  const firstLimited = burst.findIndex((r) => r.error);
+  assert.ok(firstLimited > 0 && limited.length >= 1 && burst.slice(firstLimited).every((r) => r.error?.message?.includes('chat_rate_limited')), 'Rate limit kicks in only after a burst and then holds');
+  console.log('PASS: chat client ids, unread tracking, chat notifications, soft delete, reporting, rate limit');
   ok(await sam.from('rsvps').delete().eq('event_id', eventId).eq('user_id', samId));
   assert.equal(ok(await sam.from('event_chat_messages').select('*').eq('event_id', eventId)).length, 0);
   console.log('PASS: RSVP list, two-attendee chat gate, realtime, sender identity, leave-event revocation');

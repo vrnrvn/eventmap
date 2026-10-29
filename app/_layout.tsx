@@ -47,7 +47,10 @@ function handleNotificationData(data: Record<string, unknown> | null | undefined
   const linkUrl = data.linkUrl;
 
   if (typeof eventId === 'string' && eventId.length > 0) {
-    router.push(`/event/${eventId}` as never);
+    const isChat = data.kind === 'chat' || data.type === 'chat_message' || data.type === 'chat_mention';
+    const messageId = typeof data.messageId === 'string' ? data.messageId : null;
+    const chatPath = messageId ? `/event-chat/${eventId}?messageId=${messageId}` : `/event-chat/${eventId}`;
+    router.push((isChat ? chatPath : `/event/${eventId}`) as never);
     return;
   }
   if (typeof businessId === 'string' && businessId.length > 0) {

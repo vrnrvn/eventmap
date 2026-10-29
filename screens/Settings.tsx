@@ -44,6 +44,7 @@ import {
   FileText,
   Bell,
   ChevronRight,
+  MessageCircle,
 } from 'lucide-react-native';
 
 const Palette = {
@@ -120,6 +121,7 @@ export default function SettingsScreen() {
     eventUpdate: true,
     rsvp: true,
     nearbyEvent: true,
+    chatMessage: true,
     eventReminderEnabled: true,
     eventReminderMinutes: 60 as number | null,
   });
@@ -192,6 +194,7 @@ export default function SettingsScreen() {
         eventUpdate: prefs.event_update ?? true,
         rsvp: prefs.rsvp ?? true,
         nearbyEvent: prefs.nearby_event ?? true,
+        chatMessage: prefs.chat_message ?? true,
         eventReminderEnabled: profile.event_reminder_enabled ?? true,
         eventReminderMinutes: profile.event_reminder_minutes ?? 60,
       });
@@ -362,6 +365,7 @@ export default function SettingsScreen() {
         event_update: next.eventUpdate,
         rsvp: next.rsvp,
         nearby_event: next.nearbyEvent,
+        chat_message: next.chatMessage,
       };
       const reminderEnabled = next.eventReminderMinutes != null;
       const reminderMinutes = next.eventReminderMinutes ?? null;
@@ -1171,6 +1175,24 @@ export default function SettingsScreen() {
                     trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
                     thumbColor={
                       notificationForm.nearbyEvent ? Colors.primary : Colors.background.secondary
+                    }
+                  />
+                </View>
+                <View style={styles.fieldSeparator} />
+                <View style={styles.privacyRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <MessageCircle size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Event chat messages</Text>
+                    <Text style={styles.privacyDesc}>New messages in chats for events you&apos;re going to</Text>
+                  </View>
+                  <Switch
+                    value={notificationForm.chatMessage}
+                    onValueChange={(v) => handleNotificationToggle('chatMessage', v)}
+                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    thumbColor={
+                      notificationForm.chatMessage ? Colors.primary : Colors.background.secondary
                     }
                   />
                 </View>

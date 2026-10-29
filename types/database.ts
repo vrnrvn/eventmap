@@ -192,10 +192,15 @@ export type EventChatMessage = {
   body: string;
   created_at: string;
   deleted_at: string | null;
+  /** Who removed it (sender, host or admin); null for automatic hides. */
+  deleted_by: string | null;
+  mentions: string[];
 };
 
 export type EventChatMessageWithSender = EventChatMessage & {
   sender: Pick<Profile, 'id' | 'name' | 'avatar_url'> | null;
+  /** Display names for `mentions`, used to highlight @Name spans. */
+  mention_names: Record<string, string>;
 };
 
 export type RankedEvent = Omit<Event, 'updated_at'> & {

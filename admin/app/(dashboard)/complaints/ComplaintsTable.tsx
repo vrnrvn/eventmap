@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 
 type Complaint = {
@@ -86,7 +87,7 @@ export function ComplaintsTable({ complaints }: { complaints: Complaint[] }) {
                 <tr key={c.id} className="border-t border-zinc-200">
                   <td className="px-4 py-3 text-zinc-600">{getReporterName(c)}</td>
                   <td className="px-4 py-3">
-                    <span className="font-mono text-xs">{c.target_type}</span>:{' '}
+                    <span className="font-mono text-xs">{c.target_type === 'chat_message' ? 'chat message' : c.target_type}</span>:{' '}
                     <span className="font-mono text-xs text-zinc-500">{c.target_id.slice(0, 8)}…</span>
                   </td>
                   <td className="max-w-xs truncate px-4 py-3 text-zinc-600" title={c.reason ?? ''}>
@@ -109,7 +110,11 @@ export function ComplaintsTable({ complaints }: { complaints: Complaint[] }) {
                     {new Date(c.created_at).toLocaleString()}
                   </td>
                   <td className="px-4 py-3">
-                    {loading === c.id ? (
+                    {c.target_type === 'chat_message' ? (
+                      <Link href="/chat-moderation" className="text-blue-600 hover:underline">
+                        Review in chat moderation →
+                      </Link>
+                    ) : loading === c.id ? (
                       <span className="text-zinc-400">...</span>
                     ) : status === 'pending' ? (
                       <span className="space-x-2">

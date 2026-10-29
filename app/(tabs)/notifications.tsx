@@ -17,6 +17,8 @@ import {
   BellRing,
   ChevronRight,
   History,
+  MessageCircle,
+  AtSign,
 } from 'lucide-react-native';
 import { Colors, Typography, BorderRadius } from '@/constants/theme';
 import {
@@ -80,6 +82,10 @@ const getIconMeta = (type: NotificationType) => {
       return { kind: 'icon' as const, Icon: RefreshCcw, bg: Palette.readIconBg, color: Palette.subtle };
     case 'promotion':
       return { kind: 'icon' as const, Icon: BellRing, bg: 'rgba(180, 25, 36, 0.08)', color: Palette.primary };
+    case 'chat_message':
+      return { kind: 'icon' as const, Icon: MessageCircle, bg: 'rgba(180, 25, 36, 0.08)', color: Palette.primary };
+    case 'chat_mention':
+      return { kind: 'icon' as const, Icon: AtSign, bg: 'rgba(180, 25, 36, 0.08)', color: Palette.primary };
     default:
       return { kind: 'icon' as const, Icon: Mail, bg: 'rgba(180, 25, 36, 0.08)', color: Palette.primary };
   }
@@ -157,7 +163,13 @@ export default function NotificationsScreen() {
     (notification: Notification) => {
       if (!notification.read) markAsRead(notification.id);
       if (notification.eventId) {
-        router.push(`/event/${notification.eventId}` as never);
+        const isChat = notification.type === 'chat_message' || notification.type === 'chat_mention';
+        const path = isChat
+          ? notification.messageId
+            ? `/event-chat/${notification.eventId}?messageId=${notification.messageId}`
+            : `/event-chat/${notification.eventId}`
+          : `/event/${notification.eventId}`;
+        router.push(path as never);
         return;
       }
       if (notification.businessId) {

@@ -340,32 +340,94 @@ export type Database = {
           },
         ]
       }
+      event_chat_blocks: {
+        Row: {
+          blocked_by: string
+          created_at: string
+          event_id: string
+          expires_at: string | null
+          reason: string | null
+          user_id: string
+        }
+        Insert: {
+          blocked_by: string
+          created_at?: string
+          event_id: string
+          expires_at?: string | null
+          reason?: string | null
+          user_id: string
+        }
+        Update: {
+          blocked_by?: string
+          created_at?: string
+          event_id?: string
+          expires_at?: string | null
+          reason?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_chat_blocks_blocked_by_fkey"
+            columns: ["blocked_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_chat_blocks_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_chat_blocks_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       event_chat_messages: {
         Row: {
           body: string
           created_at: string
           deleted_at: string | null
+          deleted_by: string | null
           event_id: string
           id: string
+          mentions: string[]
           sender_id: string
         }
         Insert: {
           body: string
           created_at?: string
           deleted_at?: string | null
+          deleted_by?: string | null
           event_id: string
           id?: string
+          mentions?: string[]
           sender_id: string
         }
         Update: {
           body?: string
           created_at?: string
           deleted_at?: string | null
+          deleted_by?: string | null
           event_id?: string
           id?: string
+          mentions?: string[]
           sender_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "event_chat_messages_deleted_by_fkey"
+            columns: ["deleted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "event_chat_messages_event_id_fkey"
             columns: ["event_id"]
@@ -376,6 +438,169 @@ export type Database = {
           {
             foreignKeyName: "event_chat_messages_sender_id_fkey"
             columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      event_chat_moderation_actions: {
+        Row: {
+          action: string
+          actor_id: string | null
+          created_at: string
+          event_id: string
+          id: string
+          message_id: string | null
+          reason: string | null
+          target_user_id: string | null
+        }
+        Insert: {
+          action: string
+          actor_id?: string | null
+          created_at?: string
+          event_id: string
+          id?: string
+          message_id?: string | null
+          reason?: string | null
+          target_user_id?: string | null
+        }
+        Update: {
+          action?: string
+          actor_id?: string | null
+          created_at?: string
+          event_id?: string
+          id?: string
+          message_id?: string | null
+          reason?: string | null
+          target_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_chat_moderation_actions_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_chat_moderation_actions_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_chat_moderation_actions_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "event_chat_messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_chat_moderation_actions_target_user_id_fkey"
+            columns: ["target_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      event_chat_reads: {
+        Row: {
+          event_id: string
+          last_read_at: string
+          muted: boolean
+          user_id: string
+        }
+        Insert: {
+          event_id: string
+          last_read_at?: string
+          muted?: boolean
+          user_id: string
+        }
+        Update: {
+          event_id?: string
+          last_read_at?: string
+          muted?: boolean
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_chat_reads_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_chat_reads_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      event_chat_removed_bodies: {
+        Row: {
+          body: string
+          message_id: string
+          removed_at: string
+        }
+        Insert: {
+          body: string
+          message_id: string
+          removed_at?: string
+        }
+        Update: {
+          body?: string
+          message_id?: string
+          removed_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_chat_removed_bodies_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: true
+            referencedRelation: "event_chat_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      event_chat_settings: {
+        Row: {
+          event_id: string
+          locked: boolean
+          slow_mode_seconds: number
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          event_id: string
+          locked?: boolean
+          slow_mode_seconds?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          event_id?: string
+          locked?: boolean
+          slow_mode_seconds?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_chat_settings_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: true
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_chat_settings_updated_by_fkey"
+            columns: ["updated_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -1047,15 +1272,83 @@ export type Database = {
         Args: { p_reason?: string; p_user_id: string }
         Returns: undefined
       }
+      admin_count_pending_chat_reports: { Args: never; Returns: number }
+      admin_dismiss_chat_reports: {
+        Args: { p_message_id: string }
+        Returns: number
+      }
+      admin_get_chat_moderation_log: {
+        Args: { p_limit?: number }
+        Returns: {
+          action: string
+          actor_id: string
+          actor_name: string
+          created_at: string
+          event_id: string
+          event_title: string
+          id: string
+          message_body: string
+          message_id: string
+          reason: string
+          target_user_id: string
+          target_user_name: string
+        }[]
+      }
+      admin_get_chat_report_details: {
+        Args: { p_message_id: string }
+        Returns: Json
+      }
+      admin_get_chat_reports: {
+        Args: { p_status?: string }
+        Returns: {
+          body: string
+          deleted_at: string
+          event_id: string
+          event_title: string
+          first_reported_at: string
+          last_reported_at: string
+          message_created_at: string
+          message_id: string
+          reasons: string[]
+          report_count: number
+          report_status: string
+          sender_banned: boolean
+          sender_blocked: boolean
+          sender_id: string
+          sender_name: string
+        }[]
+      }
       admin_reset_business_event_limit: {
         Args: { p_business_id: string }
         Returns: undefined
+      }
+      admin_resolve_chat_reports: {
+        Args: { p_message_id: string }
+        Returns: number
+      }
+      admin_restore_chat_message: {
+        Args: { p_message_id: string }
+        Returns: boolean
       }
       admin_set_business_premium: {
         Args: { p_business_id: string; p_is_premium: boolean }
         Returns: undefined
       }
       admin_unban_user: { Args: { p_user_id: string }; Returns: undefined }
+      block_event_chat_user:
+        | {
+            Args: { p_event_id: string; p_reason?: string; p_user_id: string }
+            Returns: undefined
+          }
+        | {
+            Args: {
+              p_duration_minutes?: number
+              p_event_id: string
+              p_reason?: string
+              p_user_id: string
+            }
+            Returns: undefined
+          }
       calculate_distance: {
         Args: { lat1: number; lat2: number; lng1: number; lng2: number }
         Returns: number
@@ -1082,6 +1375,14 @@ export type Database = {
         Returns: string
       }
       deactivate_push_token: { Args: { p_token: string }; Returns: undefined }
+      delete_event_chat_message: {
+        Args: { p_message_id: string }
+        Returns: boolean
+      }
+      dismiss_event_chat_reports: {
+        Args: { p_message_id: string }
+        Returns: number
+      }
       ensure_profile_exists: {
         Args: { p_name?: string; p_user_id: string }
         Returns: undefined
@@ -1093,6 +1394,76 @@ export type Database = {
       get_event_attendees_public: {
         Args: { event_uuid: string }
         Returns: Json
+      }
+      get_event_chat_messages: {
+        Args: {
+          event_uuid: string
+          p_before_created_at?: string
+          p_before_id?: string
+          p_limit?: number
+        }
+        Returns: {
+          body: string
+          created_at: string
+          deleted_at: string
+          deleted_by: string
+          event_id: string
+          id: string
+          mentions: string[]
+          sender_id: string
+        }[]
+      }
+      get_event_chat_messages_since: {
+        Args: { event_uuid: string; p_limit?: number; p_since: string }
+        Returns: {
+          body: string
+          created_at: string
+          deleted_at: string
+          deleted_by: string
+          event_id: string
+          id: string
+          mentions: string[]
+          sender_id: string
+        }[]
+      }
+      get_event_chat_post_status: {
+        Args: { event_uuid: string }
+        Returns: {
+          block_expires_at: string
+          can_post: boolean
+          can_read: boolean
+          is_admin: boolean
+          is_banned: boolean
+          is_blocked: boolean
+          is_host: boolean
+          last_post_at: string
+          last_read_at: string
+          locked: boolean
+          muted: boolean
+          slow_mode_seconds: number
+        }[]
+      }
+      get_event_chat_reported_messages: {
+        Args: { event_uuid: string }
+        Returns: {
+          body: string
+          created_at: string
+          deleted_at: string
+          last_reported_at: string
+          message_id: string
+          reasons: string[]
+          report_count: number
+          sender_id: string
+          sender_name: string
+        }[]
+      }
+      get_event_chat_unread_counts: {
+        Args: { p_event_ids?: string[] }
+        Returns: {
+          event_id: string
+          latest_message_at: string
+          unread_count: number
+        }[]
       }
       get_event_details: { Args: { event_uuid: string }; Returns: Json }
       get_ranked_events: {
@@ -1159,16 +1530,41 @@ export type Database = {
         Returns: Json
       }
       is_admin_user: { Args: never; Returns: boolean }
+      mark_event_chat_read: { Args: { p_event_id: string }; Returns: undefined }
       reset_monthly_event_counter: {
         Args: { business_uuid: string }
         Returns: undefined
+      }
+      restore_event_chat_message: {
+        Args: { p_message_id: string }
+        Returns: boolean
       }
       send_event_reminders: { Args: never; Returns: undefined }
       send_promotional_notification: {
         Args: { p_promotion_id: string }
         Returns: number
       }
+      set_event_chat_muted: {
+        Args: { p_event_id: string; p_muted: boolean }
+        Returns: undefined
+      }
+      set_event_chat_settings: {
+        Args: {
+          p_event_id: string
+          p_locked?: boolean
+          p_slow_mode_seconds?: number
+        }
+        Returns: undefined
+      }
+      stash_removed_chat_body: {
+        Args: { p_message_id: string }
+        Returns: undefined
+      }
       track_event_view: { Args: { event_uuid: string }; Returns: undefined }
+      unblock_event_chat_user: {
+        Args: { p_event_id: string; p_user_id: string }
+        Returns: undefined
+      }
       upsert_push_token:
         | {
             Args: { p_device_id?: string; p_platform?: string; p_token: string }
@@ -1187,6 +1583,12 @@ export type Database = {
         Args: { event_uuid: string }
         Returns: boolean
       }
+      user_is_banned: { Args: { p_user_id: string }; Returns: boolean }
+      user_is_blocked_from_event_chat: {
+        Args: { event_uuid: string; p_user_id: string }
+        Returns: boolean
+      }
+      user_is_event_host: { Args: { event_uuid: string }; Returns: boolean }
     }
     Enums: {
       [_ in never]: never

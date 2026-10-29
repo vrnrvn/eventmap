@@ -8,6 +8,7 @@ const navItems = [
   { href: '/businesses', label: 'Businesses' },
   { href: '/subscriptions', label: 'Subscriptions' },
   { href: '/complaints', label: 'Complaints' },
+  { href: '/chat-moderation', label: 'Chat moderation' },
   { href: '/banners', label: 'Banners/Ads' },
   { href: '/promotions', label: 'Promotions' },
   { href: '/refunds', label: 'Refunds' },
@@ -30,6 +31,11 @@ export default async function DashboardLayout({
 
   if (!profile?.is_admin) redirect('/unauthorized');
 
+  const { data: pendingChatReports } = await supabase.rpc('admin_count_pending_chat_reports');
+  const badges: Record<string, number> = {
+    '/chat-moderation': typeof pendingChatReports === 'number' ? pendingChatReports : 0,
+  };
+
   return (
     <div className="flex min-h-screen bg-zinc-50">
       <aside className="flex w-56 shrink-0 flex-col border-r border-zinc-200 bg-white">
@@ -43,9 +49,14 @@ export default async function DashboardLayout({
             <Link
               key={item.href}
               href={item.href}
-              className="block rounded-md px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"
+              className="flex items-center justify-between rounded-md px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900"
             >
-              {item.label}
+              <span>{item.label}</span>
+              {badges[item.href] ? (
+                <span className="rounded-full bg-amber-500 px-2 py-0.5 text-xs font-medium text-white">
+                  {badges[item.href]}
+                </span>
+              ) : null}
             </Link>
           ))}
         </nav>
