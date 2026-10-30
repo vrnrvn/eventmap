@@ -1,4 +1,4 @@
-import { View, Image, Text, StyleSheet, Dimensions } from 'react-native';
+import { View, Image, StyleSheet, Dimensions } from 'react-native';
 import Animated, {
   useAnimatedScrollHandler,
   useSharedValue,
@@ -7,6 +7,7 @@ import Animated, {
   Extrapolation,
 } from 'react-native-reanimated';
 import { Colors } from '@/constants/theme';
+import { EventmapCalendar } from '@/components/icons/EventmapIcons';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_WIDTH = SCREEN_WIDTH - 32;
@@ -96,7 +97,7 @@ function CarouselImage({
         <Image source={{ uri }} style={styles.image} resizeMode="cover" />
       ) : (
         <View style={[styles.image, styles.placeholder]}>
-          <Text style={styles.placeholderIcon}>📸</Text>
+          <EventmapCalendar size={40} color={Colors.text.tertiary} />
         </View>
       )}
     </Animated.View>
@@ -120,8 +121,5 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background.tertiary,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  placeholderIcon: {
-    fontSize: 48,
   },
 });

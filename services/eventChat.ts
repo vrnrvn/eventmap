@@ -188,16 +188,17 @@ async function hydrateMessages(
 
   if (staleIds.length > 0) {
     try {
-      const { data: profiles, error } = await supabase
-        .from('profiles')
-        .select('id,name,avatar_url')
-        .in('id', staleIds);
+      // The profiles table is owner-read-only; display identities come from
+      // the batch RPC instead.
+      const { data: profiles, error } = await supabase.rpc('get_profiles_display', {
+        user_ids: staleIds,
+      });
 
       if (error) throw error;
 
       const expiresAt = now + PROFILE_CACHE_TTL_MS;
       const fetched = new Map(
-        ((profiles as ChatProfile[]) || []).map((profile) => [profile.id, profile])
+        ((profiles as unknown as ChatProfile[]) || []).map((profile) => [profile.id, profile])
       );
       for (const senderId of staleIds) {
         profileCache.set(senderId, { profile: fetched.get(senderId) ?? null, expiresAt });
@@ -233,13 +234,14 @@ async function hydrateMessages(
 
 async function ensureProfiles(ids: string[]): Promise<void> {
   try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id,name,avatar_url')
-      .in('id', ids);
+    const { data, error } = await supabase.rpc('get_profiles_display', {
+      user_ids: ids,
+    });
     if (error) throw error;
     const expiresAt = Date.now() + PROFILE_CACHE_TTL_MS;
-    const fetched = new Map(((data as ChatProfile[]) || []).map((profile) => [profile.id, profile]));
+    const fetched = new Map(
+      ((data as unknown as ChatProfile[]) || []).map((profile) => [profile.id, profile])
+    );
     for (const id of ids) {
       profileCache.set(id, { profile: fetched.get(id) ?? null, expiresAt });
     }

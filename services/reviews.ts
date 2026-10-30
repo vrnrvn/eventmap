@@ -66,8 +66,7 @@ export const reviewsService = {
         text,
         business_response,
         created_at,
-        updated_at,
-        profiles:user_id (name, avatar_url)
+        updated_at
       `
       )
       .eq('business_id', businessId)
@@ -76,20 +75,33 @@ export const reviewsService = {
 
     if (error) throw error;
 
-    return (data || []).map((row: any) => {
-      const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
-      return {
-        id: row.id,
-        user_id: row.user_id,
-        business_id: row.business_id,
-        rating: row.rating,
-        text: row.text,
-        business_response: row.business_response,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        profile: profile || { name: 'User', avatar_url: null },
-      };
-    });
+    const rows = (data || []) as any[];
+    // Reviewer identities via RPC; the profiles table is owner-read-only.
+    const unique = Array.from(new Set(rows.map((row) => row.user_id)));
+    let profiles = new Map<string, { name: string; avatar_url: string | null }>();
+    if (unique.length > 0) {
+      const { data: display, error: displayError } = await supabase.rpc('get_profiles_display', {
+        user_ids: unique,
+      });
+      if (displayError) throw displayError;
+      profiles = new Map(
+        ((display as unknown as { id: string; name: string; avatar_url: string | null }[]) || []).map(
+          (row) => [row.id, { name: row.name, avatar_url: row.avatar_url }]
+        )
+      );
+    }
+
+    return rows.map((row) => ({
+      id: row.id,
+      user_id: row.user_id,
+      business_id: row.business_id,
+      rating: row.rating,
+      text: row.text,
+      business_response: row.business_response,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      profile: profiles.get(row.user_id) || { name: 'User', avatar_url: null },
+    }));
   },
 
   async getAverageRatingAndCount(businessId: string): Promise<AverageRatingResult> {

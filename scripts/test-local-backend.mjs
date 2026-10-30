@@ -62,6 +62,58 @@ try {
   const upcoming = ok(await alex.rpc('get_user_upcoming_events', { user_id_param: alexId }));
   assert.ok(upcoming.some((event) => event.id === eventId));
 
+  // --- Profile attendance: upcoming/past split, counts, server-side privacy, anonymous attendee ids ---
+  {
+    const going = ok(await alex.rpc('get_user_going_events', { user_id_param: alexId, p_scope: 'upcoming', p_limit: 50 }));
+    const mine = going.find((event) => event.id === eventId);
+    assert.ok(mine && mine.next_start_datetime, 'Upcoming rows include the event and a next occurrence');
+    assert.ok(!ok(await alex.rpc('get_user_going_events', { user_id_param: alexId, p_scope: 'past', p_limit: 50 })).some((event) => event.id === eventId), 'A future event is not in the past list');
+    const counts = ok(await alex.rpc('get_user_attendance_counts', { user_id_param: alexId }));
+    assert.ok(counts.upcoming_count >= 1, 'Owner sees an upcoming count');
+    assert.ok(ok(await sam.rpc('get_user_upcoming_events', { user_id_param: alexId })).some((event) => event.id === eventId), 'Public profile upcoming list is visible to others');
+    assert.equal(ok(await sam.rpc('get_user_past_events', { user_id_param: alexId })).length, 0, 'History is never visible to others');
+    assert.equal(ok(await sam.rpc('get_user_attendance_counts', { user_id_param: alexId })).attended_count, 0, 'Attended count is withheld from others');
+    assert.equal(ok(await anonymous.rpc('get_user_upcoming_events', { user_id_param: alexId })).length, 0, 'Anonymous callers get nothing');
+
+    ok(await alex.from('profiles').update({ is_profile_private: true }).eq('id', alexId));
+    try {
+      assert.equal(ok(await sam.rpc('get_user_upcoming_events', { user_id_param: alexId })).length, 0, 'Private profile hides the upcoming list server-side');
+      assert.equal(ok(await sam.rpc('get_user_attendance_counts', { user_id_param: alexId })).upcoming_count, 0, 'Private profile hides counts server-side');
+      assert.ok(ok(await alex.rpc('get_user_upcoming_events', { user_id_param: alexId })).some((event) => event.id === eventId), 'Owner still sees own list while private');
+      const attendees = ok(await sam.rpc('get_event_attendees_public', { event_uuid: eventId }));
+      const anon = attendees.find((row) => row.is_anonymous);
+      assert.ok(anon, 'Private attendee is listed anonymously');
+      assert.ok(!anon.id.includes(alexId) && anon.id.startsWith('anon-') && anon.avatar_url === null, 'Anonymous attendee id does not expose the user id');
+    } finally {
+      ok(await alex.from('profiles').update({ is_profile_private: false }).eq('id', alexId));
+    }
+    assert.ok(ok(await sam.rpc('get_event_attendees_public', { event_uuid: eventId })).some((row) => row.id === alexId && !row.is_anonymous), 'Public attendee is listed with the real id again');
+    const badScope = await alex.rpc('get_user_going_events', { user_id_param: alexId, p_scope: 'everything' });
+    assert.ok(badScope.error, 'Invalid scope is rejected');
+    ok(await alex.from('saves').upsert({ event_id: eventId, user_id: alexId }, { onConflict: 'user_id,event_id' }));
+    const saved = ok(await alex.rpc('get_user_saved_events', {}));
+    assert.ok(saved.some((event) => event.id === eventId && event.has_ended === false && event.saved_at), 'Saved events come back from one RPC with status fields');
+    assert.ok(ok(await alex.rpc('get_user_attendance_counts', { user_id_param: alexId })).saved_count >= 1, 'Owner sees a saved count');
+    assert.ok(!ok(await sam.rpc('get_user_saved_events', {})).some((event) => event.id === eventId), 'Saved events are caller-scoped');
+    ok(await alex.from('saves').delete().eq('event_id', eventId).eq('user_id', alexId));
+
+    // Interested RSVPs: owner-only list and count
+    ok(await alex.from('rsvps').upsert({ event_id: eventId, user_id: alexId, status: 'interested' }, { onConflict: 'user_id,event_id' }));
+    assert.ok(ok(await alex.rpc('get_user_going_events', { user_id_param: alexId, p_scope: 'interested' })).some((event) => event.id === eventId), 'Owner sees interested list');
+    assert.equal(ok(await sam.rpc('get_user_going_events', { user_id_param: alexId, p_scope: 'interested' })).length, 0, 'Interested list is owner-only');
+    assert.ok(ok(await alex.rpc('get_user_attendance_counts', { user_id_param: alexId })).interested_count >= 1, 'Owner sees interested count');
+    ok(await alex.from('rsvps').upsert({ event_id: eventId, user_id: alexId, status: 'going' }, { onConflict: 'user_id,event_id' }));
+
+    // Profiles table lockdown: only own row readable; RPCs provide the rest
+    assert.equal(ok(await sam.from('profiles').select('id').eq('id', alexId)).length, 0, 'Other users cannot read profile rows directly');
+    assert.equal(ok(await alex.from('profiles').select('id').eq('id', alexId)).length, 1, 'Owner still reads own profile row');
+    const pub = ok(await sam.rpc('get_public_profile', { user_id_param: alexId }));
+    assert.ok(pub && pub.is_private === false && pub.profile?.name && pub.profile.is_admin === undefined && pub.profile.lat === undefined, 'Public profile RPC returns safe columns only');
+    const display = ok(await sam.rpc('get_profiles_display', { user_ids: [alexId, samId] }));
+    assert.equal(display.length, 2, 'Display RPC resolves names for chat and lists');
+    console.log('PASS: attendance lists, counts, privacy enforcement, anonymous attendee ids');
+  }
+
   let received;
   const delivery = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Realtime message not received')), 15000);

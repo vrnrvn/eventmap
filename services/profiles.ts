@@ -34,33 +34,24 @@ export const profilesService = {
     return this.getProfile(user.id);
   },
 
+  /**
+   * Another user's profile through the privacy-aware RPC. The profiles table
+   * itself is readable only by its owner (and admins), so this is the one way
+   * to see someone else's name, bio, and socials.
+   */
   async getPublicProfile(userId: string): Promise<PublicProfileResult | null> {
-    const { data: check, error: checkErr } = await supabase
-      .from('profiles')
-      .select('id, is_profile_private, show_future_events')
-      .eq('id', userId)
-      .maybeSingle();
-
-    if (checkErr) throw checkErr;
-    if (!check) return null;
-
-    if (check.is_profile_private) {
-      return { isPrivate: true };
-    }
-
-    const { data: full, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle();
+    const { data, error } = await supabase.rpc('get_public_profile', {
+      user_id_param: userId,
+    });
 
     if (error) throw error;
-    if (!full) return null;
+    if (!data) return null;
 
-    return {
-      isPrivate: false,
-      profile: full as Profile,
-    };
+    const raw = data as { is_private: boolean; profile?: Partial<Profile> };
+    if (raw.is_private || !raw.profile) {
+      return { isPrivate: true };
+    }
+    return { isPrivate: false, profile: raw.profile as Profile };
   },
 
   async updateProfile(

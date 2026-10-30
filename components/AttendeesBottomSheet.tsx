@@ -1,4 +1,4 @@
-import React, { forwardRef, useImperativeHandle, useRef, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,8 @@ import { PublicAttendee } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const PAGE_SIZE = 30;
+const SEARCH_DEBOUNCE_MS = 300;
 
 export type AttendeesBottomSheetHandle = {
   present: () => void;
@@ -26,54 +28,105 @@ export type AttendeesBottomSheetHandle = {
 
 type AttendeesBottomSheetProps = {
   eventId: string;
-  rsvpCount: number;
+  /** Bump to make an open sheet refetch (e.g. after the viewer's own RSVP changed). */
+  refreshToken?: number;
 };
 
+/**
+ * Paginated "Who's going" list. Owns its own data: pages of 30 from the
+ * attendees RPC, server-side name search, and load-more on scroll.
+ */
 export const AttendeesBottomSheet = forwardRef<
   AttendeesBottomSheetHandle,
   AttendeesBottomSheetProps
->(function AttendeesBottomSheet({ eventId, rsvpCount }, ref) {
+>(function AttendeesBottomSheet({ eventId, refreshToken = 0 }, ref) {
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const insets = useSafeAreaInsets();
-  const [attendees, setAttendees] = useState<PublicAttendee[]>([]);
+  const [items, setItems] = useState<PublicAttendee[]>([]);
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeSearch, setActiveSearch] = useState('');
+  const isOpenRef = useRef(false);
+  const requestSeq = useRef(0);
 
-  const filteredAttendees = searchQuery.trim()
-    ? attendees.filter(
-        (a) =>
-          a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (!a.is_anonymous && a.bio && a.bio.toLowerCase().includes(searchQuery.toLowerCase()))
-      )
-    : attendees;
-
-  const loadAttendees = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const list = await socialService.getEventAttendees(eventId);
-      setAttendees(list);
-    } catch (e) {
-      setError('Failed to load attendees');
-      setAttendees([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const loadPage = useCallback(
+    async (offset: number, search: string) => {
+      const seq = ++requestSeq.current;
+      if (offset === 0) setLoading(true);
+      else setLoadingMore(true);
+      try {
+        const page = await socialService.getEventAttendeesPage(eventId, {
+          limit: PAGE_SIZE,
+          offset,
+          search,
+        });
+        if (seq !== requestSeq.current) return;
+        setItems((prev) => {
+          if (offset === 0) return page.items;
+          const seen = new Set(prev.map((a) => a.id));
+          return [...prev, ...page.items.filter((a) => !seen.has(a.id))];
+        });
+        setTotal(page.total);
+        setHasMore(page.has_more);
+        setError(null);
+      } catch {
+        if (seq !== requestSeq.current) return;
+        setError('Failed to load attendees');
+        if (offset === 0) setItems([]);
+        setHasMore(false);
+      } finally {
+        if (seq === requestSeq.current) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      }
+    },
+    [eventId]
+  );
 
   useImperativeHandle(ref, () => ({
-    present: async () => {
+    // Open immediately so the tap gets instant feedback; the list shows its own spinner.
+    present: () => {
+      isOpenRef.current = true;
       setSearchQuery('');
-      await loadAttendees();
+      setActiveSearch('');
       bottomSheetRef.current?.present();
+      void loadPage(0, '');
     },
     dismiss: () => bottomSheetRef.current?.dismiss(),
   }));
 
+  // Debounced server-side search while open.
+  useEffect(() => {
+    if (!isOpenRef.current) return;
+    const next = searchQuery.trim();
+    const timer = setTimeout(() => {
+      if (next !== activeSearch) {
+        setActiveSearch(next);
+        void loadPage(0, next);
+      }
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchQuery, activeSearch, loadPage]);
+
+  // Parent signals that the list changed (viewer joined or left).
+  useEffect(() => {
+    if (refreshToken > 0 && isOpenRef.current) void loadPage(0, activeSearch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshToken]);
+
   const handleAttendeePress = (userId: string) => {
     bottomSheetRef.current?.dismiss();
     router.push(`/user/${userId}` as any);
+  };
+
+  const onEndReached = () => {
+    if (loading || loadingMore || !hasMore) return;
+    void loadPage(items.length, activeSearch);
   };
 
   const renderItem = ({ item }: { item: PublicAttendee }) => (
@@ -82,6 +135,8 @@ export const AttendeesBottomSheet = forwardRef<
       onPress={() => !item.is_anonymous && handleAttendeePress(item.id)}
       activeOpacity={item.is_anonymous ? 1 : 0.7}
       disabled={item.is_anonymous}
+      accessibilityRole={item.is_anonymous ? undefined : 'button'}
+      accessibilityLabel={item.is_anonymous ? 'Anonymous attendee' : `View ${item.name}'s profile`}
     >
       <Avatar imageUrl={item.avatar_url} name={item.name} size={44} />
       <View style={styles.rowText}>
@@ -89,7 +144,9 @@ export const AttendeesBottomSheet = forwardRef<
           {item.name}
         </Text>
         {item.bio && !item.is_anonymous ? (
-          <Text style={styles.bio}>{item.bio}</Text>
+          <Text style={styles.bio} numberOfLines={1}>
+            {item.bio}
+          </Text>
         ) : null}
       </View>
     </TouchableOpacity>
@@ -108,6 +165,21 @@ export const AttendeesBottomSheet = forwardRef<
       return (
         <View style={styles.centerState}>
           <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity
+            onPress={() => void loadPage(0, activeSearch)}
+            style={styles.retryButton}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+          >
+            <Text style={styles.retryText}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    if (activeSearch) {
+      return (
+        <View style={styles.centerState}>
+          <Text style={styles.emptySubtitle}>No attendees match “{activeSearch}”</Text>
         </View>
       );
     }
@@ -119,6 +191,14 @@ export const AttendeesBottomSheet = forwardRef<
     );
   };
 
+  const subtitle = loading
+    ? 'Loading…'
+    : activeSearch
+      ? `${total} ${total === 1 ? 'match' : 'matches'}`
+      : total > 0
+        ? `${total} going`
+        : '';
+
   return (
     <BottomSheetModal
       ref={bottomSheetRef}
@@ -126,31 +206,65 @@ export const AttendeesBottomSheet = forwardRef<
       index={0}
       enablePanDownToClose
       enableDismissOnClose
+      onDismiss={() => {
+        isOpenRef.current = false;
+      }}
       handleIndicatorStyle={styles.handleIndicator}
       backgroundStyle={styles.background}
     >
       <View style={[styles.header, { paddingTop: insets.top || Spacing.md }]}>
-        <Text style={styles.title}>Who's Going</Text>
+        <Text style={styles.title}>Who&apos;s Going</Text>
+        {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
         <View style={styles.searchRow}>
           <Search size={18} color={Colors.text.tertiary} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search attendees..."
+            placeholder="Search by name..."
             placeholderTextColor={Colors.text.tertiary}
             value={searchQuery}
             onChangeText={setSearchQuery}
+            autoCorrect={false}
+            accessibilityLabel="Search attendees by name"
           />
+          {searchQuery ? (
+            <TouchableOpacity
+              onPress={() => setSearchQuery('')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+            >
+              <Text style={styles.clearText}>Clear</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
       <BottomSheetFlatList
-        data={filteredAttendees}
+        data={items}
         keyExtractor={(item: PublicAttendee) => item.id}
         renderItem={renderItem}
         ListEmptyComponent={renderEmpty}
+        ListFooterComponent={
+          loadingMore ? (
+            <ActivityIndicator size="small" color={Colors.primary} style={styles.footerSpinner} />
+          ) : hasMore ? (
+            <TouchableOpacity
+              onPress={onEndReached}
+              style={styles.loadMore}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Load more attendees"
+            >
+              <Text style={styles.loadMoreText}>Show more ({total - items.length} left)</Text>
+            </TouchableOpacity>
+          ) : null
+        }
+        onEndReached={onEndReached}
+        onEndReachedThreshold={0.4}
         contentContainerStyle={[
           styles.listContent,
-          filteredAttendees.length === 0 && styles.listContentEmpty,
+          items.length === 0 && styles.listContentEmpty,
         ]}
+        keyboardShouldPersistTaps="handled"
       />
     </BottomSheetModal>
   );
@@ -172,9 +286,14 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
-    marginBottom: Spacing.md,
+  },
+  subtitle: {
+    marginTop: 2,
+    fontSize: Typography.sizes.sm,
+    color: Colors.text.secondary,
   },
   searchRow: {
+    marginTop: Spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.sm,
@@ -188,6 +307,12 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.md,
     color: Colors.text.primary,
     paddingVertical: 0,
+  },
+  clearText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
   },
   listContent: {
     paddingHorizontal: Spacing.xl,
@@ -233,6 +358,19 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.md,
     color: Colors.error,
   },
+  retryButton: {
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.background.secondary,
+  },
+  retryText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+  },
   emptyTitle: {
     marginTop: Spacing.md,
     fontSize: Typography.sizes.lg,
@@ -244,5 +382,22 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xs,
     fontSize: Typography.sizes.sm,
     color: Colors.text.secondary,
+  },
+  footerSpinner: {
+    paddingVertical: Spacing.lg,
+  },
+  loadMore: {
+    alignSelf: 'center',
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm + 2,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.background.secondary,
+  },
+  loadMoreText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
   },
 });

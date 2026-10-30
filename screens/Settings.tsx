@@ -27,6 +27,8 @@ import { profileLocationStore } from '@/stores/profileLocationStore';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { clearOnboardingDraft } from '@/utils/onboardingDraft';
+import { confirmAction } from '@/utils/confirm';
 import {
   ArrowLeft,
   User,
@@ -41,6 +43,7 @@ import {
   Check,
   Image as ImageIcon,
   Shield,
+  RotateCcw,
   FileText,
   Bell,
   ChevronRight,
@@ -123,6 +126,7 @@ export default function SettingsScreen() {
     nearbyEvent: true,
     chatMessage: true,
     eventReminderEnabled: true,
+    interestedReminder: true,
     eventReminderMinutes: 60 as number | null,
   });
 
@@ -197,6 +201,7 @@ export default function SettingsScreen() {
         chatMessage: prefs.chat_message ?? true,
         eventReminderEnabled: profile.event_reminder_enabled ?? true,
         eventReminderMinutes: profile.event_reminder_minutes ?? 60,
+        interestedReminder: prefs.interested_reminder ?? true,
       });
     }
   }, [profile]);
@@ -366,6 +371,7 @@ export default function SettingsScreen() {
         rsvp: next.rsvp,
         nearby_event: next.nearbyEvent,
         chat_message: next.chatMessage,
+        interested_reminder: next.interestedReminder,
       };
       const reminderEnabled = next.eventReminderMinutes != null;
       const reminderMinutes = next.eventReminderMinutes ?? null;
@@ -463,6 +469,24 @@ export default function SettingsScreen() {
       photosChanged
     );
   }, [userBusiness, businessForm]);
+
+  const handleRestartOnboarding = async () => {
+    if (!user) return;
+    const ok = await confirmAction({
+      title: 'Redo setup?',
+      message: 'Walk through the setup steps again. Your current answers are kept and shown as defaults.',
+      confirmLabel: 'Start',
+    });
+    if (!ok) return;
+    try {
+      await clearOnboardingDraft(user.id);
+      await profilesService.updateProfile(user.id, { has_completed_onboarding: false });
+      await refreshProfile();
+      router.replace('/(onboarding)' as never);
+    } catch {
+      Alert.alert('Error', 'Could not restart setup. Please try again.');
+    }
+  };
 
   const handleUnsubscribePremium = async () => {
     if (!userBusiness || !isPremium) return;
@@ -1046,7 +1070,7 @@ export default function SettingsScreen() {
                   <View style={styles.privacyContent}>
                     <Text style={styles.privacyTitle}>Allow others to see which events I attend?</Text>
                     <Text style={styles.privacyDesc}>
-                      Show your name in the "Who's Going" list when you RSVP
+                      Show your name in the &quot;Who&apos;s Going&quot; list when you RSVP
                     </Text>
                   </View>
                   <Switch
@@ -1068,7 +1092,7 @@ export default function SettingsScreen() {
                   <View style={styles.privacyContent}>
                     <Text style={styles.privacyTitle}>Show my upcoming events on my profile?</Text>
                     <Text style={styles.privacyDesc}>
-                      Display events you're planning to attend on your public profile
+                      Display events you&apos;re planning to attend on your public profile
                     </Text>
                   </View>
                   <Switch
@@ -1131,7 +1155,7 @@ export default function SettingsScreen() {
                   </View>
                   <View style={styles.privacyContent}>
                     <Text style={styles.privacyTitle}>Event updates</Text>
-                    <Text style={styles.privacyDesc}>When an event you RSVP'd to changes</Text>
+                    <Text style={styles.privacyDesc}>When an event you RSVP&apos;d to changes</Text>
                   </View>
                   <Switch
                     value={notificationForm.eventUpdate}
@@ -1202,9 +1226,29 @@ export default function SettingsScreen() {
                     <Bell size={16} color={accentColor} />
                   </View>
                   <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Interested nudge</Text>
+                    <Text style={styles.privacyDesc}>
+                      A &quot;still interested?&quot; note the day before events you marked
+                    </Text>
+                  </View>
+                  <Switch
+                    value={notificationForm.interestedReminder}
+                    onValueChange={(v) => handleNotificationToggle('interestedReminder', v)}
+                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    thumbColor={
+                      notificationForm.interestedReminder ? Colors.primary : Colors.background.secondary
+                    }
+                  />
+                </View>
+                <View style={styles.fieldSeparator} />
+                <View style={styles.privacyRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Bell size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
                     <Text style={styles.privacyTitle}>Event reminder</Text>
                     <Text style={styles.privacyDesc}>
-                      Remind me before events I'm attending
+                      Remind me before events I&apos;m attending
                     </Text>
                   </View>
                   <Switch
@@ -1306,6 +1350,29 @@ export default function SettingsScreen() {
                   <View style={styles.privacyContent}>
                     <Text style={styles.privacyTitle}>Disclaimers</Text>
                     <Text style={styles.privacyDesc}>Important notes about events, safety, and accuracy</Text>
+                  </View>
+                  <ChevronRight size={18} color={Colors.text.tertiary} />
+                </TouchableOpacity>
+              </View>
+
+              {/* ── Account Section ── */}
+              <View style={[styles.sectionLabelRow, { marginTop: 32 }]}>
+                <Text style={styles.sectionLabel}>Account</Text>
+              </View>
+              <View style={styles.card}>
+                <TouchableOpacity
+                  style={styles.aboutRow}
+                  onPress={handleRestartOnboarding}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Redo setup"
+                >
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <RotateCcw size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Redo setup</Text>
+                    <Text style={styles.privacyDesc}>Run the welcome steps again: photo, interests, privacy</Text>
                   </View>
                   <ChevronRight size={18} color={Colors.text.tertiary} />
                 </TouchableOpacity>

@@ -1,6 +1,24 @@
 import { supabase } from './supabase';
-import { RsvpStatus, Rsvp, Save, Follow, RankedEvent, PublicAttendee } from '@/types/database';
-import { eventsService } from './events';
+import {
+  RsvpStatus,
+  Rsvp,
+  Save,
+  Follow,
+  RankedEvent,
+  PublicAttendee,
+  AttendeesPage,
+} from '@/types/database';
+
+export type GoingEventsScope = 'upcoming' | 'past' | 'interested';
+
+export type AttendanceCounts = {
+  upcoming: number;
+  attended: number;
+  /** Owner-only; 0 for other viewers. */
+  saved: number;
+  /** Owner-only; 0 for other viewers. */
+  interested: number;
+};
 
 export const socialService = {
   async createOrUpdateRsvp(
@@ -58,6 +76,27 @@ export const socialService = {
     return data?.status === 'going' || data?.status === 'interested' ? data.status : null;
   },
 
+  /** One page of going attendees (named first, then anonymous), with optional name search. */
+  async getEventAttendeesPage(
+    eventId: string,
+    opts?: { limit?: number; offset?: number; search?: string | null }
+  ): Promise<AttendeesPage> {
+    const { data, error } = await supabase.rpc('get_event_attendees_page', {
+      event_uuid: eventId,
+      p_limit: opts?.limit ?? 30,
+      p_offset: opts?.offset ?? 0,
+      p_search: opts?.search?.trim() ? opts.search.trim() : null,
+    });
+
+    if (error) throw error;
+    const raw = (data ?? {}) as Partial<AttendeesPage>;
+    return {
+      total: Number(raw.total ?? 0),
+      items: (raw.items as PublicAttendee[]) ?? [],
+      has_more: !!raw.has_more,
+    };
+  },
+
   async getEventAttendees(eventId: string): Promise<PublicAttendee[]> {
     const { data, error } = await supabase.rpc('get_event_attendees_public', {
       event_uuid: eventId,
@@ -67,9 +106,22 @@ export const socialService = {
     return (data as PublicAttendee[]) || [];
   },
 
-  async getUserUpcomingEvents(userId: string): Promise<RankedEvent[]> {
-    const { data, error } = await supabase.rpc('get_user_upcoming_events', {
+  /**
+   * Events the user RSVP'd "going" to, split by whether the event is over
+   * (end time for one-off events, recurrence end date for recurring ones).
+   * Privacy is enforced server-side: other users only get the upcoming list
+   * of profiles that share it, and never the history.
+   */
+  async getUserGoingEvents(
+    userId: string,
+    scope: GoingEventsScope,
+    opts?: { limit?: number; offset?: number }
+  ): Promise<RankedEvent[]> {
+    const { data, error } = await supabase.rpc('get_user_going_events', {
       user_id_param: userId,
+      p_scope: scope,
+      p_limit: opts?.limit ?? 20,
+      p_offset: opts?.offset ?? 0,
     });
 
     if (error) throw error;
@@ -79,6 +131,41 @@ export const socialService = {
       distance_km: 0,
       is_premium: false,
     })) as RankedEvent[];
+  },
+
+  async getUserUpcomingEvents(
+    userId: string,
+    opts?: { limit?: number; offset?: number }
+  ): Promise<RankedEvent[]> {
+    return this.getUserGoingEvents(userId, 'upcoming', opts);
+  },
+
+  async getUserPastEvents(
+    userId: string,
+    opts?: { limit?: number; offset?: number }
+  ): Promise<RankedEvent[]> {
+    return this.getUserGoingEvents(userId, 'past', opts);
+  },
+
+  /** Upcoming and attended counts for a profile header. Attended is owner-only. */
+  async getUserAttendanceCounts(userId: string): Promise<AttendanceCounts> {
+    const { data, error } = await supabase.rpc('get_user_attendance_counts', {
+      user_id_param: userId,
+    });
+
+    if (error) throw error;
+    const raw = (data ?? {}) as {
+      upcoming_count?: number;
+      attended_count?: number;
+      saved_count?: number;
+      interested_count?: number;
+    };
+    return {
+      upcoming: Number(raw.upcoming_count ?? 0),
+      attended: Number(raw.attended_count ?? 0),
+      saved: Number(raw.saved_count ?? 0),
+      interested: Number(raw.interested_count ?? 0),
+    };
   },
 
   async getUserRsvps(): Promise<Rsvp[]> {
@@ -160,28 +247,23 @@ export const socialService = {
     return data || [];
   },
 
-  async getUserSavedEventsWithDetails(): Promise<RankedEvent[]> {
-    const saves = await this.getUserSavedEvents();
-    if (saves.length === 0) return [];
+  /** The caller's saved events in one round trip, upcoming first then past. */
+  async getUserSavedEventsWithDetails(opts?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<RankedEvent[]> {
+    const { data, error } = await supabase.rpc('get_user_saved_events', {
+      p_limit: opts?.limit ?? 50,
+      p_offset: opts?.offset ?? 0,
+    });
 
-    const events: RankedEvent[] = [];
-    for (const save of saves) {
-      const details = await eventsService.getEventDetails(save.event_id);
-      if (!details) continue;
-      const { event, business, category, rsvp_count, save_count } = details;
-      events.push({
-        ...event,
-        distance_km: 0,
-        is_premium: false,
-        rsvp_count,
-        save_count,
-        business_name: business.name,
-        business_logo_url: business.logo_url,
-        category_label: category.label,
-        category_slug: category.slug,
-      });
-    }
-    return events;
+    if (error) throw error;
+    const raw = (data as any[]) || [];
+    return raw.map((e) => ({
+      ...e,
+      distance_km: 0,
+      is_premium: false,
+    })) as RankedEvent[];
   },
 
   async followBusiness(businessId: string): Promise<void> {

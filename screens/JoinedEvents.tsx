@@ -1,0 +1,549 @@
+import { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  ActivityIndicator,
+  RefreshControl,
+  Image,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useAuth } from '@/contexts/AuthContext';
+import { socialService, type GoingEventsScope } from '@/services/social';
+import { eventChatService } from '@/services/eventChat';
+import { RankedEvent } from '@/types/database';
+import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { isEventInProgress } from '@/utils/eventStatus';
+import {
+  ArrowLeft,
+  CalendarDays,
+  ChevronRight,
+  MessageCircle,
+  Repeat,
+  History,
+} from 'lucide-react-native';
+
+const PAGE_SIZE = 20;
+
+type TabState = {
+  items: RankedEvent[];
+  loaded: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
+};
+
+const emptyTab = (): TabState => ({ items: [], loaded: false, loadingMore: false, hasMore: true });
+
+export default function JoinedEvents() {
+  const insets = useSafeAreaInsets();
+  const { user } = useAuth();
+  const params = useLocalSearchParams<{ tab?: string }>();
+  const initialScope: GoingEventsScope =
+    params.tab === 'past' || params.tab === 'interested' ? params.tab : 'upcoming';
+  const [scope, setScope] = useState<GoingEventsScope>(initialScope);
+  const [tabs, setTabs] = useState<Record<GoingEventsScope, TabState>>({
+    upcoming: emptyTab(),
+    interested: emptyTab(),
+    past: emptyTab(),
+  });
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [chatUnread, setChatUnread] = useState<Record<string, number>>({});
+  // Guards against a slow response for one tab overwriting a newer one.
+  const requestSeq = useRef<Record<GoingEventsScope, number>>({ upcoming: 0, interested: 0, past: 0 });
+
+  const userId = user?.id;
+  const current = tabs[scope];
+
+  const patchTab = useCallback((key: GoingEventsScope, patch: Partial<TabState>) => {
+    setTabs((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+  }, []);
+
+  const loadUnread = useCallback(async (events: RankedEvent[]) => {
+    const ids = events.map((event) => event.id);
+    if (ids.length === 0) return;
+    try {
+      const counts = await eventChatService.getUnreadCounts(ids);
+      setChatUnread((prev) => ({
+        ...prev,
+        ...Object.fromEntries(counts.map((row) => [row.event_id, row.unread_count])),
+      }));
+    } catch {
+      // Badges are best-effort.
+    }
+  }, []);
+
+  const loadPage = useCallback(
+    async (key: GoingEventsScope, offset: number) => {
+      if (!userId) return;
+      const seq = ++requestSeq.current[key];
+      if (offset > 0) patchTab(key, { loadingMore: true });
+      try {
+        const page = await socialService.getUserGoingEvents(userId, key, {
+          limit: PAGE_SIZE,
+          offset,
+        });
+        if (seq !== requestSeq.current[key]) return;
+        setError(null);
+        setTabs((prev) => {
+          const existing = offset === 0 ? [] : prev[key].items;
+          const seen = new Set(existing.map((event) => event.id));
+          const merged = [...existing, ...page.filter((event) => !seen.has(event.id))];
+          return {
+            ...prev,
+            [key]: { items: merged, loaded: true, loadingMore: false, hasMore: page.length >= PAGE_SIZE },
+          };
+        });
+        if (key === 'upcoming') void loadUnread(page);
+        // 'interested' and 'past' carry no chat badges.
+      } catch {
+        if (seq !== requestSeq.current[key]) return;
+        setError('Could not load your events. Pull to retry.');
+        patchTab(key, { loaded: true, loadingMore: false, hasMore: false });
+      }
+    },
+    [userId, patchTab, loadUnread]
+  );
+
+  // Fresh data every time the screen gains focus (RSVPs change elsewhere), and
+  // again when the user switches tabs since the callback identity changes.
+  useFocusEffect(
+    useCallback(() => {
+      void loadPage(scope, 0);
+    }, [loadPage, scope])
+  );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadPage(scope, 0);
+    setRefreshing(false);
+  }, [loadPage, scope]);
+
+  const onEndReached = useCallback(() => {
+    if (!current.loaded || current.loadingMore || !current.hasMore) return;
+    void loadPage(scope, current.items.length);
+  }, [current, loadPage, scope]);
+
+  const subtitle = useMemo(() => {
+    if (!current.loaded) return 'Loading…';
+    const n = `${current.items.length}${current.hasMore ? '+' : ''}`;
+    const noun = current.items.length === 1 ? 'event' : 'events';
+    if (scope === 'upcoming') return `${n} upcoming ${noun}`;
+    if (scope === 'interested') return `${n} ${noun} you're interested in`;
+    return `${n} attended ${noun}`;
+  }, [current, scope]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: RankedEvent }) => {
+      const when = scope === 'past' ? item.start_datetime : item.next_start_datetime || item.start_datetime;
+      const live = scope !== 'past' && isEventInProgress(item);
+      const unread = chatUnread[item.id] ?? 0;
+      return (
+        <TouchableOpacity
+          style={styles.card}
+          activeOpacity={0.85}
+          onPress={() => router.push(`/event/${item.id}`)}
+          accessibilityRole="button"
+          accessibilityLabel={`${item.title}, ${formatDateTime(when)}`}
+        >
+          {item.cover_image_url ? (
+            <Image source={{ uri: item.cover_image_url }} style={styles.thumb} />
+          ) : (
+            <View style={[styles.thumb, styles.thumbPlaceholder]}>
+              <CalendarDays size={22} color={Colors.primary} />
+            </View>
+          )}
+          <View style={styles.cardBody}>
+            <View style={styles.titleRow}>
+              <Text style={styles.title} numberOfLines={2}>
+                {item.title}
+              </Text>
+              {live ? (
+                <View style={styles.livePill}>
+                  <Text style={styles.livePillText}>LIVE</Text>
+                </View>
+              ) : null}
+              {unread > 0 ? (
+                <View style={styles.unreadBadge} accessibilityLabel={`${unread} unread chat messages`}>
+                  <MessageCircle size={10} color="#FFFFFF" />
+                  <Text style={styles.unreadText}>{unread > 99 ? '99+' : unread}</Text>
+                </View>
+              ) : null}
+            </View>
+            <Text style={styles.business} numberOfLines={1}>
+              {item.business_name}
+            </Text>
+            <View style={styles.metaRow}>
+              {item.is_recurring ? <Repeat size={12} color={Colors.text.tertiary} /> : <CalendarDays size={12} color={Colors.text.tertiary} />}
+              <Text style={styles.metaText} numberOfLines={1}>
+                {scope === 'past' ? formatDateTime(when) : `${formatDayLabel(when)} · ${formatTime(when)}`}
+                {item.is_recurring && scope !== 'past' ? ' · repeats' : ''}
+              </Text>
+            </View>
+          </View>
+          <ChevronRight size={18} color={Colors.border.medium} />
+        </TouchableOpacity>
+      );
+    },
+    [scope, chatUnread]
+  );
+
+  const renderEmpty = () => {
+    if (!current.loaded) {
+      return (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      );
+    }
+    if (error) {
+      return (
+        <View style={styles.center}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.center}>
+        <View style={styles.emptyIcon}>
+          {scope === 'upcoming' ? (
+            <CalendarDays size={28} color={Colors.primary} />
+          ) : (
+            <History size={28} color={Colors.primary} />
+          )}
+        </View>
+        <Text style={styles.emptyTitle}>
+          {scope === 'upcoming'
+            ? 'Nothing coming up'
+            : scope === 'interested'
+              ? 'No interested events'
+              : 'No past events yet'}
+        </Text>
+        <Text style={styles.emptyText}>
+          {scope === 'upcoming'
+            ? 'Events you RSVP to as going will show up here.'
+            : scope === 'interested'
+              ? 'Mark events as interested to keep an eye on them here.'
+              : 'Once an event you joined is over, it moves here.'}
+        </Text>
+        {scope !== 'past' ? (
+          <TouchableOpacity
+            style={styles.emptyButton}
+            onPress={() => router.push('/(tabs)/discover')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.emptyButtonText}>Discover events</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  };
+
+  return (
+    <View style={[styles.root, { paddingTop: insets.top }]}>
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.back()}
+          activeOpacity={0.7}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
+          <ArrowLeft size={22} color={Colors.text.primary} />
+        </TouchableOpacity>
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>Events Joined</Text>
+          <Text style={styles.headerSubtitle}>{subtitle}</Text>
+        </View>
+        <View style={styles.headerSpacer} />
+      </View>
+
+      <View style={styles.segment} accessibilityRole="tablist">
+        {(['upcoming', 'interested', 'past'] as GoingEventsScope[]).map((key) => {
+          const active = key === scope;
+          return (
+            <TouchableOpacity
+              key={key}
+              style={[styles.segmentItem, active && styles.segmentItemActive]}
+              onPress={() => setScope(key)}
+              activeOpacity={0.85}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+            >
+              <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                {key === 'upcoming' ? 'Going' : key === 'interested' ? 'Interested' : 'Attended'}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      <FlatList
+        data={current.items}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        ListEmptyComponent={renderEmpty}
+        contentContainerStyle={[
+          styles.listContent,
+          current.items.length === 0 && styles.listContentEmpty,
+          { paddingBottom: insets.bottom + 32 },
+        ]}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
+        }
+        onEndReached={onEndReached}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={
+          current.loadingMore ? (
+            <ActivityIndicator size="small" color={Colors.primary} style={styles.footerSpinner} />
+          ) : null
+        }
+        showsVerticalScrollIndicator={false}
+      />
+    </View>
+  );
+}
+
+function formatDateTime(value: string) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: d.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined,
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function formatTime(value: string) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+function formatDayLabel(value: string) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const today = new Date();
+  const tomorrow = new Date();
+  tomorrow.setDate(today.getDate() + 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: Colors.background.primary,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: Colors.background.secondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerCenter: {
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: Colors.text.primary,
+  },
+  headerSubtitle: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.text.tertiary,
+    marginTop: 1,
+  },
+  headerSpacer: {
+    width: 40,
+  },
+  segment: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginTop: 4,
+    marginBottom: 12,
+    padding: 4,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.background.secondary,
+  },
+  segmentItem: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: BorderRadius.round,
+    alignItems: 'center',
+  },
+  segmentItemActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  segmentText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+  },
+  segmentTextActive: {
+    color: Colors.text.primary,
+  },
+  listContent: {
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  listContentEmpty: {
+    flexGrow: 1,
+  },
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.06)',
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  thumb: {
+    width: 58,
+    height: 58,
+    borderRadius: 14,
+  },
+  thumbPlaceholder: {
+    backgroundColor: Colors.accentLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardBody: {
+    flex: 1,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  title: {
+    flexShrink: 1,
+    color: Colors.text.primary,
+    fontSize: 16,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+  },
+  livePill: {
+    paddingHorizontal: 6,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: Colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  livePillText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    letterSpacing: 1,
+    fontFamily: Typography.labelFontFamilies.semibold,
+  },
+  unreadBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    height: 18,
+    paddingHorizontal: 6,
+    borderRadius: 9999,
+    backgroundColor: Colors.primary,
+  },
+  unreadText: {
+    fontSize: 10,
+    lineHeight: 12,
+    color: '#FFFFFF',
+    fontFamily: Typography.labelFontFamilies.semibold,
+  },
+  business: {
+    marginTop: 2,
+    color: Colors.text.secondary,
+    fontSize: 12,
+    fontFamily: Typography.labelFontFamilies.medium,
+  },
+  metaRow: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  metaText: {
+    flexShrink: 1,
+    color: Colors.text.tertiary,
+    fontSize: 12,
+    fontFamily: Typography.labelFontFamilies.medium,
+  },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    paddingVertical: 48,
+  },
+  emptyIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: Colors.accentLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  emptyTitle: {
+    fontSize: Typography.sizes.lg,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: Colors.text.primary,
+  },
+  emptyText: {
+    marginTop: 6,
+    textAlign: 'center',
+    fontSize: Typography.sizes.sm,
+    color: Colors.text.secondary,
+    lineHeight: 20,
+  },
+  emptyButton: {
+    marginTop: 18,
+    paddingHorizontal: 20,
+    paddingVertical: 11,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.primary,
+  },
+  emptyButtonText: {
+    color: '#FFFFFF',
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+  },
+  errorText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.error,
+    textAlign: 'center',
+  },
+  footerSpinner: {
+    paddingVertical: Spacing.md,
+  },
+});

@@ -68,10 +68,12 @@ export default function UserProfile() {
     if (!id) return;
     try {
       if (isOwnProfile) {
-        const p = await profilesService.getProfile(id);
+        const [p, events] = await Promise.all([
+          profilesService.getProfile(id),
+          socialService.getUserUpcomingEvents(id),
+        ]);
         setProfile(p);
         setIsPrivate(false);
-        const events = await socialService.getUserUpcomingEvents(id);
         setUpcomingEvents(events);
       } else {
         const result = await profilesService.getPublicProfile(id);
@@ -105,7 +107,10 @@ export default function UserProfile() {
     }
   }, [id, isOwnProfile]);
 
+  // Reset to the loading state whenever the route id changes so a previous
+  // user's profile is not shown while the next one loads.
   useEffect(() => {
+    setLoading(true);
     load();
   }, [load]);
 
@@ -235,7 +240,7 @@ export default function UserProfile() {
 
         {upcomingEvents.length > 0 ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Events I'm Planning to Attend</Text>
+            <Text style={styles.sectionTitle}>Events I&apos;m Planning to Attend</Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={true}

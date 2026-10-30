@@ -4,6 +4,8 @@ export type SocialHandles = {
 };
 
 export type NotificationPreferences = {
+  /** "Still interested?" nudge the day before an event marked as interested. */
+  interested_reminder?: boolean;
   new_follower?: boolean;
   new_event_from_followed?: boolean;
   event_update?: boolean;
@@ -31,6 +33,12 @@ export type Profile = {
   event_reminder_enabled?: boolean;
   event_reminder_minutes?: number | null;
   created_at: string;
+};
+
+export type AttendeesPage = {
+  total: number;
+  items: PublicAttendee[];
+  has_more: boolean;
 };
 
 export type PublicAttendee = {
@@ -213,6 +221,11 @@ export type RankedEvent = Omit<Event, 'updated_at'> & {
   business_logo_url: string | null;
   category_label: string;
   category_slug: string;
+  /** Next occurrence for recurring events; equals start_datetime otherwise. Only set by the attendance RPCs. */
+  next_start_datetime?: string | null;
+  /** Set by get_user_saved_events. */
+  has_ended?: boolean;
+  saved_at?: string;
 };
 
 export type EventDetails = {

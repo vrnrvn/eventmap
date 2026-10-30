@@ -122,29 +122,23 @@ export const businessesService = {
     return count || 0;
   },
 
-  async getFollowers(businessId: string): Promise<Array<{ id: string; user_id: string; created_at: string; profile: { name: string; avatar_url: string | null } }>> {
+  async getFollowers(businessId: string): Promise<{ id: string; user_id: string; created_at: string; profile: { name: string; avatar_url: string | null } }[]> {
     const { data, error } = await supabase
       .from('follows')
-      .select(`
-        id,
-        user_id,
-        created_at,
-        profiles:user_id (name, avatar_url)
-      `)
+      .select('id, user_id, created_at')
       .eq('business_id', businessId)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
 
-    return (data || []).map((row: any) => {
-      const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
-      return {
-        id: row.id,
-        user_id: row.user_id,
-        created_at: row.created_at,
-        profile: profile || { name: 'User', avatar_url: null },
-      };
-    });
+    const rows = data || [];
+    const profiles = await fetchDisplayProfiles(rows.map((row) => row.user_id));
+    return rows.map((row) => ({
+      id: row.id,
+      user_id: row.user_id,
+      created_at: row.created_at,
+      profile: profiles.get(row.user_id) || { name: 'User', avatar_url: null },
+    }));
   },
 
   async getBusinessLinks(businessId: string): Promise<BusinessLink[]> {
@@ -188,3 +182,16 @@ export const businessesService = {
     if (error) throw error;
   },
 };
+
+// Display identities come from an RPC because the profiles table is readable
+// only by its owner.
+async function fetchDisplayProfiles(
+  userIds: string[]
+): Promise<Map<string, { name: string; avatar_url: string | null }>> {
+  const unique = Array.from(new Set(userIds));
+  if (unique.length === 0) return new Map();
+  const { data, error } = await supabase.rpc('get_profiles_display', { user_ids: unique });
+  if (error) throw error;
+  const rows = (data as unknown as { id: string; name: string; avatar_url: string | null }[]) || [];
+  return new Map(rows.map((row) => [row.id, { name: row.name, avatar_url: row.avatar_url }]));
+}

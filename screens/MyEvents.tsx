@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import { useApp } from '@/contexts/AppContext';
 import { eventsService } from '@/services/events';
+import { confirmAction } from '@/utils/confirm';
 import { Event } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import {
@@ -126,26 +127,20 @@ export default function MyEvents() {
     }, [hasBusiness, userBusiness?.id])
   );
 
-  const handleDeleteEvent = useCallback((event: Event) => {
-    Alert.alert(
-      'Delete Event',
-      `Delete "${event.title}"? This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await eventsService.deleteEvent(event.id);
-              setEvents((prev) => prev.filter((e) => e.id !== event.id));
-            } catch {
-              Alert.alert('Error', 'Failed to delete event');
-            }
-          },
-        },
-      ]
-    );
+  const handleDeleteEvent = useCallback(async (event: Event) => {
+    const ok = await confirmAction({
+      title: 'Delete Event',
+      message: `Delete "${event.title}"? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await eventsService.deleteEvent(event.id);
+      setEvents((prev) => prev.filter((e) => e.id !== event.id));
+    } catch {
+      Alert.alert('Error', 'Failed to delete event');
+    }
   }, []);
 
   const formatDate = (dateString: string) =>

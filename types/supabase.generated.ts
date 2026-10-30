@@ -1395,6 +1395,15 @@ export type Database = {
         Args: { event_uuid: string }
         Returns: Json
       }
+      get_event_attendees_page: {
+        Args: {
+          event_uuid: string
+          p_limit?: number
+          p_offset?: number
+          p_search?: string | null
+        }
+        Returns: Json
+      }
       get_event_chat_messages: {
         Args: {
           event_uuid: string
@@ -1528,6 +1537,48 @@ export type Database = {
       get_user_upcoming_events: {
         Args: { user_id_param: string }
         Returns: Json
+      }
+      get_user_going_events: {
+        Args: {
+          user_id_param: string
+          p_scope?: string
+          p_limit?: number
+          p_offset?: number
+        }
+        Returns: Json
+      }
+      get_user_past_events: {
+        Args: {
+          user_id_param: string
+          result_limit?: number
+          result_offset?: number
+        }
+        Returns: Json
+      }
+      get_user_attendance_counts: {
+        Args: { user_id_param: string }
+        Returns: Json
+      }
+      get_user_saved_events: {
+        Args: { p_limit?: number; p_offset?: number }
+        Returns: Json
+      }
+      get_public_profile: {
+        Args: { user_id_param: string }
+        Returns: Json
+      }
+      get_profiles_display: {
+        Args: { user_ids: string[] }
+        Returns: Json
+      }
+      can_view_user_events: { Args: { target_user: string }; Returns: boolean }
+      event_has_ended: {
+        Args: {
+          p_end_datetime: string
+          p_is_recurring: boolean
+          p_recurrence_pattern: Json
+        }
+        Returns: boolean
       }
       is_admin_user: { Args: never; Returns: boolean }
       mark_event_chat_read: { Args: { p_event_id: string }; Returns: undefined }

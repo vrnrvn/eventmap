@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,21 +8,23 @@ import {
   ActivityIndicator,
   RefreshControl,
   Platform,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { socialService } from '@/services/social';
+import { confirmAction } from '@/utils/confirm';
 import { RankedEvent } from '@/types/database';
-import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { Colors, Typography } from '@/constants/theme';
 import {
   ArrowLeft,
   Calendar,
-  MapPin,
   Bookmark,
   BookmarkX,
   ChevronRight,
   Users,
   Navigation,
+  Repeat,
 } from 'lucide-react-native';
 
 const Palette = {
@@ -40,26 +42,49 @@ export default function SavedEvents() {
   const [events, setEvents] = useState<RankedEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadSavedEvents();
-  }, []);
-
-  const loadSavedEvents = async () => {
+  const loadSavedEvents = useCallback(async () => {
     try {
       const list = await socialService.getUserSavedEventsWithDetails();
       setEvents(list);
-    } catch (error) {
-      console.error('Failed to load saved events:', error);
+      setError(null);
+    } catch {
+      setError('Could not load saved events. Pull to retry.');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  // Saves are toggled from event pages; refresh whenever we come back here.
+  useFocusEffect(
+    useCallback(() => {
+      void loadSavedEvents();
+    }, [loadSavedEvents])
+  );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     loadSavedEvents().finally(() => setRefreshing(false));
-  }, []);
+  }, [loadSavedEvents]);
+
+  const handleUnsave = useCallback(async (event: RankedEvent) => {
+    const ok = await confirmAction({
+      title: 'Remove saved event',
+      message: `Remove "${event.title}" from your saved events?`,
+      confirmLabel: 'Remove',
+      destructive: true,
+    });
+    if (!ok) return;
+    const previous = events;
+    setEvents((prev) => prev.filter((e) => e.id !== event.id));
+    try {
+      await socialService.unsaveEvent(event.id);
+    } catch {
+      setEvents(previous);
+      Alert.alert('Error', 'Failed to remove saved event');
+    }
+  }, [events]);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -72,6 +97,92 @@ export default function SavedEvents() {
     });
   };
 
+  const upcoming = events.filter((e) => !e.has_ended);
+  const past = events.filter((e) => e.has_ended);
+
+  const renderCard = (event: RankedEvent) => {
+    const ended = !!event.has_ended;
+    const when = ended ? event.start_datetime : event.next_start_datetime || event.start_datetime;
+    return (
+      <TouchableOpacity
+        key={event.id}
+        style={[styles.eventCard, ended && styles.eventCardPast]}
+        onPress={() => router.push(`/event/${event.id}` as never)}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel={`${event.title}, ${formatDate(when)}${ended ? ', ended' : ''}`}
+      >
+        <View style={[styles.savedStrip, ended && styles.savedStripPast]} />
+
+        <View style={styles.cardBody}>
+          <View style={styles.titleRow}>
+            <Text style={styles.eventTitle} numberOfLines={2}>
+              {event.title}
+            </Text>
+            <TouchableOpacity
+              style={styles.bookmarkBadge}
+              onPress={() => handleUnsave(event)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Remove from saved events"
+            >
+              <Bookmark size={14} color={Palette.gradientStart} fill={Palette.gradientStart} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.eventMeta}>
+            <View style={styles.metaRow}>
+              <View style={styles.metaIconWrap}>
+                {event.is_recurring ? (
+                  <Repeat size={13} color={Palette.gradientStart} />
+                ) : (
+                  <Calendar size={13} color={Palette.gradientStart} />
+                )}
+              </View>
+              <Text style={styles.metaText}>
+                {formatDate(when)}
+                {ended ? ' · Ended' : event.is_recurring ? ' · repeats' : ''}
+              </Text>
+            </View>
+
+            {event.distance_km > 0 && (
+              <View style={styles.metaRow}>
+                <View style={styles.metaIconWrap}>
+                  <Navigation size={13} color={Palette.gradientStart} />
+                </View>
+                <Text style={styles.metaText}>
+                  {event.distance_km < 1
+                    ? `${(event.distance_km * 1000).toFixed(0)} m away`
+                    : `${event.distance_km.toFixed(1)} km away`}
+                </Text>
+              </View>
+            )}
+
+            {event.rsvp_count > 0 && !ended && (
+              <View style={styles.metaRow}>
+                <View style={styles.metaIconWrap}>
+                  <Users size={13} color={Palette.gradientStart} />
+                </View>
+                <Text style={styles.metaText}>
+                  {event.rsvp_count} {event.rsvp_count === 1 ? 'person' : 'people'} going
+                </Text>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.cardFooter}>
+            <Text style={styles.businessName} numberOfLines={1}>
+              {event.business_name}
+            </Text>
+            <View style={styles.viewPill}>
+              <Text style={styles.viewPillText}>View</Text>
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       {/* ── Header ── */}
@@ -80,6 +191,8 @@ export default function SavedEvents() {
           style={styles.backBtn}
           onPress={() => router.back()}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <ArrowLeft size={22} color={Colors.text.primary} />
         </TouchableOpacity>
@@ -99,7 +212,6 @@ export default function SavedEvents() {
         <View style={styles.headerSpacer} />
       </View>
 
-      {/* ── Loading ── */}
       {loading ? (
         <View style={styles.centerContainer}>
           <View style={styles.loadingIconWrap}>
@@ -130,16 +242,18 @@ export default function SavedEvents() {
             />
           }
         >
-          {events.length === 0 ? (
-            /* ── Empty state ── */
+          {error ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : events.length === 0 ? (
             <View style={styles.emptyContainer}>
               <View style={styles.emptyIconWrap}>
                 <BookmarkX size={36} color={Palette.gradientStart} />
               </View>
               <Text style={styles.emptyTitle}>No Saved Events</Text>
               <Text style={styles.emptySubtitle}>
-                Events you bookmark will appear here.{'\n'}Start exploring to
-                find something you love!
+                Tap the bookmark on any event to keep it here for later.
               </Text>
               <TouchableOpacity
                 style={styles.exploreCta}
@@ -151,77 +265,17 @@ export default function SavedEvents() {
               </TouchableOpacity>
             </View>
           ) : (
-            /* ── Event list ── */
-            events.map((event, index) => (
-              <TouchableOpacity
-                key={event.id}
-                style={styles.eventCard}
-                onPress={() => router.push(`/event/${event.id}` as never)}
-                activeOpacity={0.8}
-              >
-                {/* Saved indicator */}
-                <View style={styles.savedStrip} />
-
-                <View style={styles.cardBody}>
-                  {/* Title row */}
-                  <View style={styles.titleRow}>
-                    <Text style={styles.eventTitle} numberOfLines={2}>
-                      {event.title}
-                    </Text>
-                    <View style={styles.bookmarkBadge}>
-                      <Bookmark size={14} color={Palette.gradientStart} />
-                    </View>
-                  </View>
-
-                  {/* Meta */}
-                  <View style={styles.eventMeta}>
-                    <View style={styles.metaRow}>
-                      <View style={styles.metaIconWrap}>
-                        <Calendar size={13} color={Palette.gradientStart} />
-                      </View>
-                      <Text style={styles.metaText}>
-                        {formatDate(event.start_datetime)}
-                      </Text>
-                    </View>
-
-                    {event.distance_km > 0 && (
-                      <View style={styles.metaRow}>
-                        <View style={styles.metaIconWrap}>
-                          <Navigation size={13} color={Palette.gradientStart} />
-                        </View>
-                        <Text style={styles.metaText}>
-                          {event.distance_km < 1
-                            ? `${(event.distance_km * 1000).toFixed(0)} m away`
-                            : `${event.distance_km.toFixed(1)} km away`}
-                        </Text>
-                      </View>
-                    )}
-
-                    {event.rsvp_count > 0 && (
-                      <View style={styles.metaRow}>
-                        <View style={styles.metaIconWrap}>
-                          <Users size={13} color={Palette.gradientStart} />
-                        </View>
-                        <Text style={styles.metaText}>
-                          {event.rsvp_count}{' '}
-                          {event.rsvp_count === 1 ? 'person' : 'people'} going
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-
-                  {/* Footer */}
-                  <View style={styles.cardFooter}>
-                    <Text style={styles.businessName} numberOfLines={1}>
-                      {event.business_name}
-                    </Text>
-                    <View style={styles.viewPill}>
-                      <Text style={styles.viewPillText}>View</Text>
-                    </View>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            ))
+            <>
+              {upcoming.map(renderCard)}
+              {past.length > 0 ? (
+                <>
+                  <Text style={styles.groupLabel}>
+                    {upcoming.length > 0 ? 'Already happened' : 'All of these have ended'}
+                  </Text>
+                  {past.map(renderCard)}
+                </>
+              ) : null}
+            </>
           )}
         </ScrollView>
       )}
@@ -237,6 +291,27 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.surfaceMuted,
   },
 
+  groupLabel: {
+    marginTop: 8,
+    marginBottom: 12,
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  eventCardPast: {
+    opacity: 0.72,
+  },
+  savedStripPast: {
+    backgroundColor: Colors.text.tertiary,
+  },
+  errorText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.error,
+    textAlign: 'center',
+  },
   /* ── Header ── */
   header: {
     flexDirection: 'row',

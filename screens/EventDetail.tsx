@@ -43,7 +43,6 @@ import {
   ExternalLink,
   Pencil,
   Trash2,
-  CheckCircle2,
   Star,
   Flag,
   Repeat,
@@ -53,11 +52,14 @@ import {
   TrendingUp,
   ChevronRight,
   MessageCircle,
+  Bookmark,
+  BookmarkCheck,
 } from 'lucide-react-native';
 import { EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView } from '@/components/GoogleMapView';
 import { complaintsService } from '@/services/complaints';
 import { getNextOccurrences, getRecurrenceLabel } from '@/utils/recurrence';
+import { hasEventEnded, isEventInProgress } from '@/utils/eventStatus';
 import { getEventWebUrl, getGoogleCalendarEventUrl } from '@/utils/eventShare';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -78,6 +80,9 @@ export default function EventDetail() {
   const [showReviewForm, setShowReviewForm] = useState(false);
   const attendeesSheetRef = useRef<AttendeesBottomSheetHandle>(null);
   const [previewAttendees, setPreviewAttendees] = useState<PublicAttendee[]>([]);
+  const [attendeesRefresh, setAttendeesRefresh] = useState(0);
+  const [togglingSave, setTogglingSave] = useState(false);
+  const hasLoadedRef = useRef(false);
   const [chatPreview, setChatPreview] = useState<EventChatMessageWithSender | null>(null);
   const [chatUnread, setChatUnread] = useState(0);
 
@@ -97,23 +102,59 @@ export default function EventDetail() {
     return urls;
   }, [details]);
 
-  useEffect(() => {
-    if (!id) return;
-    const load = async () => {
+  // Attendee list is owned here and shared by the preview faces and the sheet,
+  // so the event page makes one attendee request per refresh instead of two.
+  // Four faces for the preview row. The sheet fetches its own pages, so the
+  // event page never downloads the whole list; the parent only bumps
+  // attendeesRefresh when the viewer's own RSVP changes.
+  const loadAttendees = useCallback(
+    async (isCancelled: () => boolean = () => false) => {
+      if (!id) return;
       try {
-        const data = await eventsService.getEventDetails(id);
-        setDetails(data);
-        if (data) {
-          eventsService.trackEventView(id).catch(() => {});
-        }
+        const page = await socialService.getEventAttendeesPage(id, { limit: 4 });
+        if (isCancelled()) return;
+        setPreviewAttendees(page.items);
       } catch {
-        setDetails(null);
-      } finally {
-        setLoading(false);
+        if (isCancelled()) return;
+        setPreviewAttendees([]);
       }
-    };
-    load();
-  }, [id]);
+    },
+    [id]
+  );
+
+  // Details (RSVP state, counts) are re-fetched every time the screen gains
+  // focus, so returning from chat, attendee profiles, or the host's edit
+  // screen shows current data. Only the very first load shows the spinner.
+  useFocusEffect(
+    useCallback(() => {
+      if (!id) return;
+      let cancelled = false;
+      const load = async () => {
+        try {
+          const data = await eventsService.getEventDetails(id);
+          if (cancelled) return;
+          setDetails(data);
+          if (data && !hasLoadedRef.current) {
+            eventsService.trackEventView(id).catch(() => {});
+          }
+          hasLoadedRef.current = true;
+          if (data && data.rsvp_count > 0) {
+            void loadAttendees(() => cancelled);
+          } else if (data) {
+            setPreviewAttendees([]);
+          }
+        } catch {
+          if (!cancelled && !hasLoadedRef.current) setDetails(null);
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      };
+      load();
+      return () => {
+        cancelled = true;
+      };
+    }, [id, loadAttendees])
+  );
 
   // A one-line preview of the latest chat message for the chat-entry row.
   // Focus-driven so it also refreshes when the user comes back from the chat.
@@ -170,25 +211,6 @@ export default function EventDetail() {
     loadReviews();
   }, [businessId, user]);
 
-  useEffect(() => {
-    if (!id || !details || details.rsvp_count < 1) {
-      setPreviewAttendees([]);
-      return;
-    }
-    let cancelled = false;
-    socialService
-      .getEventAttendees(id)
-      .then((list) => {
-        if (!cancelled) setPreviewAttendees(list);
-      })
-      .catch(() => {
-        if (!cancelled) setPreviewAttendees([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id, details?.rsvp_count]);
-
   const handleReviewSubmit = async (rating: number, text: string) => {
     if (!businessId) return;
     await reviewsService.createOrUpdateReview(businessId, rating, text || null);
@@ -215,6 +237,10 @@ export default function EventDetail() {
       Alert.alert('Account Suspended', 'Your account has been suspended. Please contact support.');
       return;
     }
+    if (details && hasEventEnded(details.event)) {
+      Alert.alert('Event ended', 'This event is over, so it can no longer be joined.');
+      return;
+    }
     setSaving(true);
     try {
       await socialService.createOrUpdateRsvp(id, status);
@@ -235,6 +261,8 @@ export default function EventDetail() {
             }
           : null
       );
+      void loadAttendees();
+      setAttendeesRefresh((n) => n + 1);
     } catch {
       Alert.alert('Error', 'Failed to update RSVP');
     } finally {
@@ -257,10 +285,33 @@ export default function EventDetail() {
             }
           : null
       );
+      void loadAttendees();
+      setAttendeesRefresh((n) => n + 1);
     } catch {
       Alert.alert('Error', 'Failed to remove RSVP');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleToggleSave = async () => {
+    if (!user || !id || !details || togglingSave) return;
+    const wasSaved = details.user_saved;
+    setTogglingSave(true);
+    // Optimistic flip; revert on failure.
+    setDetails((d) =>
+      d ? { ...d, user_saved: !wasSaved, save_count: Math.max(0, d.save_count + (wasSaved ? -1 : 1)) } : d
+    );
+    try {
+      if (wasSaved) await socialService.unsaveEvent(id);
+      else await socialService.saveEvent(id);
+    } catch {
+      setDetails((d) =>
+        d ? { ...d, user_saved: wasSaved, save_count: Math.max(0, d.save_count + (wasSaved ? 1 : -1)) } : d
+      );
+      Alert.alert('Error', wasSaved ? 'Failed to remove from saved events' : 'Failed to save event');
+    } finally {
+      setTogglingSave(false);
     }
   };
 
@@ -375,6 +426,20 @@ export default function EventDetail() {
       hour: 'numeric',
       minute: '2-digit',
     });
+  const formatClock = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  // "1:00 PM – 3:00 PM"; for a recurring event the displayed start may be a later
+  // occurrence, so the end is shifted by the original duration.
+  const formatTimeRange = (startIso: string, endIso: string, originalStartIso: string) => {
+    const start = new Date(startIso);
+    const originalStart = new Date(originalStartIso);
+    const end = new Date(endIso);
+    if (Number.isNaN(start.getTime())) return '';
+    if (Number.isNaN(end.getTime()) || Number.isNaN(originalStart.getTime())) return formatClock(start);
+    const shiftedEnd = new Date(start.getTime() + (end.getTime() - originalStart.getTime()));
+    if (shiftedEnd.getTime() <= start.getTime()) return formatClock(start);
+    const multiDay = shiftedEnd.toDateString() !== start.toDateString();
+    return `${formatClock(start)} – ${multiDay ? formatDateTime(shiftedEnd.toISOString()) : formatClock(shiftedEnd)}`;
+  };
 
   if (loading) {
     return (
@@ -406,6 +471,16 @@ export default function EventDetail() {
   const canOpenEventChat = details.user_rsvp === 'going' && details.rsvp_count >= 2;
   const shouldShowEventChatPrompt = details.user_rsvp === 'going';
   const hasJoinedEvent = details.user_rsvp === 'going';
+  const eventEnded = hasEventEnded(event);
+  const eventLive = isEventInProgress(event);
+  // Recurring events that already started show their next occurrence in the
+  // header; everything else shows the scheduled start.
+  const displayStartIso = (() => {
+    if (!event.is_recurring || eventEnded) return event.start_datetime;
+    if (new Date(event.start_datetime).getTime() > Date.now()) return event.start_datetime;
+    const next = getNextOccurrences(event, 1)[0];
+    return next ? next.toISOString() : event.start_datetime;
+  })();
 
   return (
     <View style={styles.container}>
@@ -415,13 +490,32 @@ export default function EventDetail() {
             <ArrowLeft size={24} color={Colors.text.primary} />
           </TouchableOpacity>
           <Text style={styles.brandTitle}>EventMaps</Text>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={handleShareEvent}
-            accessibilityLabel="Share event"
-          >
-            <Share2 size={20} color={Colors.text.primary} />
-          </TouchableOpacity>
+          <View style={styles.heroTopActions}>
+            {user ? (
+              <TouchableOpacity
+                style={styles.backButton}
+                onPress={handleToggleSave}
+                disabled={togglingSave}
+                accessibilityRole="button"
+                accessibilityLabel={details.user_saved ? 'Remove from saved events' : 'Save event'}
+                accessibilityState={{ selected: details.user_saved }}
+              >
+                {details.user_saved ? (
+                  <BookmarkCheck size={20} color={Colors.primary} />
+                ) : (
+                  <Bookmark size={20} color={Colors.text.primary} />
+                )}
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={handleShareEvent}
+              accessibilityRole="button"
+              accessibilityLabel="Share event"
+            >
+              <Share2 size={20} color={Colors.text.primary} />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -482,8 +576,13 @@ export default function EventDetail() {
                 <EventmapCalendar size={18} color={Colors.primary} />
               </View>
               <View>
-                <Text style={styles.metaLabel}>Date</Text>
-                <Text style={styles.metaValue}>{formatDate(event.start_datetime)}</Text>
+                <Text style={styles.metaLabel}>
+                  {event.is_recurring && displayStartIso !== event.start_datetime ? 'Next date' : 'Date'}
+                </Text>
+                <Text style={styles.metaValue}>
+                  {formatDate(displayStartIso)}
+                  {eventLive ? '  ·  Happening now' : eventEnded ? '  ·  Ended' : ''}
+                </Text>
               </View>
             </View>
             <View style={styles.metaRow}>
@@ -492,7 +591,7 @@ export default function EventDetail() {
               </View>
               <View>
                 <Text style={styles.metaLabel}>Time</Text>
-                <Text style={styles.metaValue}>{formatDateTime(event.start_datetime)}</Text>
+                <Text style={styles.metaValue}>{formatTimeRange(displayStartIso, event.end_datetime, event.start_datetime)}</Text>
               </View>
             </View>
             {event.address && (
@@ -699,87 +798,14 @@ export default function EventDetail() {
             </View>
           )}
 
-          {user && !isOwner && (
-            <View style={styles.actionsSection}>
-              <View style={styles.actionRow}>
-                {details.user_rsvp ? (
-                  <>
-                    <TouchableOpacity
-                      style={[
-                        styles.actionButton,
-                        details.user_rsvp === 'going' && styles.actionButtonActive,
-                      ]}
-                      onPress={() => handleRsvp('going')}
-                      disabled={saving}
-                      activeOpacity={0.8}
-                    >
-                      <CheckCircle2
-                        size={22}
-                        color={details.user_rsvp === 'going' ? Colors.text.inverse : Colors.primary}
-                      />
-                      <Text
-                        style={[
-                          styles.actionButtonText,
-                          details.user_rsvp === 'going' && styles.actionButtonTextActive,
-                        ]}
-                      >
-                        Going
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.actionButton,
-                        details.user_rsvp === 'interested' && styles.actionButtonActive,
-                      ]}
-                      onPress={() => handleRsvp('interested')}
-                      disabled={saving}
-                      activeOpacity={0.8}
-                    >
-                      <Star
-                        size={22}
-                        color={details.user_rsvp === 'interested' ? Colors.text.inverse : Colors.primary}
-                      />
-                      <Text
-                        style={[
-                          styles.actionButtonText,
-                          details.user_rsvp === 'interested' && styles.actionButtonTextActive,
-                        ]}
-                      >
-                        Interested
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.actionButtonRemove}
-                      onPress={handleRemoveRsvp}
-                      disabled={saving}
-                      activeOpacity={0.8}
-                    >
-                      <Text style={styles.actionButtonRemoveText}>Remove</Text>
-                    </TouchableOpacity>
-                  </>
-                ) : (
-                  <>
-                    <TouchableOpacity
-                      style={styles.actionButton}
-                      onPress={() => handleRsvp('going')}
-                      disabled={saving}
-                      activeOpacity={0.8}
-                    >
-                      <CheckCircle2 size={22} color={Colors.primary} />
-                      <Text style={styles.actionButtonText}>Going</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.actionButton}
-                      onPress={() => handleRsvp('interested')}
-                      disabled={saving}
-                      activeOpacity={0.8}
-                    >
-                      <Star size={22} color={Colors.primary} />
-                      <Text style={styles.actionButtonText}>Interested</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
-              </View>
+          {user && !isOwner && eventEnded && (
+            <View style={styles.endedNotice}>
+              <Clock3 size={16} color={Colors.text.secondary} />
+              <Text style={styles.endedNoticeText}>
+                {hasJoinedEvent
+                  ? 'This event has ended. It now lives in your attendance history.'
+                  : 'This event has ended and can no longer be joined.'}
+              </Text>
             </View>
           )}
 
@@ -888,28 +914,86 @@ export default function EventDetail() {
           </View>
         </View>
       </ScrollView>
-      <View style={[styles.bottomActionBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
-        <TouchableOpacity
-          style={[styles.joinButton, hasJoinedEvent && styles.joinButtonJoined]}
-          onPress={() => {
-            if (!user || saving || hasJoinedEvent) return;
-            handleRsvp('going');
-          }}
-          disabled={saving || hasJoinedEvent}
-          activeOpacity={0.9}
-        >
-          <Text style={styles.joinButtonText}>
-            {hasJoinedEvent ? 'Event Joined' : 'Join Event'}
-          </Text>
-          <Text style={styles.joinArrow}>{hasJoinedEvent ? '✓' : '→'}</Text>
-        </TouchableOpacity>
-      </View>
+      {!isOwner ? (
+        <View style={[styles.bottomActionBar, { paddingBottom: Math.max(insets.bottom, 14) }]}>
+          <View style={styles.bottomActionRow}>
+            <TouchableOpacity
+              style={[
+                styles.joinButton,
+                hasJoinedEvent && styles.joinButtonJoined,
+                eventEnded && styles.joinButtonEnded,
+              ]}
+              onPress={() => {
+                if (!user || saving || hasJoinedEvent || eventEnded) return;
+                handleRsvp('going');
+              }}
+              disabled={saving || hasJoinedEvent || eventEnded}
+              activeOpacity={0.9}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: saving || hasJoinedEvent || eventEnded }}
+            >
+              <Text style={styles.joinButtonText}>
+                {eventEnded
+                  ? hasJoinedEvent
+                    ? 'You attended'
+                    : 'Event ended'
+                  : hasJoinedEvent
+                    ? 'Event Joined'
+                    : 'Join Event'}
+              </Text>
+              <Text style={styles.joinArrow}>{eventEnded ? '' : hasJoinedEvent ? '✓' : '→'}</Text>
+            </TouchableOpacity>
+
+            {/* One secondary control replaces the old Going / Interested / Remove row:
+                star = mark or unmark interest, "Leave" = drop a "going" RSVP. */}
+            {user && !eventEnded ? (
+              hasJoinedEvent ? (
+                <TouchableOpacity
+                  style={styles.secondaryActionButton}
+                  onPress={handleRemoveRsvp}
+                  disabled={saving}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Leave event"
+                >
+                  <Text style={styles.secondaryActionText}>Leave</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[
+                    styles.secondaryActionButton,
+                    styles.secondaryActionIcon,
+                    details.user_rsvp === 'interested' && styles.secondaryActionActive,
+                  ]}
+                  onPress={() =>
+                    details.user_rsvp === 'interested' ? handleRemoveRsvp() : handleRsvp('interested')
+                  }
+                  disabled={saving}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel={details.user_rsvp === 'interested' ? 'Remove interest' : 'Mark as interested'}
+                  accessibilityState={{ selected: details.user_rsvp === 'interested' }}
+                >
+                  <Star
+                    size={22}
+                    color={details.user_rsvp === 'interested' ? Colors.text.inverse : Colors.primary}
+                    fill={details.user_rsvp === 'interested' ? Colors.text.inverse : 'transparent'}
+                  />
+                </TouchableOpacity>
+              )
+            ) : null}
+          </View>
+          {user && !eventEnded && !hasJoinedEvent ? (
+            <Text style={styles.bottomActionHint}>
+              {details.user_rsvp === 'interested'
+                ? 'Marked as interested. Join to unlock the event chat.'
+                : 'Not sure yet? Tap the star to keep an eye on it.'}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
       {id && (
-        <AttendeesBottomSheet
-          ref={attendeesSheetRef}
-          eventId={id}
-          rsvpCount={details.rsvp_count}
-        />
+        <AttendeesBottomSheet ref={attendeesSheetRef} eventId={id} refreshToken={attendeesRefresh} />
       )}
     </View>
   );
@@ -925,6 +1009,10 @@ const styles = StyleSheet.create({
     left: 16,
     right: 16,
     zIndex: 50,
+  },
+  heroTopActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   heroTopBar: {
     height: 56,
@@ -1588,11 +1676,49 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    paddingTop: 16,
+    paddingTop: 12,
     paddingHorizontal: 24,
-    backgroundColor: 'rgba(255,255,255,0.94)',
+    backgroundColor: Colors.background.primary,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border.light,
+  },
+  bottomActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  secondaryActionButton: {
+    height: 58,
+    minWidth: 58,
+    paddingHorizontal: 18,
+    borderRadius: BorderRadius.round,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.background.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryActionIcon: {
+    paddingHorizontal: 0,
+    width: 58,
+  },
+  secondaryActionActive: {
+    backgroundColor: Colors.primary,
+  },
+  secondaryActionText: {
+    color: Colors.primary,
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+  },
+  bottomActionHint: {
+    marginTop: 8,
+    textAlign: 'center',
+    fontSize: Typography.sizes.xs,
+    color: Colors.text.secondary,
   },
   joinButton: {
+    flex: 1,
     height: 58,
     borderRadius: BorderRadius.round,
     backgroundColor: Colors.primary,
@@ -1603,6 +1729,25 @@ const styles = StyleSheet.create({
   },
   joinButtonJoined: {
     backgroundColor: Colors.success,
+  },
+  joinButtonEnded: {
+    backgroundColor: Colors.text.tertiary,
+  },
+  endedNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.background.secondary,
+  },
+  endedNoticeText: {
+    flex: 1,
+    fontSize: Typography.sizes.sm,
+    color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.medium,
   },
   joinButtonText: {
     color: '#FFFFFF',

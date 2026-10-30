@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,6 @@ import { useApp } from '@/contexts/AppContext';
 import { usePremium } from '@/contexts/PremiumContext';
 import { premiumService } from '@/services/premium';
 import { eventChatService } from '@/services/eventChat';
-import { analyticsService } from '@/services/analytics';
 import { profilesService } from '@/services/profiles';
 import { businessesService } from '@/services/businesses';
 import { eventsService } from '@/services/events';
@@ -25,10 +24,12 @@ import { socialService } from '@/services/social';
 import { useFocusEffect, router } from 'expo-router';
 import { Colors, Typography, BorderRadius } from '@/constants/theme';
 import { Event, RankedEvent } from '@/types/database';
+import { hasEventEnded } from '@/utils/eventStatus';
+import { AvatarRing } from '@/components/AvatarRing';
+import { confirmAction } from '@/utils/confirm';
 import {
   MapPin,
   BadgeCheck,
-  Star,
   CalendarDays,
   ChevronRight,
   LogOut,
@@ -36,12 +37,21 @@ import {
   SlidersHorizontal,
   PlusCircle,
   MessageCircle,
+  Bookmark,
+  BarChart3,
+  Users,
+  Heart,
 } from 'lucide-react-native';
 
-const FALLBACK_CREATED_IMAGES = [
-  'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1000&q=60',
-  'https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1000&q=60',
-];
+const CREATED_PREVIEW_LIMIT = 3;
+const JOINED_PREVIEW_LIMIT = 3;
+
+type ProfileStats = {
+  upcoming: number;
+  attended: number;
+  saved: number;
+  created: number;
+};
 
 const Palette = {
   surface: Colors.background.primary,
@@ -61,134 +71,107 @@ export default function ProfileScreen() {
   const { profile, signOut, refreshProfile, user } = useAuth();
   const { hasBusiness, userMode, setUserMode, userBusiness, refreshBusiness, loading: appLoading } =
     useApp();
-  const { isPremium, currentPlan, canUse, refreshSubscription } = usePremium();
+  const { isPremium, currentPlan, refreshSubscription } = usePremium();
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [createdEvents, setCreatedEvents] = useState<Event[]>([]);
   const [joinedEvents, setJoinedEvents] = useState<RankedEvent[]>([]);
   const [chatUnread, setChatUnread] = useState<Record<string, number>>({});
-
-  // Unread chat badges go stale while this tab stays mounted; refresh on focus.
-  useFocusEffect(
-    useCallback(() => {
-      const ids = joinedEvents.map((event) => event.id);
-      if (ids.length === 0) return;
-      let cancelled = false;
-      eventChatService
-        .getUnreadCounts(ids)
-        .then((counts) => {
-          if (!cancelled) {
-            setChatUnread(Object.fromEntries(counts.map((row) => [row.event_id, row.unread_count])));
-          }
-        })
-        .catch(() => {});
-      return () => {
-        cancelled = true;
-      };
-    }, [joinedEvents])
-  );
-  const [stats, setStats] = useState<{
-    attended: string;
-    created: string;
-    rating: string;
-  }>({
-    attended: '0',
-    created: '0',
-    rating: '4.9',
-  });
+  const [stats, setStats] = useState<ProfileStats>({ upcoming: 0, attended: 0, saved: 0, created: 0 });
+  const [loaded, setLoaded] = useState(false);
 
   const isBizMode = hasBusiness && userMode === 'business';
+  const businessId = hasBusiness ? userBusiness?.id : undefined;
+  const userId = user?.id;
 
   const headerAvatarUrl = isBizMode ? userBusiness?.logo_url : profile?.avatar_url;
   const headerName = isBizMode ? (userBusiness?.name || 'Business') : (profile?.name || 'User');
   const headerLocation = useMemo(() => {
     if (isBizMode && userBusiness?.address) return userBusiness.address;
     if (profile?.city) return profile.city;
-    return 'EventMaps';
+    return null;
   }, [isBizMode, profile?.city, userBusiness?.address]);
   const headerBio = useMemo(() => {
-    if (isBizMode) return userBusiness?.description || 'Host and manage events with your community.';
-    return (
-      profile?.bio ||
-      'Urban explorer and coffee enthusiast. Hosting the best underground moments in the city.'
-    );
+    if (isBizMode) return userBusiness?.description?.trim() || '';
+    return profile?.bio?.trim() || '';
   }, [isBizMode, profile?.bio, userBusiness?.description]);
+  const showVerifiedBadge = isBizMode && !!userBusiness?.verified;
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadProfileData = async () => {
+  // Everything on this tab that can change while it stays mounted (RSVPs made
+  // elsewhere, new events, chat activity) is reloaded on focus in one pass.
+  const loadProfileData = useCallback(
+    async (isCancelled: () => boolean) => {
       try {
-        const jobs: Promise<unknown>[] = [];
-        if (hasBusiness && userBusiness) {
-          jobs.push(eventsService.getBusinessEvents(userBusiness.id, { limit: 4 }));
-        } else {
-          jobs.push(Promise.resolve([] as Event[]));
-        }
-        if (user?.id) {
-          jobs.push(socialService.getUserUpcomingEvents(user.id));
-        } else {
-          jobs.push(Promise.resolve([] as RankedEvent[]));
-        }
-        if (isBizMode && userBusiness && isPremium && canUse('analytics')) {
-          jobs.push(analyticsService.getBusinessAnalytics(userBusiness.id, 30));
-        } else {
-          jobs.push(Promise.resolve(null));
-        }
+        const [created, createdCount, upcoming, counts] = await Promise.all([
+          businessId
+            ? eventsService.getBusinessEvents(businessId, { limit: CREATED_PREVIEW_LIMIT })
+            : Promise.resolve([] as Event[]),
+          businessId ? eventsService.getBusinessEventsCount(businessId) : Promise.resolve(0),
+          userId
+            ? socialService.getUserUpcomingEvents(userId, { limit: JOINED_PREVIEW_LIMIT })
+            : Promise.resolve([] as RankedEvent[]),
+          userId
+            ? socialService.getUserAttendanceCounts(userId)
+            : Promise.resolve({ upcoming: 0, attended: 0, saved: 0, interested: 0 }),
+        ]);
+        if (isCancelled()) return;
 
-        const [created, upcoming] = (await Promise.all(jobs)) as [Event[], RankedEvent[], unknown];
-        if (cancelled) return;
-
-        setCreatedEvents(created || []);
-        setJoinedEvents((upcoming || []).slice(0, 4));
-        const joinedIds = (upcoming || []).slice(0, 4).map((event) => event.id);
-        if (joinedIds.length > 0) {
-          eventChatService
-            .getUnreadCounts(joinedIds)
-            .then((counts) => {
-              setChatUnread(Object.fromEntries(counts.map((row) => [row.event_id, row.unread_count])));
-            })
-            .catch(() => setChatUnread({}));
-        } else {
-          setChatUnread({});
-        }
+        setCreatedEvents(created);
+        setJoinedEvents(upcoming);
         setStats({
-          attended: String(upcoming?.length || 0),
-          created: String(created?.length || 0),
-          rating: '4.9',
+          upcoming: counts.upcoming,
+          attended: counts.attended,
+          saved: counts.saved,
+          created: createdCount,
         });
-      } catch {
-        if (!cancelled) {
-          setCreatedEvents([]);
-          setJoinedEvents([]);
-          setStats({ attended: '0', created: '0', rating: '4.9' });
-        }
-      }
-    };
+        setLoaded(true);
 
-    loadProfileData();
-    return () => {
-      cancelled = true;
-    };
-  }, [hasBusiness, user?.id, userBusiness?.id, isBizMode, isPremium, canUse]);
+        const joinedIds = upcoming.map((event) => event.id);
+        if (joinedIds.length === 0) {
+          setChatUnread({});
+          return;
+        }
+        // Badges are a nice-to-have: a failure here must not blank the lists.
+        const unread = await eventChatService.getUnreadCounts(joinedIds).catch(() => []);
+        if (isCancelled()) return;
+        setChatUnread(Object.fromEntries(unread.map((row) => [row.event_id, row.unread_count])));
+      } catch {
+        if (isCancelled()) return;
+        setCreatedEvents([]);
+        setJoinedEvents([]);
+        setChatUnread({});
+        setStats({ upcoming: 0, attended: 0, saved: 0, created: 0 });
+        setLoaded(true);
+      }
+    },
+    [businessId, userId]
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      loadProfileData(() => cancelled);
+      return () => {
+        cancelled = true;
+      };
+    }, [loadProfileData])
+  );
 
   useEffect(() => {
     if (!isBizMode) setShowPremiumModal(false);
   }, [isBizMode]);
 
-  const handleSignOut = () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign Out',
-        style: 'destructive',
-        onPress: async () => {
-          await signOut();
-          router.replace('/');
-        },
-      },
-    ]);
+  const handleSignOut = async () => {
+    const ok = await confirmAction({
+      title: 'Sign Out',
+      message: 'Are you sure you want to sign out?',
+      confirmLabel: 'Sign Out',
+      destructive: true,
+    });
+    if (!ok) return;
+    await signOut();
+    router.replace('/');
   };
 
   const handleUpgradeToPremium = async () => {
@@ -293,59 +276,118 @@ export default function ProfileScreen() {
             activeOpacity={0.88}
             onPress={handleAvatarPick}
           >
-            <LinearGradient
-              colors={[Palette.primary, Colors.primaryLight, Palette.secondary]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.avatarRing}
-            >
-              <View style={styles.avatarInner}>
-                {uploadingAvatar ? (
-                  <ActivityIndicator size="small" color={Palette.primary} />
-                ) : headerAvatarUrl ? (
-                  <Image source={{ uri: headerAvatarUrl }} style={styles.avatarImage} />
-                ) : (
-                  <Text style={styles.avatarInitial}>
-                    {headerName.slice(0, 1).toUpperCase()}
-                  </Text>
-                )}
-              </View>
-            </LinearGradient>
-            <View style={styles.verifiedBadge}>
-              <BadgeCheck size={16} color="#FFFFFF" />
-            </View>
+            <AvatarRing
+              imageUrl={headerAvatarUrl}
+              name={headerName}
+              loading={uploadingAvatar}
+              badge={
+                showVerifiedBadge ? (
+                  <View style={styles.verifiedBadge}>
+                    <BadgeCheck size={16} color="#FFFFFF" />
+                  </View>
+                ) : null
+              }
+            />
           </TouchableOpacity>
 
-          <Text style={styles.heroName}>{headerName}</Text>
-          <View style={styles.locationRow}>
-            <MapPin size={14} color={Palette.primary} fill={Palette.primary} />
-            <Text style={styles.locationText} numberOfLines={1}>
-              {headerLocation}
-            </Text>
-          </View>
-          <Text style={styles.bioText}>{headerBio}</Text>
+          <Text style={styles.heroName} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.75}>
+            {headerName}
+          </Text>
+          {headerLocation ? (
+            <View style={styles.locationRow}>
+              <MapPin size={14} color={Palette.primary} fill={Palette.primary} />
+              <Text style={styles.locationText} numberOfLines={1}>
+                {headerLocation}
+              </Text>
+            </View>
+          ) : !isBizMode ? (
+            <TouchableOpacity
+              style={styles.locationRow}
+              onPress={() => router.push('/settings')}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Add your city"
+            >
+              <MapPin size={14} color={Palette.lightMuted} />
+              <Text style={[styles.locationText, styles.locationPlaceholder]}>Add your city</Text>
+            </TouchableOpacity>
+          ) : null}
+          {headerBio ? (
+            <Text style={styles.bioText}>{headerBio}</Text>
+          ) : isBizMode ? null : (
+            <TouchableOpacity onPress={() => router.push('/settings')} activeOpacity={0.7}>
+              <Text style={styles.bioPlaceholder}>Add a short bio in Settings</Text>
+            </TouchableOpacity>
+          )}
 
           <View style={styles.statGrid}>
-            <ProfileStat label="Attended" value={stats.attended} color={Palette.primary} />
-            <ProfileStat label="Created" value={stats.created} color={Palette.secondary} />
             <ProfileStat
-              label="Rating"
-              value={stats.rating}
-              color={Palette.text}
-              showStar
+              label="Upcoming"
+              value={loaded ? String(stats.upcoming) : '–'}
+              color={Palette.primary}
+              onPress={() => router.push('/joined-events' as never)}
             />
+            <ProfileStat
+              label="Attended"
+              value={loaded ? String(stats.attended) : '–'}
+              color={Palette.secondary}
+              onPress={() => router.push({ pathname: '/joined-events', params: { tab: 'past' } } as never)}
+            />
+            {isBizMode ? (
+              <ProfileStat
+                label="Created"
+                value={loaded ? String(stats.created) : '–'}
+                color={Palette.text}
+                onPress={() => router.push('/my-events')}
+              />
+            ) : (
+              <ProfileStat
+                label="Saved"
+                value={loaded ? String(stats.saved) : '–'}
+                color={Palette.text}
+                onPress={() => router.push('/saved-events')}
+              />
+            )}
           </View>
 
-          <TouchableOpacity style={styles.modeSwitchPill} onPress={toggleMode} activeOpacity={0.8}>
-            <ArrowLeftRight size={14} color={Palette.primary} />
-            <Text style={styles.modeSwitchText}>
-              {hasBusiness
-                ? userMode === 'user'
-                  ? 'Switch to Business'
-                  : 'Switch to Personal'
-                : 'Create Business'}
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.quickLinks}>
+            {isBizMode ? (
+              <>
+                <QuickLink
+                  icon={<BarChart3 size={15} color={Palette.primary} />}
+                  label="Analytics"
+                  onPress={() => router.push('/profile-analytics')}
+                />
+                <QuickLink
+                  icon={<Users size={15} color={Palette.primary} />}
+                  label="Followers"
+                  onPress={() => router.push('/followers')}
+                />
+              </>
+            ) : (
+              <>
+                <QuickLink
+                  icon={<Bookmark size={15} color={Palette.primary} />}
+                  label="Saved"
+                  onPress={() => router.push('/saved-events')}
+                />
+                <QuickLink
+                  icon={<Heart size={15} color={Palette.primary} />}
+                  label="Following"
+                  onPress={() => router.push('/following')}
+                />
+              </>
+            )}
+          </View>
+
+          {hasBusiness ? (
+            <TouchableOpacity style={styles.modeSwitchPill} onPress={toggleMode} activeOpacity={0.8}>
+              <ArrowLeftRight size={14} color={Palette.primary} />
+              <Text style={styles.modeSwitchText}>
+                {userMode === 'user' ? 'Switch to Business' : 'Switch to Personal'}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
 
           {isBizMode && isPremium && (
             <Text style={styles.premiumText}>
@@ -387,57 +429,73 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </View>
 
-          {(createdEvents.length ? createdEvents : [null, null]).map((event, index) => (
-            <TouchableOpacity
-              key={event?.id || `created-${index}`}
-              style={styles.eventCard}
-              activeOpacity={0.9}
-              onPress={() => {
-                if (event?.id) router.push(`/event/${event.id}`);
-              }}
-            >
-              <View style={styles.eventImageWrap}>
-                <Image
-                  source={{
-                    uri:
-                      event?.cover_image_url ||
-                      FALLBACK_CREATED_IMAGES[index % FALLBACK_CREATED_IMAGES.length],
-                  }}
-                  style={styles.eventImage}
-                />
-                <View style={[styles.eventStatusPill, index === 0 ? styles.activePill : styles.draftPill]}>
-                  <Text style={[styles.eventStatusText, index !== 0 && styles.eventStatusTextMuted]}>
-                    {index === 0 ? 'ACTIVE' : 'DRAFT'}
-                  </Text>
-                </View>
+          {!loaded ? (
+            <View style={styles.skeletonTall} />
+          ) : createdEvents.length === 0 ? (
+            <View style={styles.joinedEmptyCard}>
+              <View style={styles.joinedEmptyIcon}>
+                <PlusCircle size={24} color={Palette.primary} />
               </View>
-              <View style={styles.eventBody}>
-                <Text style={styles.eventTitle} numberOfLines={1}>
-                  {event?.title || (index === 0 ? 'Underground Jazz Session' : 'Soho Photo Walk')}
-                </Text>
-                <View style={styles.eventMetaRow}>
-                  <CalendarDays size={14} color={Palette.lightMuted} />
-                  <Text style={styles.eventMetaText}>
-                    {event
-                      ? formatEventDateTime(event.start_datetime)
-                      : index === 0
-                        ? 'Oct 24, 2023 • 21:00'
-                        : 'Nov 02, 2023 • 14:00'}
-                  </Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
+              <Text style={styles.joinedEmptyTitle}>No events yet</Text>
+              <Text style={styles.joinedEmptyText}>
+                Events you create for your venue will show up here.
+              </Text>
+            </View>
+          ) : (
+            createdEvents.map((event) => {
+              const ended = hasEventEnded(event);
+              return (
+                <TouchableOpacity
+                  key={event.id}
+                  style={styles.eventCard}
+                  activeOpacity={0.9}
+                  onPress={() => router.push(`/event/${event.id}`)}
+                >
+                  <View style={styles.eventImageWrap}>
+                    {event.cover_image_url ? (
+                      <Image source={{ uri: event.cover_image_url }} style={styles.eventImage} />
+                    ) : (
+                      <View style={[styles.eventImage, styles.eventImagePlaceholder]}>
+                        <CalendarDays size={32} color={Palette.primary} />
+                      </View>
+                    )}
+                    <View style={[styles.eventStatusPill, ended ? styles.draftPill : styles.activePill]}>
+                      <Text style={[styles.eventStatusText, ended && styles.eventStatusTextMuted]}>
+                        {ended ? 'PAST' : 'UPCOMING'}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.eventBody}>
+                    <Text style={styles.eventTitle} numberOfLines={1}>
+                      {event.title}
+                    </Text>
+                    <View style={styles.eventMetaRow}>
+                      <CalendarDays size={14} color={Palette.lightMuted} />
+                      <Text style={styles.eventMetaText}>{formatEventDateTime(event.start_datetime)}</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              );
+            })
+          )}
         </View>
         )}
 
         <View style={styles.sectionWrap}>
           <View style={styles.sectionHead}>
             <Text style={styles.sectionTitle}>Events Joined</Text>
+            <TouchableOpacity onPress={() => router.push('/joined-events' as never)}>
+              <Text style={styles.sectionLink}>View All</Text>
+            </TouchableOpacity>
           </View>
 
-          {joinedEvents.length > 0 ? (
-            joinedEvents.slice(0, 2).map((event) => (
+          {!loaded ? (
+            <>
+              <View style={styles.skeletonRow} />
+              <View style={styles.skeletonRow} />
+            </>
+          ) : joinedEvents.length > 0 ? (
+            joinedEvents.map((event) => (
               <TouchableOpacity
                 key={event.id}
                 style={styles.joinedCard}
@@ -453,7 +511,7 @@ export default function ProfileScreen() {
                 )}
                 <View style={styles.joinedCopy}>
                   <View style={styles.joinedTitleRow}>
-                    <Text style={styles.joinedTitle} numberOfLines={1}>
+                    <Text style={styles.joinedTitle} numberOfLines={2}>
                       {event.title}
                     </Text>
                     {chatUnread[event.id] ? (
@@ -471,9 +529,11 @@ export default function ProfileScreen() {
                 </View>
                 <View style={styles.joinedTimeWrap}>
                   <Text style={styles.joinedDay}>
-                    {formatEventDayLabel(event.start_datetime)}
+                    {formatEventDayLabel(event.next_start_datetime || event.start_datetime)}
                   </Text>
-                  <Text style={styles.joinedTime}>{formatEventTime(event.start_datetime)}</Text>
+                  <Text style={styles.joinedTime}>
+                    {formatEventTime(event.next_start_datetime || event.start_datetime)}
+                  </Text>
                 </View>
                 <ChevronRight size={18} color={Palette.outline} />
               </TouchableOpacity>
@@ -517,6 +577,25 @@ export default function ProfileScreen() {
             </LinearGradient>
           </TouchableOpacity>
         )}
+
+        {!appLoading && !hasBusiness ? (
+          <TouchableOpacity
+            style={styles.createBusinessCard}
+            onPress={toggleMode}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Create a business profile"
+          >
+            <View style={styles.createBusinessIcon}>
+              <PlusCircle size={20} color={Palette.primary} />
+            </View>
+            <View style={styles.createBusinessCopy}>
+              <Text style={styles.createBusinessTitle}>Host events?</Text>
+              <Text style={styles.createBusinessSub}>Create a business profile to publish your own events.</Text>
+            </View>
+            <ChevronRight size={18} color={Palette.outline} />
+          </TouchableOpacity>
+        ) : null}
 
         <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut} activeOpacity={0.8}>
           <LogOut size={16} color={Colors.error} />
@@ -562,25 +641,55 @@ export default function ProfileScreen() {
   );
 }
 
+function QuickLink({
+  icon,
+  label,
+  onPress,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={styles.quickLink}
+      onPress={onPress}
+      activeOpacity={0.8}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      {icon}
+      <Text style={styles.quickLinkText}>{label}</Text>
+      <ChevronRight size={14} color={Palette.lightMuted} />
+    </TouchableOpacity>
+  );
+}
+
 function ProfileStat({
   label,
   value,
   color,
-  showStar = false,
+  onPress,
 }: {
   label: string;
   value: string;
   color: string;
-  showStar?: boolean;
+  onPress?: () => void;
 }) {
   return (
-    <View style={styles.statCard}>
+    <TouchableOpacity
+      style={styles.statCard}
+      onPress={onPress}
+      disabled={!onPress}
+      activeOpacity={0.8}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={`${value} ${label}`}
+    >
       <View style={styles.statValueRow}>
         <Text style={[styles.statValue, { color }]}>{value}</Text>
-        {showStar ? <Star size={12} color={Palette.secondary} fill={Palette.secondary} /> : null}
       </View>
       <Text style={styles.statLabel}>{label}</Text>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -629,9 +738,10 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.surface,
   },
   logoRow: {
-    alignItems: 'flex-end',
-    marginBottom: 10,
-    gap: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
   },
   headerLogo: {
     width: 30,
@@ -640,8 +750,8 @@ const styles = StyleSheet.create({
     tintColor: Colors.primary,
   },
   settingsIcon: {
-    width: 32,
-    height: 32,
+    width: 36,
+    height: 36,
     borderRadius: BorderRadius.round,
     alignItems: 'center',
     justifyContent: 'center',
@@ -656,39 +766,7 @@ const styles = StyleSheet.create({
     marginTop: 0,
     marginBottom: 10,
   },
-  avatarRing: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 6,
-  },
-  avatarInner: {
-    width: '100%',
-    height: '100%',
-    borderRadius: BorderRadius.round,
-    backgroundColor: Palette.card,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 4,
-    borderColor: Palette.surface,
-  },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-  },
-  avatarInitial: {
-    color: Palette.primary,
-    fontSize: 46,
-    fontFamily: Typography.displayFontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-  },
   verifiedBadge: {
-    position: 'absolute',
-    bottom: 10,
-    right: 8,
     width: 34,
     height: 34,
     borderRadius: BorderRadius.round,
@@ -725,6 +803,15 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     maxWidth: 260,
+  },
+  locationPlaceholder: {
+    color: Palette.lightMuted,
+  },
+  bioPlaceholder: {
+    marginTop: 10,
+    fontSize: 13,
+    color: Palette.primary,
+    fontFamily: Typography.labelFontFamilies.semibold,
   },
   bioText: {
     marginTop: 12,
@@ -766,10 +853,47 @@ const styles = StyleSheet.create({
   statLabel: {
     marginTop: 4,
     textTransform: 'uppercase',
-    letterSpacing: 1.7,
-    color: Palette.lightMuted,
-    fontSize: 10,
+    letterSpacing: 1.2,
+    color: Palette.muted,
+    fontSize: 11,
     fontFamily: Typography.labelFontFamilies.semibold,
+  },
+  quickLinks: {
+    marginTop: 12,
+    width: '100%',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  quickLink: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Palette.card,
+    borderWidth: 1,
+    borderColor: Palette.softBorder,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  quickLinkText: {
+    flex: 1,
+    fontSize: 13,
+    color: Palette.text,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+  },
+  skeletonRow: {
+    height: 82,
+    borderRadius: 16,
+    backgroundColor: Palette.softCard,
+    marginBottom: 10,
+  },
+  skeletonTall: {
+    height: 250,
+    borderRadius: 16,
+    backgroundColor: Palette.softCard,
+    marginBottom: 16,
   },
   modeSwitchPill: {
     marginTop: 14,
@@ -869,6 +993,11 @@ const styles = StyleSheet.create({
   eventImage: {
     width: '100%',
     height: '100%',
+  },
+  eventImagePlaceholder: {
+    backgroundColor: Colors.accentLight,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   eventStatusPill: {
     position: 'absolute',
@@ -1052,6 +1181,41 @@ const styles = StyleSheet.create({
     marginTop: 2,
     color: 'rgba(255,255,255,0.82)',
     fontSize: 12,
+    fontFamily: Typography.labelFontFamilies.medium,
+  },
+  createBusinessCard: {
+    marginTop: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: Palette.card,
+    borderWidth: 1,
+    borderColor: Palette.softBorder,
+    borderRadius: 16,
+    padding: 14,
+  },
+  createBusinessIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: Colors.accentLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  createBusinessCopy: {
+    flex: 1,
+  },
+  createBusinessTitle: {
+    fontSize: 15,
+    color: Palette.text,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+  },
+  createBusinessSub: {
+    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 16,
+    color: Palette.muted,
     fontFamily: Typography.labelFontFamilies.medium,
   },
   signOutButton: {
