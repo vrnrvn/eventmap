@@ -17,6 +17,8 @@ import { eventChatService } from '@/services/eventChat';
 import { RankedEvent } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { isEventInProgress } from '@/utils/eventStatus';
+import { Button } from '@/components/ui/Button';
+import { EventListItem, formatEventDate } from '@/components/EventListItem';
 import {
   ArrowLeft,
   CalendarDays,
@@ -141,51 +143,33 @@ export default function JoinedEvents() {
       const when = scope === 'past' ? item.start_datetime : item.next_start_datetime || item.start_datetime;
       const live = scope !== 'past' && isEventInProgress(item);
       const unread = chatUnread[item.id] ?? 0;
+      const dateLine =
+        (scope === 'past' ? formatEventDate(when) : `${formatDayLabel(when)} · ${formatTime(when)}`) +
+        (item.is_recurring && scope !== 'past' ? ' · repeats' : '');
       return (
-        <TouchableOpacity
-          style={styles.card}
-          activeOpacity={0.85}
+        <EventListItem
+          title={item.title}
+          subtitle={item.business_name}
+          dateLine={dateLine}
+          thumbnailUrl={item.cover_image_url}
+          badge={live ? { label: 'LIVE', tone: 'success' } : null}
+          dateIcon={
+            item.is_recurring ? (
+              <Repeat size={12} color={Colors.text.tertiary} />
+            ) : undefined
+          }
+          titleAccessory={
+            unread > 0 ? (
+              <View style={styles.unreadBadge} accessibilityLabel={`${unread} unread chat messages`}>
+                <MessageCircle size={10} color="#FFFFFF" />
+                <Text style={styles.unreadText}>{unread > 99 ? '99+' : unread}</Text>
+              </View>
+            ) : null
+          }
+          rightAccessory={<ChevronRight size={18} color={Colors.border.medium} />}
           onPress={() => router.push(`/event/${item.id}`)}
-          accessibilityRole="button"
-          accessibilityLabel={`${item.title}, ${formatDateTime(when)}`}
-        >
-          {item.cover_image_url ? (
-            <Image source={{ uri: item.cover_image_url }} style={styles.thumb} />
-          ) : (
-            <View style={[styles.thumb, styles.thumbPlaceholder]}>
-              <CalendarDays size={22} color={Colors.primary} />
-            </View>
-          )}
-          <View style={styles.cardBody}>
-            <View style={styles.titleRow}>
-              <Text style={styles.title} numberOfLines={2}>
-                {item.title}
-              </Text>
-              {live ? (
-                <View style={styles.livePill}>
-                  <Text style={styles.livePillText}>LIVE</Text>
-                </View>
-              ) : null}
-              {unread > 0 ? (
-                <View style={styles.unreadBadge} accessibilityLabel={`${unread} unread chat messages`}>
-                  <MessageCircle size={10} color="#FFFFFF" />
-                  <Text style={styles.unreadText}>{unread > 99 ? '99+' : unread}</Text>
-                </View>
-              ) : null}
-            </View>
-            <Text style={styles.business} numberOfLines={1}>
-              {item.business_name}
-            </Text>
-            <View style={styles.metaRow}>
-              {item.is_recurring ? <Repeat size={12} color={Colors.text.tertiary} /> : <CalendarDays size={12} color={Colors.text.tertiary} />}
-              <Text style={styles.metaText} numberOfLines={1}>
-                {scope === 'past' ? formatDateTime(when) : `${formatDayLabel(when)} · ${formatTime(when)}`}
-                {item.is_recurring && scope !== 'past' ? ' · repeats' : ''}
-              </Text>
-            </View>
-          </View>
-          <ChevronRight size={18} color={Colors.border.medium} />
-        </TouchableOpacity>
+          accessibilityLabel={`${item.title}, ${formatEventDate(when)}`}
+        />
       );
     },
     [scope, chatUnread]
@@ -230,13 +214,11 @@ export default function JoinedEvents() {
               : 'Once an event you joined is over, it moves here.'}
         </Text>
         {scope !== 'past' ? (
-          <TouchableOpacity
-            style={styles.emptyButton}
+          <Button
+            label="Discover events"
             onPress={() => router.push('/(tabs)/discover')}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.emptyButtonText}>Discover events</Text>
-          </TouchableOpacity>
+            style={styles.emptyButton}
+          />
         ) : null}
       </View>
     );
@@ -306,19 +288,6 @@ export default function JoinedEvents() {
       />
     </View>
   );
-}
-
-function formatDateTime(value: string) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: d.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined,
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 }
 
 function formatTime(value: string) {
@@ -414,55 +383,6 @@ const styles = StyleSheet.create({
   listContentEmpty: {
     flexGrow: 1,
   },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.06)',
-    padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  thumb: {
-    width: 58,
-    height: 58,
-    borderRadius: 14,
-  },
-  thumbPlaceholder: {
-    backgroundColor: Colors.accentLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardBody: {
-    flex: 1,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  title: {
-    flexShrink: 1,
-    color: Colors.text.primary,
-    fontSize: 16,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-  },
-  livePill: {
-    paddingHorizontal: 6,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: Colors.success,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  livePillText: {
-    color: '#FFFFFF',
-    fontSize: 9,
-    letterSpacing: 1,
-    fontFamily: Typography.labelFontFamilies.semibold,
-  },
   unreadBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -477,24 +397,6 @@ const styles = StyleSheet.create({
     lineHeight: 12,
     color: '#FFFFFF',
     fontFamily: Typography.labelFontFamilies.semibold,
-  },
-  business: {
-    marginTop: 2,
-    color: Colors.text.secondary,
-    fontSize: 12,
-    fontFamily: Typography.labelFontFamilies.medium,
-  },
-  metaRow: {
-    marginTop: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  metaText: {
-    flexShrink: 1,
-    color: Colors.text.tertiary,
-    fontSize: 12,
-    fontFamily: Typography.labelFontFamilies.medium,
   },
   center: {
     flex: 1,
@@ -527,16 +429,6 @@ const styles = StyleSheet.create({
   },
   emptyButton: {
     marginTop: 18,
-    paddingHorizontal: 20,
-    paddingVertical: 11,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Colors.primary,
-  },
-  emptyButtonText: {
-    color: '#FFFFFF',
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
   },
   errorText: {
     fontSize: Typography.sizes.sm,

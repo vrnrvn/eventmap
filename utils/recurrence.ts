@@ -31,17 +31,19 @@ function toDateOnly(d: Date): string {
 }
 
 function parseDateOnly(s: string): Date {
-  const d = new Date(s);
-  d.setHours(0, 0, 0, 0);
-  return d;
+  // Parse 'YYYY-MM-DD' into LOCAL date components (matches utils/eventStatus.ts)
+  // so the end date doesn't land a day early west of UTC.
+  const [y, m, d] = s.slice(0, 10).split('-').map(Number);
+  if (Number.isFinite(y) && Number.isFinite(m) && Number.isFinite(d)) {
+    return new Date(y, m - 1, d);
+  }
+  const fallback = new Date(s);
+  fallback.setHours(0, 0, 0, 0);
+  return fallback;
 }
 
 function sameDayOfWeek(d1: Date, d2: Date): boolean {
   return d1.getDay() === d2.getDay();
-}
-
-function sameDayOfMonth(d1: Date, d2: Date): boolean {
-  return d1.getDate() === d2.getDate();
 }
 
 export function isEventOnDate(
@@ -70,15 +72,31 @@ export function isEventOnDate(
 
   const startDay = checkStart.getTime();
   const checkDay = checkDate.getTime();
-  const diffDays = Math.floor((checkDay - startDay) / (24 * 60 * 60 * 1000));
+  // Round, don't floor: both timestamps are local midnights, so a DST
+  // transition inside the span makes the diff a non-integer number of days
+  // (±1h). Flooring undercounted by one day after spring-forward, flipping
+  // the parity of every daily/weekly series with interval > 1.
+  const diffDays = Math.round((checkDay - startDay) / (24 * 60 * 60 * 1000));
 
   switch (pattern.frequency) {
     case 'daily':
       return diffDays % pattern.interval === 0;
     case 'weekly':
       return sameDayOfWeek(start, checkDate) && Math.floor(diffDays / 7) % pattern.interval === 0;
-    case 'monthly':
-      return sameDayOfMonth(start, checkDate);
+    case 'monthly': {
+      // Honor `interval` via whole-month arithmetic (year*12 + month), since a
+      // day-diff can't express "every N months".
+      const monthsDiff =
+        (checkDate.getFullYear() - checkStart.getFullYear()) * 12 +
+        (checkDate.getMonth() - checkStart.getMonth());
+      if (monthsDiff % pattern.interval !== 0) return false;
+      // Clamp to the last day of short months so a series on the 29th/30th/31st
+      // doesn't silently skip them — e.g. a "31st" series fires Feb 28 (Feb 29
+      // in leap years), Apr 30, etc. Months long enough use the start day as-is.
+      const daysInMonth = new Date(checkDate.getFullYear(), checkDate.getMonth() + 1, 0).getDate();
+      const targetDay = Math.min(checkStart.getDate(), daysInMonth);
+      return checkDate.getDate() === targetDay;
+    }
     default:
       return false;
   }
@@ -103,8 +121,22 @@ export function getNextOccurrences(
   const from = new Date();
   from.setHours(0, 0, 0, 0);
 
-  for (let d = new Date(from); results.length < maxCount; d.setDate(d.getDate() + 1)) {
-    if (d < parseDateOnly(toDateOnly(start))) continue;
+  // Cap the day-walk so a malformed pattern (e.g. interval 0 or a start far in
+  // the future) can't spin this loop forever; return whatever was found.
+  const MAX_DAY_ITERATIONS = 731;
+  let iterations = 0;
+
+  // Local midnight of the start day (toDateOnly would use the UTC date, which
+  // skips the true first day for evening starts west of UTC).
+  const startMidnight = new Date(start);
+  startMidnight.setHours(0, 0, 0, 0);
+
+  for (
+    let d = new Date(from);
+    results.length < maxCount && iterations < MAX_DAY_ITERATIONS;
+    d.setDate(d.getDate() + 1), iterations++
+  ) {
+    if (d < startMidnight) continue;
     if (endDate && d > endDate) break;
 
     if (isEventOnDate(event, d)) {

@@ -6,7 +6,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Switch,
@@ -17,23 +16,25 @@ import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import { usePremium } from '@/contexts/PremiumContext';
-import { premiumService } from '@/services/premium';
 import { profilesService } from '@/services/profiles';
 import { businessesService } from '@/services/businesses';
 import { eventsService } from '@/services/events';
 import { Input } from '@/components/Input';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { businessLocationStore } from '@/stores/businessLocationStore';
 import { profileLocationStore } from '@/stores/profileLocationStore';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
-import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { clearOnboardingDraft } from '@/utils/onboardingDraft';
 import { confirmAction } from '@/utils/confirm';
+import { notify, notifyConfirm } from '@/utils/notify';
+import { authService } from '@/services/auth';
+import { deleteAccount, AccountDeletionUnavailableError } from '@/services/account';
+import { supabase } from '@/services/supabase';
 import {
-  ArrowLeft,
   User,
   Building2,
-  Settings,
   Mail,
   Heart,
   MapPin,
@@ -48,6 +49,8 @@ import {
   Bell,
   ChevronRight,
   MessageCircle,
+  KeyRound,
+  Trash2,
 } from 'lucide-react-native';
 
 const Palette = {
@@ -55,12 +58,12 @@ const Palette = {
   gradientEnd: Colors.accent,
   cardBg: Colors.background.primary,
   surfaceMuted: Colors.background.primary,
-  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  accentSoft: Colors.primarySoft,
   textOnGradient: Colors.text.inverse,
-  textOnGradientMuted: 'rgba(250, 248, 245, 0.75)',
+  textOnGradientMuted: alpha(Colors.surface, 0.75),
   separator: Colors.border.light,
   badge: Colors.primary,
-  successSoft: 'rgba(45, 138, 110, 0.12)',
+  successSoft: Colors.successSoft,
   successDot: Colors.success,
 };
 
@@ -90,7 +93,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { user, profile, refreshProfile } = useAuth();
   const { userBusiness, refreshBusiness, userMode, hasBusiness } = useApp();
-  const { isPremium, refreshSubscription } = usePremium();
+  const { isPremium } = usePremium();
   const [saving, setSaving] = useState<'user' | 'business' | null>(null);
   const [savedSection, setSavedSection] = useState<'user' | 'business' | null>(null);
 
@@ -99,7 +102,7 @@ export default function SettingsScreen() {
   const accentGradient: [string, string] = isBizMode
     ? [Colors.secondary, Colors.secondaryLight]
     : [Palette.gradientStart, Palette.gradientEnd];
-  const accentSoft = isBizMode ? 'rgba(13, 79, 79, 0.12)' : Palette.accentSoft;
+  const accentSoft = isBizMode ? alpha(Colors.secondary, 0.12) : Palette.accentSoft;
 
   const [userForm, setUserForm] = useState({
     name: '',
@@ -149,6 +152,9 @@ export default function SettingsScreen() {
   const originalVenuePhotoIds = useRef<string[]>([]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const [emailForm, setEmailForm] = useState({ open: false, value: '', saving: false });
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -200,7 +206,12 @@ export default function SettingsScreen() {
         nearbyEvent: prefs.nearby_event ?? true,
         chatMessage: prefs.chat_message ?? true,
         eventReminderEnabled: profile.event_reminder_enabled ?? true,
-        eventReminderMinutes: profile.event_reminder_minutes ?? 60,
+        // Respect a saved "off" state: only default to 60 when the reminder is
+        // enabled (or never configured) but has no stored minutes.
+        eventReminderMinutes:
+          profile.event_reminder_enabled === false
+            ? null
+            : profile.event_reminder_minutes ?? 60,
         interestedReminder: prefs.interested_reminder ?? true,
       });
     }
@@ -251,17 +262,19 @@ export default function SettingsScreen() {
   };
 
   const validateUser = () => {
+    // Rebuild from scratch so resolved errors clear on re-validation.
     const next: Record<string, string> = {};
     if (!userForm.name.trim()) next.name = 'Name is required';
-    setErrors((prev) => ({ ...prev, ...next }));
+    setErrors(next);
     return Object.keys(next).length === 0;
   };
 
   const validateBusiness = () => {
+    // Rebuild from scratch so resolved errors clear on re-validation.
     const next: Record<string, string> = {};
     if (!businessForm.name.trim()) next.businessName = 'Business name is required';
     if (!businessForm.category) next.category = 'Category is required';
-    setErrors((prev) => ({ ...prev, ...next }));
+    setErrors(next);
     return Object.keys(next).length === 0;
   };
 
@@ -284,7 +297,7 @@ export default function SettingsScreen() {
       await refreshProfile();
       showSavedFeedback('user');
     } catch (e) {
-      Alert.alert('Error', 'Failed to save profile. Please try again.');
+      notify.error('Failed to save profile. Please try again.');
     } finally {
       setSaving(null);
     }
@@ -349,7 +362,7 @@ export default function SettingsScreen() {
       await refreshBusiness();
       showSavedFeedback('business');
     } catch (e) {
-      Alert.alert('Error', 'Failed to save business. Please try again.');
+      notify.error('Failed to save business. Please try again.');
     } finally {
       setSaving(null);
     }
@@ -383,7 +396,7 @@ export default function SettingsScreen() {
       await refreshProfile();
     } catch (e) {
       setNotificationForm(notificationForm);
-      Alert.alert('Error', 'Failed to update notification settings. Please try again.');
+      notify.error('Failed to update notification settings. Please try again.');
     }
   };
 
@@ -399,7 +412,7 @@ export default function SettingsScreen() {
       await refreshBusiness();
     } catch (e) {
       setBusinessNotificationForm({ notificationsEnabled: prev });
-      Alert.alert('Error', 'Failed to update notification settings. Please try again.');
+      notify.error('Failed to update notification settings. Please try again.');
     }
   };
 
@@ -419,14 +432,11 @@ export default function SettingsScreen() {
       });
       await refreshProfile();
       if (field === 'showProfileToOthers' && !value) {
-        Alert.alert(
-          'Profile is now private',
-          "Others won't be able to see your profile or find you in search."
-        );
+        notify.success("Profile is now private. Others won't see you or find you in search.");
       }
     } catch (e) {
       setPrivacyForm(privacyForm);
-      Alert.alert('Error', 'Failed to update privacy settings. Please try again.');
+      notify.error('Failed to update privacy settings. Please try again.');
     }
   };
 
@@ -484,98 +494,157 @@ export default function SettingsScreen() {
       await refreshProfile();
       router.replace('/(onboarding)' as never);
     } catch {
-      Alert.alert('Error', 'Could not restart setup. Please try again.');
+      notify.error('Could not restart setup. Please try again.');
     }
   };
 
-  const handleUnsubscribePremium = async () => {
-    if (!userBusiness || !isPremium) return;
-    Alert.alert(
-      'Unsubscribe from Premium',
-      'Are you sure you want to go back to a regular account? You will lose premium features.',
-      [
-        { text: 'Keep Premium', style: 'cancel' },
-        {
-          text: 'Unsubscribe',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              // Mock downgrade to free plan
-              await premiumService.subscribeToPlan(userBusiness.id, 'free', 'monthly');
-              await refreshBusiness();
-              await refreshSubscription();
-              Alert.alert('Premium canceled', 'You are now on a regular account.');
-            } catch (e) {
-              console.error('Failed to unsubscribe from premium', e);
-              Alert.alert('Error', 'Failed to unsubscribe. Please try again.');
-            }
-          },
-        },
-      ]
-    );
+  const handleChangePassword = () => {
+    router.push('/(auth)/reset-password?mode=change' as never);
+  };
+
+  const handleChangeEmail = async () => {
+    const newEmail = emailForm.value.trim();
+    if (!/\S+@\S+\.\S+/.test(newEmail)) {
+      notify.error('Please enter a valid email address.');
+      return;
+    }
+    if (newEmail.toLowerCase() === (user?.email ?? '').toLowerCase()) {
+      notify.error('That is already your email address.');
+      return;
+    }
+    setEmailForm((p) => ({ ...p, saving: true }));
+    try {
+      await authService.updateEmail(newEmail);
+      notify.success(
+        `Confirmation email sent to ${newEmail}. Your email changes once you confirm it.`
+      );
+      setEmailForm({ open: false, value: '', saving: false });
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : 'Could not change email. Please try again.');
+      setEmailForm((p) => ({ ...p, saving: false }));
+    }
+  };
+
+  // Single cancel flow lives in /premium/manage.
+  const handleManageSubscription = () => {
+    router.push('/premium/manage' as never);
+  };
+
+  const handleBack = () => {
+    const dirty = isBizMode ? businessFormDirty : userFormDirty;
+    if (!dirty) {
+      router.back();
+      return;
+    }
+    notifyConfirm({
+      title: 'Discard changes?',
+      message: 'You have unsaved changes. Go back and lose them?',
+      confirmLabel: 'Discard',
+      cancelLabel: 'Keep editing',
+      destructive: true,
+      onConfirm: () => router.back(),
+    });
+  };
+
+  const performDeleteAccount = async () => {
+    if (deletingAccount) return;
+    setDeletingAccount(true);
+    try {
+      await deleteAccount();
+      // Explicit confirmation before the auth listener routes away.
+      notify.success('Your account has been deleted');
+      // The session is already invalid server-side; clear the local one so the
+      // auth state routes away. Failures here are harmless.
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // ignored — session is gone either way
+      }
+    } catch (e) {
+      if (e instanceof AccountDeletionUnavailableError) {
+        notify.error("Account deletion isn't enabled on this server yet.");
+      } else {
+        notify.error('Failed to delete account. Please try again.');
+      }
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    notifyConfirm({
+      title: 'Delete account?',
+      message:
+        'This permanently deletes your account and everything tied to it: your profile, business and its events, RSVPs, saved events, reviews, chat messages, and notifications. This cannot be undone.',
+      confirmLabel: 'Continue',
+      cancelLabel: 'Cancel',
+      destructive: true,
+      onConfirm: () => {
+        notifyConfirm({
+          title: 'Are you absolutely sure?',
+          message: 'Your account and all of its data will be erased immediately and forever.',
+          confirmLabel: 'Delete my account',
+          cancelLabel: 'Keep my account',
+          destructive: true,
+          onConfirm: () => void performDeleteAccount(),
+        });
+      },
+    });
   };
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       {/* ── Header ── */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => router.back()}
-          activeOpacity={0.7}
-        >
-          <ArrowLeft size={22} color={Colors.text.primary} />
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <View style={[styles.headerIconWrap, { backgroundColor: accentSoft }]}>
-            {isBizMode ? (
-              <Building2 size={18} color={accentColor} />
-            ) : (
-              <Settings size={18} color={accentColor} />
-            )}
-          </View>
-          <Text style={styles.headerTitle}>
-            {isBizMode ? 'Business Settings' : 'Settings'}
-          </Text>
-        </View>
-        {isBizMode && userBusiness ? (
-          <TouchableOpacity
-            onPress={handleSaveBusiness}
-            disabled={saving !== null || !businessFormDirty}
-            activeOpacity={0.7}
-            style={styles.headerSaveWrap}
-          >
-            <Text
-              style={[
-                styles.headerSaveText,
-                {
-                  color: businessFormDirty && saving === null ? accentColor : Colors.text.tertiary,
-                },
-              ]}
+      <ScreenHeader
+        title={isBizMode ? 'Business Settings' : 'Settings'}
+        onBack={handleBack}
+        safeArea={false}
+        backgroundColor={Palette.cardBg}
+        style={styles.headerBorder}
+        right={
+          isBizMode && userBusiness ? (
+            <TouchableOpacity
+              onPress={handleSaveBusiness}
+              disabled={saving !== null || !businessFormDirty}
+              activeOpacity={0.7}
+              style={styles.headerSaveWrap}
+              accessibilityRole="button"
+              accessibilityLabel="Save business settings"
             >
-              {saving === 'business' ? '...' : 'Save'}
-            </Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            onPress={handleSaveUser}
-            disabled={saving !== null || !userFormDirty}
-            activeOpacity={0.7}
-            style={styles.headerSaveWrap}
-          >
-            <Text
-              style={[
-                styles.headerSaveText,
-                {
-                  color: userFormDirty && saving === null ? accentColor : Colors.text.tertiary,
-                },
-              ]}
+              <Text
+                style={[
+                  styles.headerSaveText,
+                  {
+                    color: businessFormDirty && saving === null ? accentColor : Colors.text.tertiary,
+                  },
+                ]}
+              >
+                {saving === 'business' ? '...' : 'Save'}
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              onPress={handleSaveUser}
+              disabled={saving !== null || !userFormDirty}
+              activeOpacity={0.7}
+              style={styles.headerSaveWrap}
+              accessibilityRole="button"
+              accessibilityLabel="Save settings"
             >
-              {saving === 'user' ? '...' : 'Save'}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
+              <Text
+                style={[
+                  styles.headerSaveText,
+                  {
+                    color: userFormDirty && saving === null ? accentColor : Colors.text.tertiary,
+                  },
+                ]}
+              >
+                {saving === 'user' ? '...' : 'Save'}
+              </Text>
+            </TouchableOpacity>
+          )
+        }
+      />
 
       <KeyboardAvoidingView
         style={styles.keyboardView}
@@ -617,6 +686,7 @@ export default function SettingsScreen() {
                         setBusinessForm((p) => ({ ...p, name: t }))
                       }
                       placeholder="Business name"
+                      maxLength={80}
                       error={errors.businessName}
                     />
                   </View>
@@ -726,6 +796,7 @@ export default function SettingsScreen() {
                         setBusinessForm((p) => ({ ...p, instagram: t }))
                       }
                       placeholder="@username or username"
+                      maxLength={80}
                       autoCapitalize="none"
                       autoCorrect={false}
                     />
@@ -747,6 +818,7 @@ export default function SettingsScreen() {
                         setBusinessForm((p) => ({ ...p, facebook: t }))
                       }
                       placeholder="Username or page URL"
+                      maxLength={200}
                       autoCapitalize="none"
                       autoCorrect={false}
                     />
@@ -838,7 +910,7 @@ export default function SettingsScreen() {
                   <Switch
                     value={businessNotificationForm.notificationsEnabled}
                     onValueChange={handleBusinessNotificationToggle}
-                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       businessNotificationForm.notificationsEnabled
                         ? Colors.primary
@@ -848,14 +920,14 @@ export default function SettingsScreen() {
                 </View>
               </View>
 
-              {/* Unsubscribe from premium – only for premium business users */}
+              {/* Manage subscription – only for premium business users */}
               {isBizMode && userBusiness && isPremium && (
                 <TouchableOpacity
                   style={styles.unsubscribeWrap}
-                  onPress={handleUnsubscribePremium}
+                  onPress={handleManageSubscription}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.unsubscribeText}>Unsubscribe from premium</Text>
+                  <Text style={styles.unsubscribeText}>Manage subscription</Text>
                 </TouchableOpacity>
               )}
             </>
@@ -884,6 +956,7 @@ export default function SettingsScreen() {
                       value={userForm.name}
                       onChangeText={(t) => setUserForm((p) => ({ ...p, name: t }))}
                       placeholder="Your name"
+                      maxLength={80}
                       error={errors.name}
                     />
                   </View>
@@ -902,6 +975,7 @@ export default function SettingsScreen() {
                       value={userForm.bio}
                       onChangeText={(t) => setUserForm((p) => ({ ...p, bio: t }))}
                       placeholder="A short bio about yourself"
+                      maxLength={500}
                       multiline
                       numberOfLines={3}
                     />
@@ -923,6 +997,7 @@ export default function SettingsScreen() {
                         setUserForm((p) => ({ ...p, hobbies: t }))
                       }
                       placeholder="e.g. hiking, music, cooking"
+                      maxLength={200}
                       error={errors.hobbies}
                     />
                   </View>
@@ -941,6 +1016,7 @@ export default function SettingsScreen() {
                       value={userForm.instagram}
                       onChangeText={(t) => setUserForm((p) => ({ ...p, instagram: t }))}
                       placeholder="@username or username"
+                      maxLength={80}
                       autoCapitalize="none"
                       autoCorrect={false}
                     />
@@ -960,6 +1036,7 @@ export default function SettingsScreen() {
                       value={userForm.facebook}
                       onChangeText={(t) => setUserForm((p) => ({ ...p, facebook: t }))}
                       placeholder="Username or profile URL"
+                      maxLength={200}
                       autoCapitalize="none"
                       autoCorrect={false}
                     />
@@ -1056,7 +1133,7 @@ export default function SettingsScreen() {
                   <Switch
                     value={privacyForm.showProfileToOthers}
                     onValueChange={(v) => handlePrivacyToggle('showProfileToOthers', v)}
-                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       privacyForm.showProfileToOthers ? Colors.primary : Colors.background.secondary
                     }
@@ -1076,7 +1153,7 @@ export default function SettingsScreen() {
                   <Switch
                     value={privacyForm.showAttendancePublicly}
                     onValueChange={(v) => handlePrivacyToggle('showAttendancePublicly', v)}
-                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       privacyForm.showAttendancePublicly
                         ? Colors.primary
@@ -1098,7 +1175,7 @@ export default function SettingsScreen() {
                   <Switch
                     value={privacyForm.showFutureEvents}
                     onValueChange={(v) => handlePrivacyToggle('showFutureEvents', v)}
-                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       privacyForm.showFutureEvents ? Colors.primary : Colors.background.secondary
                     }
@@ -1122,7 +1199,7 @@ export default function SettingsScreen() {
                   <Switch
                     value={notificationForm.newFollower}
                     onValueChange={(v) => handleNotificationToggle('newFollower', v)}
-                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       notificationForm.newFollower ? Colors.primary : Colors.background.secondary
                     }
@@ -1140,7 +1217,7 @@ export default function SettingsScreen() {
                   <Switch
                     value={notificationForm.newEventFromFollowed}
                     onValueChange={(v) => handleNotificationToggle('newEventFromFollowed', v)}
-                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       notificationForm.newEventFromFollowed
                         ? Colors.primary
@@ -1160,7 +1237,7 @@ export default function SettingsScreen() {
                   <Switch
                     value={notificationForm.eventUpdate}
                     onValueChange={(v) => handleNotificationToggle('eventUpdate', v)}
-                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       notificationForm.eventUpdate ? Colors.primary : Colors.background.secondary
                     }
@@ -1178,7 +1255,7 @@ export default function SettingsScreen() {
                   <Switch
                     value={notificationForm.rsvp}
                     onValueChange={(v) => handleNotificationToggle('rsvp', v)}
-                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       notificationForm.rsvp ? Colors.primary : Colors.background.secondary
                     }
@@ -1196,7 +1273,7 @@ export default function SettingsScreen() {
                   <Switch
                     value={notificationForm.nearbyEvent}
                     onValueChange={(v) => handleNotificationToggle('nearbyEvent', v)}
-                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       notificationForm.nearbyEvent ? Colors.primary : Colors.background.secondary
                     }
@@ -1214,7 +1291,7 @@ export default function SettingsScreen() {
                   <Switch
                     value={notificationForm.chatMessage}
                     onValueChange={(v) => handleNotificationToggle('chatMessage', v)}
-                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       notificationForm.chatMessage ? Colors.primary : Colors.background.secondary
                     }
@@ -1234,7 +1311,7 @@ export default function SettingsScreen() {
                   <Switch
                     value={notificationForm.interestedReminder}
                     onValueChange={(v) => handleNotificationToggle('interestedReminder', v)}
-                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       notificationForm.interestedReminder ? Colors.primary : Colors.background.secondary
                     }
@@ -1259,7 +1336,7 @@ export default function SettingsScreen() {
                         v ? 60 : null
                       )
                     }
-                    trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                    trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       notificationForm.eventReminderMinutes != null
                         ? Colors.primary
@@ -1376,6 +1453,100 @@ export default function SettingsScreen() {
                   </View>
                   <ChevronRight size={18} color={Colors.text.tertiary} />
                 </TouchableOpacity>
+
+                <View style={styles.fieldSeparator} />
+
+                <TouchableOpacity
+                  style={styles.aboutRow}
+                  onPress={handleChangePassword}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Change password"
+                >
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <KeyRound size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Change password</Text>
+                    <Text style={styles.privacyDesc}>Set a new password for your account</Text>
+                  </View>
+                  <ChevronRight size={18} color={Colors.text.tertiary} />
+                </TouchableOpacity>
+
+                <View style={styles.fieldSeparator} />
+
+                <TouchableOpacity
+                  style={styles.aboutRow}
+                  onPress={() => setEmailForm((p) => ({ ...p, open: !p.open }))}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Change email"
+                >
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Mail size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Change email</Text>
+                    <Text style={styles.privacyDesc}>
+                      A confirmation email is sent to the new address
+                    </Text>
+                  </View>
+                  <ChevronRight size={18} color={Colors.text.tertiary} />
+                </TouchableOpacity>
+
+                {emailForm.open && (
+                  <View style={styles.fieldRow}>
+                    <View style={[styles.fieldIcon, styles.fieldIconMuted]}>
+                      <Mail size={16} color={Colors.text.tertiary} />
+                    </View>
+                    <View style={styles.fieldContent}>
+                      <Input
+                        label="New email address"
+                        value={emailForm.value}
+                        onChangeText={(t) => setEmailForm((p) => ({ ...p, value: t }))}
+                        placeholder="name@example.com"
+                        keyboardType="email-address"
+                        autoCapitalize="none"
+                      />
+                      <TouchableOpacity
+                        style={styles.emailSaveBtn}
+                        onPress={handleChangeEmail}
+                        disabled={emailForm.saving}
+                        activeOpacity={0.8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Send confirmation email"
+                      >
+                        <Text style={styles.emailSaveBtnText}>
+                          {emailForm.saving ? 'Sending…' : 'Send confirmation email'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+
+                <View style={styles.fieldSeparator} />
+
+                <TouchableOpacity
+                  style={styles.aboutRow}
+                  onPress={handleDeleteAccount}
+                  disabled={deletingAccount}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete account"
+                >
+                  <View style={[styles.fieldIcon, styles.dangerIcon]}>
+                    <Trash2 size={16} color={Colors.error} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={[styles.privacyTitle, styles.dangerTitle]}>
+                      {deletingAccount ? 'Deleting account…' : 'Delete account'}
+                    </Text>
+                    <Text style={styles.privacyDesc}>
+                      Permanently erase your profile, events, and all data
+                    </Text>
+                  </View>
+                  <ChevronRight size={18} color={Colors.text.tertiary} />
+                </TouchableOpacity>
               </View>
             </>
           )}
@@ -1394,42 +1565,9 @@ const styles = StyleSheet.create({
   },
 
   /* ── Header ── */
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: Palette.cardBg,
+  headerBorder: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Palette.separator,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: Palette.surfaceMuted,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  headerIconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: Palette.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: Colors.text.primary,
   },
   headerSaveWrap: {
     paddingVertical: 8,
@@ -1525,6 +1663,12 @@ const styles = StyleSheet.create({
   },
   fieldIconMuted: {
     backgroundColor: Palette.surfaceMuted,
+  },
+  dangerIcon: {
+    backgroundColor: Colors.errorSoft,
+  },
+  dangerTitle: {
+    color: Colors.error,
   },
   fieldContent: {
     flex: 1,
@@ -1670,6 +1814,21 @@ const styles = StyleSheet.create({
     color: Colors.error,
     marginTop: 4,
     marginLeft: 4,
+  },
+
+  emailSaveBtn: {
+    marginTop: Spacing.sm,
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.primary,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
+  },
+  emailSaveBtnText: {
+    color: Colors.text.inverse,
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
   },
 
   unsubscribeWrap: {

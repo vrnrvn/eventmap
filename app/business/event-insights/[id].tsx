@@ -13,11 +13,14 @@ import { ArrowLeft, Eye, Heart, Users, Share2 } from 'lucide-react-native';
 import { premiumService } from '@/services/premium';
 import { eventsService } from '@/services/events';
 import { useApp } from '@/contexts/AppContext';
+import { usePremium } from '@/contexts/PremiumContext';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 
 export default function EventInsightsScreen() {
   const insets = useSafeAreaInsets();
   const { userBusiness } = useApp();
+  const { isPremium, canUse, loading: premiumLoading } = usePremium();
+  const canAccessInsights = isPremium && canUse('analytics');
   const { id } = useLocalSearchParams<{ id: string }>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +57,7 @@ export default function EventInsightsScreen() {
         saves: details.save_count,
         rsvps: details.rsvp_count,
       });
-      const data = await premiumService.getEventAnalytics(id, 30);
+      const data = await premiumService.getSampleEventAnalytics(id, 30);
       setTotals({
         totalViews: data.totalViews,
         totalSaves: data.totalSaves,
@@ -84,9 +87,22 @@ export default function EventInsightsScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      {loading ? (
+      {premiumLoading || loading ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      ) : !canAccessInsights ? (
+        <View style={styles.center}>
+          <Text style={styles.error}>
+            Event insights are a Pro feature. Upgrade to see analytics for your
+            events.
+          </Text>
+          <TouchableOpacity
+            onPress={() => router.push('/premium/plans' as never)}
+            style={styles.retry}
+          >
+            <Text style={styles.retryText}>View plans</Text>
+          </TouchableOpacity>
         </View>
       ) : forbidden ? (
         <View style={styles.center}>
@@ -123,25 +139,38 @@ export default function EventInsightsScreen() {
             <Text style={styles.liveHint}>Live counts on this listing (all time).</Text>
           </View>
           <Text style={styles.sub}>
-            Last 30 days (aggregated). Connect production analytics for live data.
+            The figures below are sample data — view and share tracking is not
+            connected yet. Only the Saves and RSVPs above are real.
           </Text>
           <View style={styles.grid}>
             <View style={styles.card}>
+              <View style={styles.sampleBadge}>
+                <Text style={styles.sampleBadgeText}>Sample data</Text>
+              </View>
               <Eye size={22} color={Colors.primary} />
               <Text style={styles.cardValue}>{totals.totalViews.toLocaleString()}</Text>
               <Text style={styles.cardLabel}>Views</Text>
             </View>
             <View style={styles.card}>
+              <View style={styles.sampleBadge}>
+                <Text style={styles.sampleBadgeText}>Sample data</Text>
+              </View>
               <Heart size={22} color={Colors.error} />
               <Text style={styles.cardValue}>{totals.totalSaves.toLocaleString()}</Text>
               <Text style={styles.cardLabel}>Saves</Text>
             </View>
             <View style={styles.card}>
+              <View style={styles.sampleBadge}>
+                <Text style={styles.sampleBadgeText}>Sample data</Text>
+              </View>
               <Users size={22} color={Colors.secondary} />
               <Text style={styles.cardValue}>{totals.totalRsvps.toLocaleString()}</Text>
               <Text style={styles.cardLabel}>RSVPs</Text>
             </View>
             <View style={styles.card}>
+              <View style={styles.sampleBadge}>
+                <Text style={styles.sampleBadgeText}>Sample data</Text>
+              </View>
               <Share2 size={22} color={Colors.text.secondary} />
               <Text style={styles.cardValue}>{totals.shareClicks.toLocaleString()}</Text>
               <Text style={styles.cardLabel}>Share taps</Text>
@@ -271,5 +300,21 @@ const styles = StyleSheet.create({
     color: Colors.text.tertiary,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
+  },
+  sampleBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: Spacing.xs,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.background.primary,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+  },
+  sampleBadgeText: {
+    fontSize: 10,
+    color: Colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    fontFamily: Typography.fontFamilies.semibold,
   },
 });

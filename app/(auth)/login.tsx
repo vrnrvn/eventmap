@@ -7,23 +7,25 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  ActivityIndicator,
-  Alert,
   Image,
   TextInput,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { GoogleIcon } from '@/components/icons/BrandIcons';
+import { Button } from '@/components/ui/Button';
 import { oauthEnabled } from '@/services/runtime';
-import { Colors, Typography, BorderRadius } from '@/constants/theme';
+import { notify } from '@/utils/notify';
+import { Colors, Typography, BorderRadius, Spacing } from '@/constants/theme';
 import { ArrowLeft, Eye, EyeOff, Mail, Lock } from 'lucide-react-native';
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
-  const { email: emailParam } = useLocalSearchParams<{ email?: string }>();
+  const { email: emailParam, redirect: redirectParam } = useLocalSearchParams<{
+    email?: string;
+    redirect?: string;
+  }>();
   const { signIn, signInWithOAuth } = useAuth();
   const scrollRef = useRef<ScrollView>(null);
 
@@ -39,6 +41,12 @@ export default function LoginScreen() {
     if (value) setEmail(value);
   }, [emailParam]);
 
+  // Optional return path after login (internal paths only), e.g. back to an event.
+  const redirectTo = (() => {
+    const value = Array.isArray(redirectParam) ? redirectParam[0] : redirectParam;
+    return value && value.startsWith('/') && !value.startsWith('//') ? value : '/';
+  })();
+
   const validateForm = () => {
     const newErrors: { email?: string; password?: string } = {};
     if (!email.trim()) newErrors.email = 'Email is required';
@@ -53,10 +61,10 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await signIn(email, password);
-      router.replace('/');
+      router.replace(redirectTo as never);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
-      Alert.alert('Sign In Failed', msg || 'Please try again');
+      notify.error(msg || 'Sign in failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -66,10 +74,10 @@ export default function LoginScreen() {
     setOauthLoading(true);
     try {
       await signInWithOAuth('google');
-      router.replace('/');
+      router.replace(redirectTo as never);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
-      Alert.alert('Google Sign In', msg.includes('cancelled') ? 'Sign in was cancelled.' : msg);
+      notify.error(msg.includes('cancelled') ? 'Sign in was cancelled.' : msg);
     } finally {
       setOauthLoading(false);
     }
@@ -88,12 +96,19 @@ export default function LoginScreen() {
           contentContainerStyle={{
             paddingTop: insets.top + 10,
             paddingBottom: insets.bottom + 24,
-            paddingHorizontal: 22,
+            paddingHorizontal: Spacing.lg,
           }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.75}>
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => router.back()}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <ArrowLeft size={20} color={Colors.text.primary} />
           </TouchableOpacity>
 
@@ -102,7 +117,7 @@ export default function LoginScreen() {
               <Image source={require('@/assets/images/EMlogo.png')} style={[styles.logo, styles.logoTint]} resizeMode="contain" />
             </View>
             <Text style={styles.heroTitle}>Welcome Back</Text>
-            <Text style={styles.heroSub}>Sign in to explore your city's pulse</Text>
+            <Text style={styles.heroSub}>Sign in to explore your city&apos;s pulse</Text>
           </View>
 
           <View style={styles.card}>
@@ -137,7 +152,12 @@ export default function LoginScreen() {
                 secureTextEntry={!showPassword}
                 style={styles.input}
               />
-              <TouchableOpacity onPress={() => setShowPassword((v) => !v)}>
+              <TouchableOpacity
+                onPress={() => setShowPassword((v) => !v)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityRole="button"
+                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+              >
                 {showPassword ? (
                   <EyeOff size={21} color={Colors.text.tertiary} />
                 ) : (
@@ -147,11 +167,15 @@ export default function LoginScreen() {
             </View>
             {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
 
-            <TouchableOpacity style={styles.ctaWrap} onPress={handleSignIn} disabled={loading} activeOpacity={0.9}>
-              <LinearGradient colors={[Colors.primary, Colors.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.cta}>
-                {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.ctaText}>Login</Text>}
-              </LinearGradient>
-            </TouchableOpacity>
+            <Button
+              label="Login"
+              onPress={handleSignIn}
+              loading={loading}
+              size="lg"
+              fullWidth
+              gradient
+              style={styles.ctaWrap}
+            />
 
             {oauthEnabled && <><View style={styles.divider}>
               <View style={styles.dividerLine} />
@@ -167,7 +191,7 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>Don't have an account?</Text>
+            <Text style={styles.footerText}>Don&apos;t have an account?</Text>
             <TouchableOpacity onPress={() => router.push('/(auth)/signup')}>
               <Text style={styles.footerLink}>Sign Up</Text>
             </TouchableOpacity>
@@ -202,8 +226,8 @@ const styles = StyleSheet.create({
   logo: { width: 52, height: 52 },
   logoTint: { tintColor: Colors.primary },
   heroTitle: {
-    fontSize: 54,
-    lineHeight: 60,
+    fontSize: Typography.sizes.xxl,
+    lineHeight: 38,
     color: Colors.text.primary,
     fontFamily: Typography.displayFontFamilies.extrabold,
     fontWeight: '800',
@@ -267,18 +291,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Typography.fontFamilies.medium,
   },
-  ctaWrap: { marginTop: 24, borderRadius: BorderRadius.round, overflow: 'hidden' },
-  cta: {
-    height: 64,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ctaText: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontFamily: Typography.displayFontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-  },
+  ctaWrap: { marginTop: Spacing.lg },
   divider: {
     marginTop: 24,
     marginBottom: 18,
@@ -289,7 +302,7 @@ const styles = StyleSheet.create({
   dividerLine: { flex: 1, height: 1, backgroundColor: Colors.border.light },
   dividerText: {
     color: Colors.text.tertiary,
-    fontSize: 11,
+    fontSize: Typography.sizes.xs,
     letterSpacing: 2,
     fontFamily: Typography.labelFontFamilies.semibold,
   },

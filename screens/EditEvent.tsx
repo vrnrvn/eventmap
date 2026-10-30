@@ -13,12 +13,12 @@ import {
 import DateTimePicker, {
   DateTimePickerAndroid,
 } from '@react-native-community/datetimepicker';
-import { Repeat, ChevronRight } from 'lucide-react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { Repeat, ChevronRight, MapPin } from 'lucide-react-native';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useApp } from '@/contexts/AppContext';
+import { usePremium } from '@/contexts/PremiumContext';
 import { Input } from '@/components/Input';
-import { AddressSearchInput } from '@/components/AddressSearchInput';
-import { GoogleMapView } from '@/components/GoogleMapView';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import {
   RecurrencePicker,
@@ -26,8 +26,9 @@ import {
   type RecurrencePickerHandle,
 } from '@/components/RecurrencePicker';
 import type { RecurrenceOption } from '@/utils/recurrence';
-import { geocodingService } from '@/services/geocoding';
+import { notify, notifyConfirm } from '@/utils/notify';
 import { eventsService } from '@/services/events';
+import { eventLocationStore } from '@/stores/eventLocationStore';
 import { categoriesService } from '@/services/categories';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { Category, EventPhoto } from '@/types/database';
@@ -40,6 +41,7 @@ MAX_EVENT_DATE.setFullYear(MAX_EVENT_DATE.getFullYear() + 10);
 export default function EditEvent() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { userBusiness } = useApp();
+  const { currentPlan } = usePremium();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -61,10 +63,14 @@ export default function EditEvent() {
     lng: DEFAULT_LOCATION.lng,
     images: [] as ImageAsset[],
     recurrence: null as RecurrenceOption,
+    maxAttendees: '',
   });
   const recurrencePickerRef = useRef<RecurrencePickerHandle>(null);
   /** Track the original photos loaded from DB to detect removals */
   const originalPhotoIds = useRef<string[]>([]);
+  /** Original start time, so saves of other fields aren't blocked for past events */
+  const originalStartMs = useRef<number | null>(null);
+  const originalHadCap = useRef(false);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -72,15 +78,32 @@ export default function EditEvent() {
     categoriesService.getAllCategories().then(setCategories);
   }, []);
 
+  // Location is select-only: it can only change via the /business-location
+  // picker (suggestion pick or map tap), which hands the committed result
+  // back through eventLocationStore. Free-typed text can never desync the
+  // address from the saved coordinates.
+  useFocusEffect(
+    useCallback(() => {
+      const loc = eventLocationStore.consume();
+      if (loc) {
+        setFormData((f) => ({
+          ...f,
+          address: loc.formattedAddress,
+          lat: loc.lat,
+          lng: loc.lng,
+        }));
+      }
+    }, [])
+  );
+
   useEffect(() => {
     if (!id) return;
     const load = async () => {
       try {
         const details = await eventsService.getEventDetails(id);
         if (!details?.event) {
-          Alert.alert('Error', 'Event not found', [
-            { text: 'OK', onPress: () => router.back() },
-          ]);
+          notify.error('Event not found');
+          router.back();
           return;
         }
         const e = details.event;
@@ -96,6 +119,9 @@ export default function EditEvent() {
         originalPhotoIds.current = existingImages
           .map((img) => img.photoId)
           .filter(Boolean) as string[];
+        originalStartMs.current = new Date(e.start_datetime).getTime();
+        originalHadCap.current =
+          (e as { max_attendees?: number | null }).max_attendees != null;
 
         setFormData({
           title: e.title,
@@ -108,11 +134,15 @@ export default function EditEvent() {
           lng: e.lng,
           images: existingImages,
           recurrence: e.is_recurring && e.recurrence_pattern ? e.recurrence_pattern : null,
+          // Tolerant: max_attendees only exists once 20261030108000 is applied.
+          maxAttendees:
+            (e as { max_attendees?: number | null }).max_attendees != null
+              ? String((e as { max_attendees?: number | null }).max_attendees)
+              : '',
         });
       } catch {
-        Alert.alert('Error', 'Failed to load event', [
-          { text: 'OK', onPress: () => router.back() },
-        ]);
+        notify.error('Failed to load event');
+        router.back();
       } finally {
         setLoading(false);
       }
@@ -132,6 +162,8 @@ export default function EditEvent() {
       DateTimePickerAndroid.open({
         value: currentDate,
         mode: 'date',
+        // Don't clamp events whose (unchanged) start is already in the past.
+        minimumDate: currentDate.getTime() >= Date.now() ? new Date() : undefined,
         maximumDate: MAX_EVENT_DATE,
         onChange: (_, dateResult) => {
           if (dateResult) {
@@ -154,8 +186,22 @@ export default function EditEvent() {
     if (!formData.title.trim()) e.title = 'Title is required';
     if (!formData.description.trim()) e.description = 'Description is required';
     if (!formData.categoryId) e.categoryId = 'Select a category';
+    // Only enforce a future start when the start was actually changed, so an
+    // event that already started can still have its other fields edited.
+    const startChanged =
+      originalStartMs.current == null ||
+      formData.startDatetime.getTime() !== originalStartMs.current;
+    if (startChanged && formData.startDatetime.getTime() <= Date.now()) {
+      e.startDatetime = 'Start must be in the future';
+    }
     if (formData.endDatetime <= formData.startDatetime) {
       e.endDatetime = 'End must be after start';
+    }
+    if (formData.maxAttendees.trim()) {
+      const n = Number(formData.maxAttendees.trim());
+      if (!Number.isInteger(n) || n <= 0) {
+        e.maxAttendees = 'Enter a whole number greater than 0';
+      }
     }
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -170,45 +216,13 @@ export default function EditEvent() {
 
     setSaving(true);
     try {
-      // Detect removed photos and delete them
-      const currentPhotoIds = formData.images
-        .map((img) => img.photoId)
-        .filter(Boolean) as string[];
-      const removedIds = originalPhotoIds.current.filter(
-        (pid) => !currentPhotoIds.includes(pid)
-      );
-      for (const pid of removedIds) {
-        await eventsService.deleteEventPhoto(pid);
-      }
-
-      // Upload new images (no photoId means it's new)
-      const uploadedUrls: string[] = [];
-      for (const img of formData.images) {
-        if (!img.photoId) {
-          const url = await eventsService.uploadEventImage({
-            uri: img.uri,
-            name: img.name,
-            type: img.type,
-          });
-          uploadedUrls.push(url);
-        }
-      }
-
-      // Add new photos to DB
-      const existingCount = formData.images.filter((i) => i.photoId).length;
-      for (let i = 0; i < uploadedUrls.length; i++) {
-        await eventsService.addEventPhoto(id, uploadedUrls[i], existingCount + i);
-      }
-
-      // Determine cover image: first image in the list
-      const firstImage = formData.images[0];
-      const coverImageUrl = firstImage
-        ? firstImage.remoteUrl ||
-          uploadedUrls[formData.images.filter((i) => !i.photoId).indexOf(firstImage)] ||
-          null
+      // Save the event fields FIRST: if this fails, nothing has been uploaded
+      // or deleted, so there are no orphans. Photos are handled afterwards
+      // and photo failures are non-fatal.
+      const maxAttendeesValue = formData.maxAttendees.trim()
+        ? Number(formData.maxAttendees.trim())
         : null;
-
-      await eventsService.updateEvent(id, {
+      const updates: Record<string, unknown> = {
         title: formData.title.trim(),
         description: formData.description.trim(),
         category_id: formData.categoryId,
@@ -217,18 +231,104 @@ export default function EditEvent() {
         address,
         lat,
         lng,
-        cover_image_url: coverImageUrl,
         is_recurring: formData.recurrence != null,
         recurrence_pattern: formData.recurrence ?? null,
-      });
-      Alert.alert('Saved', 'Event updated.', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
-    } catch (err: unknown) {
-      Alert.alert(
-        'Error',
-        err instanceof Error ? err.message : 'Failed to update event'
+      };
+      // Include max_attendees when the user set a value, or when the event
+      // previously had a cap and the field was cleared (send null to remove
+      // it); the column only exists once 20261030108000 is applied.
+      if (maxAttendeesValue != null || originalHadCap.current) {
+        updates.max_attendees = maxAttendeesValue;
+      }
+
+      let capacityUnavailable = false;
+      try {
+        await eventsService.updateEvent(id, updates as never);
+      } catch (updErr: unknown) {
+        const code = (updErr as { code?: string })?.code;
+        // TODO: remove retry once 20261030108000 is applied
+        if (
+          'max_attendees' in updates &&
+          (code === '42703' || code === 'PGRST204')
+        ) {
+          delete updates.max_attendees;
+          await eventsService.updateEvent(id, updates as never);
+          capacityUnavailable = true;
+        } else {
+          throw updErr;
+        }
+      }
+
+      // Detect removed photos and delete them (non-fatal)
+      const currentPhotoIds = formData.images
+        .map((img) => img.photoId)
+        .filter(Boolean) as string[];
+      const removedIds = originalPhotoIds.current.filter(
+        (pid) => !currentPhotoIds.includes(pid)
       );
+      for (const pid of removedIds) {
+        try {
+          await eventsService.deleteEventPhoto(pid);
+        } catch {
+          // Non-fatal: the photo just stays attached.
+        }
+      }
+
+      // Upload + attach new images (no photoId means it's new); keep the
+      // successes even if some fail.
+      let photoFailures = 0;
+      const uploadedByUri = new Map<string, string>();
+      const existingCount = formData.images.filter((i) => i.photoId).length;
+      for (const img of formData.images) {
+        if (img.photoId) continue;
+        try {
+          const url = await eventsService.uploadEventImage({
+            uri: img.uri,
+            name: img.name,
+            type: img.type,
+          });
+          await eventsService.addEventPhoto(
+            id,
+            url,
+            existingCount + uploadedByUri.size
+          );
+          uploadedByUri.set(img.uri, url);
+        } catch {
+          photoFailures += 1;
+        }
+      }
+
+      // Cover image: first image in the list (existing URL or a successful
+      // upload); non-fatal if it can't be written.
+      const firstImage = formData.images[0];
+      const coverImageUrl = firstImage
+        ? firstImage.remoteUrl || uploadedByUri.get(firstImage.uri) || null
+        : null;
+      try {
+        await eventsService.updateEvent(id, { cover_image_url: coverImageUrl });
+      } catch {
+        // Non-fatal.
+      }
+
+      const warnings: string[] = [];
+      if (photoFailures > 0) {
+        warnings.push(
+          `${photoFailures} photo(s) failed to upload — you can try again by editing the event.`
+        );
+      }
+      if (capacityUnavailable) {
+        warnings.push(
+          'Attendee capacity is not enabled yet, so the limit was not saved.'
+        );
+      }
+      notify.success(
+        warnings.length > 0
+          ? `Event updated, but ${warnings.join(' Also, ')}`
+          : 'Event updated.'
+      );
+      router.back();
+    } catch (err: unknown) {
+      notify.error(err instanceof Error ? err.message : 'Failed to update event');
     } finally {
       setSaving(false);
     }
@@ -255,23 +355,27 @@ export default function EditEvent() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backText}>Cancel</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Edit Event</Text>
-        <TouchableOpacity
-          style={styles.saveHeaderButton}
-          onPress={handleSubmit}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator size="small" color={Colors.primary} />
-          ) : (
-            <Text style={styles.saveHeaderText}>Save</Text>
-          )}
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader
+        title="Edit Event"
+        backgroundColor={Colors.surface}
+        style={styles.headerBorder}
+        right={
+          <TouchableOpacity
+            style={styles.saveHeaderButton}
+            onPress={handleSubmit}
+            disabled={saving}
+            accessibilityRole="button"
+            accessibilityLabel="Save event"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : (
+              <Text style={styles.saveHeaderText}>Save</Text>
+            )}
+          </TouchableOpacity>
+        }
+      />
 
       <ScrollView
         style={styles.scrollView}
@@ -349,12 +453,18 @@ export default function EditEvent() {
             value={formData.startDatetime}
             mode="datetime"
             display="spinner"
+            minimumDate={
+              formData.startDatetime.getTime() >= Date.now() ? new Date() : undefined
+            }
             maximumDate={MAX_EVENT_DATE}
             onChange={(_, d) => {
               setShowStartPicker(false);
               if (d) setFormData((f) => ({ ...f, startDatetime: d }));
             }}
           />
+        )}
+        {errors.startDatetime && (
+          <Text style={styles.errorText}>{errors.startDatetime}</Text>
         )}
 
         <Text style={styles.label}>End</Text>
@@ -394,14 +504,14 @@ export default function EditEvent() {
           style={styles.dateButton}
           onPress={() => {
             if (userBusiness?.subscription_tier !== 'premium') {
-              Alert.alert(
-                'Premium Feature',
-                'Recurring events are only available for Premium businesses. Upgrade to create recurring events.',
-                [
-                  { text: 'OK' },
-                  { text: 'Upgrade', onPress: () => router.push('/(tabs)/profile') },
-                ]
-              );
+              notifyConfirm({
+                title: 'Premium Feature',
+                message:
+                  'Recurring events are only available for Premium businesses. Upgrade to create recurring events.',
+                cancelLabel: 'OK',
+                confirmLabel: 'Upgrade',
+                onConfirm: () => router.push('/premium/plans' as never),
+              });
               return;
             }
             recurrencePickerRef.current?.present();
@@ -419,59 +529,69 @@ export default function EditEvent() {
           </View>
         </TouchableOpacity>
 
+        <Input
+          label="Max attendees (optional)"
+          value={formData.maxAttendees}
+          onChangeText={(t) =>
+            setFormData((f) => ({
+              ...f,
+              maxAttendees: t.replace(/[^0-9]/g, ''),
+            }))
+          }
+          placeholder="Unlimited"
+          keyboardType="number-pad"
+          error={errors.maxAttendees}
+        />
+
         <Text style={styles.label}>Photos</Text>
         <Text style={styles.tapHint}>First image becomes the cover photo</Text>
         <ImagePickerButton
           images={formData.images}
           onChange={(imgs) => setFormData((f) => ({ ...f, images: imgs }))}
-          maxImages={5}
+          maxImages={currentPlan?.max_photos_per_event ?? 5}
         />
 
         <Text style={styles.label}>Location (optional – defaults to business address)</Text>
-        <AddressSearchInput
-          value={formData.address}
-          onChangeText={(t) => setFormData((f) => ({ ...f, address: t }))}
-          onSelect={(result) =>
-            setFormData((f) => ({
-              ...f,
-              address: result.formattedAddress,
-              lat: result.lat,
-              lng: result.lng,
-            }))
-          }
-          placeholder="Address or venue"
-          approximate={false}
-          showSetButton
-        />
-        <Text style={styles.tapHint}>Tap on the map to set location</Text>
-        <View style={styles.mapPreview}>
-          <GoogleMapView
-            center={{ lat: formData.lat, lng: formData.lng }}
-            zoom={15}
-            webViewScrollEnabled={false}
-            nestedScrollEnabled={false}
-            markers={[
-              {
-                id: 'event',
-                lat: formData.lat,
-                lng: formData.lng,
-                title: formData.title || 'Event location',
+        <Text style={styles.tapHint}>
+          Pick the address from suggestions or tap the map
+        </Text>
+        <TouchableOpacity
+          style={styles.addressTouchable}
+          onPress={() =>
+            router.push({
+              pathname: '/business-location',
+              params: {
+                context: 'event',
+                address: formData.address ?? '',
+                lat: String(formData.lat),
+                lng: String(formData.lng),
               },
-            ]}
-            style={styles.mapPreviewInner}
-            onMapPress={async (lat, lng) => {
-              const result = await geocodingService.reverseGeocode(lat, lng);
-              if (result) {
-                setFormData((f) => ({
-                  ...f,
-                  address: result.formattedAddress,
-                  lat: result.lat,
-                  lng: result.lng,
-                }));
-              }
-            }}
-          />
-        </View>
+            })
+          }
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Set event location"
+        >
+          <View style={styles.addressTouchableRow}>
+            <MapPin size={18} color={Colors.text.tertiary} />
+            <Text
+              style={[
+                styles.addressTouchableText,
+                !formData.address?.trim() && styles.addressPlaceholder,
+              ]}
+              numberOfLines={2}
+            >
+              {formData.address?.trim()
+                ? formData.address
+                : 'Tap to set venue on map'}
+            </Text>
+          </View>
+          {!!formData.address?.trim() && (
+            <Text style={styles.addressCoords}>
+              {formData.lat.toFixed(4)}, {formData.lng.toFixed(4)}
+            </Text>
+          )}
+        </TouchableOpacity>
         <RecurrencePicker
           ref={recurrencePickerRef}
           selectedValue={formData.recurrence}
@@ -492,29 +612,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.md,
-    paddingTop: Spacing.xxl + 24,
-    paddingBottom: Spacing.md,
+  headerBorder: {
     borderBottomWidth: 1,
     borderBottomColor: Colors.border.light,
-  },
-  backButton: {
-    padding: Spacing.sm,
-    minWidth: 60,
-  },
-  backText: {
-    fontSize: Typography.sizes.md,
-    color: Colors.text.secondary,
-  },
-  title: {
-    fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: Colors.text.primary,
   },
   saveHeaderButton: {
     padding: Spacing.sm,
@@ -605,14 +705,32 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
     marginBottom: Spacing.sm,
   },
-  mapPreview: {
-    height: 280,
-    borderRadius: BorderRadius.lg,
-    overflow: 'hidden',
+  addressTouchable: {
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 4,
+    backgroundColor: Colors.background.primary,
     marginBottom: Spacing.md,
   },
-  mapPreviewInner: {
+  addressTouchableRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+  },
+  addressTouchableText: {
+    fontSize: Typography.sizes.md,
+    color: Colors.text.primary,
     flex: 1,
-    minHeight: 280,
+  },
+  addressPlaceholder: {
+    color: Colors.text.tertiary,
+  },
+  addressCoords: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+    marginTop: 4,
   },
 });

@@ -35,7 +35,7 @@ file_size_limit = "5MiB"
 [auth]
 enabled = true
 site_url = "http://localhost:8081"
-additional_redirect_urls = ["http://localhost:8081/**", "http://127.0.0.1:8081/**", "eventmap://**"]
+additional_redirect_urls = ["http://localhost:8081/**", "http://127.0.0.1:8081/**", "eventmap://**", "exp://**"]
 jwt_expiry = 3600
 enable_signup = true
 

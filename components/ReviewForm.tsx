@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
 import { Star } from 'lucide-react-native';
 import { Colors, Spacing, Typography } from '@/constants/theme';
+import { notify } from '@/utils/notify';
 
 type ReviewFormProps = {
   initialRating?: number;
@@ -24,14 +25,14 @@ export function ReviewForm({
 
   const handleSubmit = async () => {
     if (rating < 1) {
-      Alert.alert('Rating required', 'Please select a star rating.');
+      notify.error('Please select a star rating.');
       return;
     }
     setSaving(true);
     try {
       await onSubmit(rating, text.trim());
     } catch {
-      Alert.alert('Error', 'Failed to submit review');
+      notify.error('Failed to submit review');
     } finally {
       setSaving(false);
     }
@@ -50,8 +51,8 @@ export function ReviewForm({
           >
             <Star
               size={28}
-              color={value <= rating ? '#F59E0B' : '#D1D5DB'}
-              fill={value <= rating ? '#F59E0B' : 'transparent'}
+              color={value <= rating ? Colors.warning : Colors.border.light}
+              fill={value <= rating ? Colors.warning : 'transparent'}
             />
           </TouchableOpacity>
         ))}

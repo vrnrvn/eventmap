@@ -2,7 +2,7 @@ import React, { forwardRef, useImperativeHandle, useRef } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { NativeViewGestureHandler } from 'react-native-gesture-handler';
 import { BottomSheetModal, BottomSheetView, TouchableOpacity } from '@gorhom/bottom-sheet';
-import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { RECURRENCE_OPTIONS, type RecurrenceOption } from '@/utils/recurrence';
 
 export type RecurrencePickerHandle = {
@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   optionSelected: {
-    backgroundColor: Colors.primary + '20',
+    backgroundColor: alpha(Colors.primary, 0.12),
   },
   optionText: {
     fontSize: Typography.sizes.md,

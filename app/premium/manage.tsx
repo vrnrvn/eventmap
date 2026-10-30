@@ -5,24 +5,20 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
-  ActivityIndicator,
-  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import {
-  ArrowLeft,
   Crown,
-  Calendar,
   CreditCard,
-  AlertCircle,
   Check,
   X,
-  RefreshCw,
 } from 'lucide-react-native';
 import { usePremium } from '@/contexts/PremiumContext';
+import { notify, notifyConfirm } from '@/utils/notify';
+import { Button } from '@/components/ui/Button';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { useApp } from '@/contexts/AppContext';
 import { premiumService } from '@/services/premium';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import * as WebBrowser from 'expo-web-browser';
@@ -34,19 +30,20 @@ const Palette = {
   gradientEnd: Colors.accent,
   cardBg: Colors.background.primary,
   surfaceMuted: Colors.background.primary,
-  accentSoft: 'rgba(180, 25, 36, 0.12)',
+  accentSoft: Colors.primarySoft,
   separator: Colors.border.light,
   premiumGold: Colors.accent,
   success: Colors.success,
-  successSoft: 'rgba(45, 138, 110, 0.12)',
+  successSoft: Colors.successSoft,
   error: Colors.error,
-  errorSoft: 'rgba(180, 25, 36, 0.12)',
+  errorSoft: Colors.errorSoft,
   warn: Colors.warning,
-  warnSoft: 'rgba(212, 160, 23, 0.12)',
+  warnSoft: Colors.warningSoft,
 };
 
 export default function ManageSubscriptionScreen() {
   const insets = useSafeAreaInsets();
+  const { userBusiness, refreshBusiness } = useApp();
   const {
     subscription,
     currentPlan,
@@ -54,7 +51,6 @@ export default function ManageSubscriptionScreen() {
     refreshSubscription,
   } = usePremium();
   const [canceling, setCanceling] = useState(false);
-  const [reactivating, setReactivating] = useState(false);
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'N/A';
@@ -72,50 +68,30 @@ export default function ManageSubscriptionScreen() {
   };
 
   const handleCancel = useCallback(() => {
-    if (!subscription) return;
+    if (!subscription || !userBusiness) return;
 
-    Alert.alert(
-      'Cancel Subscription',
-      subscription.cancel_at_period_end
-        ? 'Your subscription is already set to cancel. Would you like to reactivate it instead?'
-        : 'Are you sure you want to cancel your subscription? You\'ll continue to have access until the end of your billing period.',
-      [
-        { text: 'Keep Subscription', style: 'cancel' },
-        {
-          text: 'Cancel Subscription',
-          style: 'destructive',
-          onPress: async () => {
-            setCanceling(true);
-            try {
-              await premiumService.cancelSubscription('current-business-id');
-              await refreshSubscription();
-            } catch (err) {
-              console.error('Failed to cancel:', err);
-              Alert.alert('Error', 'Failed to cancel subscription. Please try again.');
-            } finally {
-              setCanceling(false);
-            }
-          },
-        },
-      ]
-    );
-  }, [subscription, refreshSubscription]);
-
-  const handleReactivate = useCallback(async () => {
-    if (!subscription) return;
-    setReactivating(true);
-    try {
-      // In real implementation, this would call an API to reactivate
-      // For now, we'll just refresh and the mock service will handle it
-      await refreshSubscription();
-      Alert.alert('Success', 'Your subscription has been reactivated!');
-    } catch (err) {
-      console.error('Failed to reactivate:', err);
-      Alert.alert('Error', 'Failed to reactivate subscription. Please try again.');
-    } finally {
-      setReactivating(false);
-    }
-  }, [subscription, refreshSubscription]);
+    notifyConfirm({
+      title: 'Cancel Subscription',
+      message:
+        'Are you sure you want to cancel? Since this is a simulated subscription with no payment, Pro features are removed immediately and your business goes back to the Free plan.',
+      cancelLabel: 'Keep Subscription',
+      confirmLabel: 'Cancel Subscription',
+      destructive: true,
+      onConfirm: async () => {
+        setCanceling(true);
+        try {
+          await premiumService.cancelSubscription(userBusiness.id);
+          await refreshBusiness();
+          await refreshSubscription();
+        } catch (err) {
+          console.error('Failed to cancel:', err);
+          notify.error('Failed to cancel subscription. Please try again.');
+        } finally {
+          setCanceling(false);
+        }
+      },
+    });
+  }, [subscription, userBusiness, refreshBusiness, refreshSubscription]);
 
   const handleUpgrade = useCallback(() => {
     router.push('/premium/plans' as never);
@@ -124,16 +100,12 @@ export default function ManageSubscriptionScreen() {
   if (!isPremium && !subscription) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-          >
-            <ArrowLeft size={24} color={Colors.text.primary} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Subscription</Text>
-        </View>
+        <ScreenHeader
+          title="Subscription"
+          safeArea={false}
+          backgroundColor={Palette.cardBg}
+          style={styles.headerBorder}
+        />
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -144,48 +116,25 @@ export default function ManageSubscriptionScreen() {
             </View>
             <Text style={styles.emptyTitle}>No Active Subscription</Text>
             <Text style={styles.emptySubtitle}>
-              You're currently on the free plan. Upgrade to unlock premium features!
+              You&apos;re currently on the free plan. Upgrade to unlock premium features!
             </Text>
-            <TouchableOpacity
-              style={styles.upgradeButton}
-              onPress={handleUpgrade}
-              activeOpacity={0.85}
-            >
-              <LinearGradient
-                colors={[Palette.gradientStart, Palette.gradientEnd]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.upgradeButtonGradient}
-              >
-                <Text style={styles.upgradeButtonText}>View Plans</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+            <Button label="View Plans" onPress={handleUpgrade} fullWidth gradient />
           </View>
         </ScrollView>
       </View>
     );
   }
 
-  const isCanceling = subscription?.cancel_at_period_end ?? false;
-  const statusColor =
-    subscription?.status === 'active'
-      ? Palette.success
-      : subscription?.status === 'past_due'
-        ? Palette.error
-        : Palette.warn;
+  const statusColor = Palette.success;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-          activeOpacity={0.7}
-        >
-          <ArrowLeft size={24} color={Colors.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Manage Subscription</Text>
-      </View>
+      <ScreenHeader
+        title="Manage Subscription"
+        safeArea={false}
+        backgroundColor={Palette.cardBg}
+        style={styles.headerBorder}
+      />
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -210,51 +159,32 @@ export default function ManageSubscriptionScreen() {
               ]}
             >
               <Text style={[styles.statusText, { color: statusColor }]}>
-                {subscription?.status === 'active'
-                  ? 'Active'
-                  : subscription?.status === 'past_due'
-                    ? 'Past Due'
-                    : subscription?.status === 'trialing'
-                      ? 'Trial'
-                      : 'Inactive'}
+                Active
               </Text>
             </View>
           </View>
 
-          {isCanceling && (
-            <View style={styles.cancelWarning}>
-              <AlertCircle size={16} color={Palette.warn} />
-              <Text style={styles.cancelWarningText}>
-                Your subscription will cancel on{' '}
-                {formatDate(subscription?.current_period_end ?? null)}
-              </Text>
-            </View>
-          )}
-
           <View style={styles.planDetails}>
             <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Billing Amount</Text>
+              <Text style={styles.detailLabel}>Plan Price</Text>
               <Text style={styles.detailValue}>
                 {formatPrice(currentPlan?.price_monthly ?? 0)}/month
               </Text>
             </View>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Current Period</Text>
-              <Text style={styles.detailValue}>
-                {formatDate(subscription?.current_period_start ?? null)} -{' '}
-                {formatDate(subscription?.current_period_end ?? null)}
-              </Text>
-            </View>
             {subscription?.current_period_end && (
               <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>
-                  {isCanceling ? 'Cancels On' : 'Renews On'}
-                </Text>
+                <Text style={styles.detailLabel}>Expires On</Text>
                 <Text style={styles.detailValue}>
                   {formatDate(subscription.current_period_end)}
                 </Text>
               </View>
             )}
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Renewal</Text>
+              <Text style={styles.detailValue}>
+                Does not auto-renew (simulated plan)
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -275,54 +205,22 @@ export default function ManageSubscriptionScreen() {
 
         {/* Actions */}
         <View style={styles.actionsCard}>
-          {isCanceling ? (
-            <TouchableOpacity
-              style={styles.reactivateButton}
-              onPress={handleReactivate}
-              disabled={reactivating}
-              activeOpacity={0.85}
-            >
-              <LinearGradient
-                colors={[Palette.gradientStart, Palette.gradientEnd]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.reactivateButtonGradient}
-              >
-                {reactivating ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <>
-                    <RefreshCw size={18} color="#FFFFFF" />
-                    <Text style={styles.reactivateButtonText}>Reactivate Subscription</Text>
-                  </>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={handleCancel}
-              disabled={canceling}
-              activeOpacity={0.85}
-            >
-              {canceling ? (
-                <ActivityIndicator size="small" color={Palette.error} />
-              ) : (
-                <>
-                  <X size={18} color={Palette.error} />
-                  <Text style={styles.cancelButtonText}>Cancel Subscription</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          )}
+          <Button
+            label="Cancel Subscription"
+            onPress={handleCancel}
+            loading={canceling}
+            variant="destructive"
+            fullWidth
+            icon={<X size={18} color="#FFFFFF" />}
+          />
 
-          <TouchableOpacity
-            style={styles.changePlanButton}
+          <Button
+            label="Change Plan"
             onPress={handleUpgrade}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.changePlanButtonText}>Change Plan</Text>
-          </TouchableOpacity>
+            variant="ghost"
+            fullWidth
+            style={styles.changePlanButton}
+          />
         </View>
 
         {/* Payment method */}
@@ -371,29 +269,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Palette.surfaceMuted,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Palette.cardBg,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.md,
+  headerBorder: {
     borderBottomWidth: 1,
     borderBottomColor: Palette.separator,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: Palette.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: Spacing.md,
-  },
-  headerTitle: {
-    fontSize: Typography.sizes.xl,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: Colors.text.primary,
   },
   scrollContent: {
     paddingBottom: Spacing.xxl,
@@ -425,21 +303,6 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
     textAlign: 'center',
     marginBottom: Spacing.xl,
-  },
-  upgradeButton: {
-    borderRadius: BorderRadius.lg,
-    overflow: 'hidden',
-    width: '100%',
-  },
-  upgradeButtonGradient: {
-    paddingVertical: Spacing.md,
-    alignItems: 'center',
-  },
-  upgradeButtonText: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: '#FFFFFF',
   },
   planCard: {
     backgroundColor: Palette.cardBg,
@@ -487,21 +350,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.xs,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-  },
-  cancelWarning: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    backgroundColor: Palette.warnSoft,
-    padding: Spacing.md,
-    borderRadius: BorderRadius.md,
-    marginBottom: Spacing.md,
-  },
-  cancelWarningText: {
-    flex: 1,
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.primary,
   },
   planDetails: {
     gap: Spacing.sm,
@@ -561,56 +409,8 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     ...Shadows.md,
   },
-  cancelButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Palette.errorSoft,
-    borderWidth: 1,
-    borderColor: Palette.error,
-  },
-  cancelButtonText: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Palette.error,
-  },
-  reactivateButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md,
-    overflow: 'hidden',
-  },
-  reactivateButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.md,
-  },
-  reactivateButtonText: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: '#FFFFFF',
-  },
   changePlanButton: {
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md,
     backgroundColor: Palette.accentSoft,
-    alignItems: 'center',
-  },
-  changePlanButtonText: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
   },
   paymentCard: {
     backgroundColor: Palette.cardBg,

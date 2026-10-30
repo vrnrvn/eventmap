@@ -6,7 +6,7 @@ import { usesGoogleMaps } from '@/services/runtime';
 import { buildOpenMapHtml } from '@/utils/openMapHtml';
 
 /** Bump when changing map icon logic or HTML structure to force WebView reload */
-const MAP_HTML_VERSION = 5;
+const MAP_HTML_VERSION = 6;
 
 export type GoogleMapHandle = {
   animateTo: (lat: number, lng: number, zoom?: number) => void;
@@ -140,18 +140,18 @@ function buildMapHtml(
       return getCategoryMarkerSvg(categorySlug, isActive);
     }
     function initMap() {
-      var center = { lat: ${center.lat}, lng: ${center.lng} };
+      var center = { lat: ${JSON.stringify(Number(center.lat))}, lng: ${JSON.stringify(Number(center.lng))} };
       var map = new google.maps.Map(document.getElementById('map'), {
         center: center,
-        zoom: ${zoom},
+        zoom: ${JSON.stringify(Number(zoom))},
         disableDefaultUI: true,
         keyboardShortcuts: false,
-        gestureHandling: ${mapGesturesEnabled} ? 'greedy' : 'none',
-        draggable: ${mapGesturesEnabled},
-        scrollwheel: ${mapGesturesEnabled},
-        disableDoubleClickZoom: ${!mapGesturesEnabled},
+        gestureHandling: ${JSON.stringify(Boolean(mapGesturesEnabled))} ? 'greedy' : 'none',
+        draggable: ${JSON.stringify(Boolean(mapGesturesEnabled))},
+        scrollwheel: ${JSON.stringify(Boolean(mapGesturesEnabled))},
+        disableDoubleClickZoom: ${JSON.stringify(!mapGesturesEnabled)},
       });
-      var hasMarkerPress = ${hasMarkerPress};
+      var hasMarkerPress = ${JSON.stringify(Boolean(hasMarkerPress))};
       window.__markerData = [];
       window.__map = map;
       window.__updateActiveMarker = function(activeId) {
@@ -163,9 +163,22 @@ function buildMapHtml(
       };
       window.__updateMarkers = function(markersData, activeId) {
         if (!window.__markerData) return;
+        // Remember the latest payload so markers can be re-rendered clustered
+        // when the (CDN-loaded) clusterer finishes loading after this call.
+        window.__lastMarkersArgs = [markersData, activeId];
+        if (window.__clusterer) {
+          try { window.__clusterer.clearMarkers(); } catch (e) {}
+        }
         window.__markerData.forEach(function(d) { d.marker.setMap(null); });
         window.__markerData = [];
         if (!markersData || !markersData.length) return;
+        // Official @googlemaps/markerclusterer from CDN; if the script failed
+        // to load, markers fall back to being added to the map directly.
+        if (!window.__clusterer && window.markerClusterer && window.markerClusterer.MarkerClusterer) {
+          try { window.__clusterer = new window.markerClusterer.MarkerClusterer({ map: map }); } catch (e) { window.__clusterer = null; }
+        }
+        var useClusterer = !!window.__clusterer;
+        var created = [];
         markersData.forEach(function(m) {
           var lat = typeof m.lat === 'number' ? m.lat : parseFloat(m.lat);
           var lng = typeof m.lng === 'number' ? m.lng : parseFloat(m.lng);
@@ -175,10 +188,11 @@ function buildMapHtml(
           var isActive = m.id && activeId === m.id;
           var marker = new google.maps.Marker({
             position: pos,
-            map: map,
+            map: useClusterer ? null : map,
             title: m.title || '',
             icon: getPinpointIcon(categorySlug, isActive)
           });
+          created.push(marker);
           window.__markerData.push({ marker: marker, id: m.id, categorySlug: categorySlug });
           if (hasMarkerPress && m.id) {
             marker.addListener('click', function() {
@@ -188,6 +202,12 @@ function buildMapHtml(
             });
           }
         });
+        if (useClusterer) {
+          try { window.__clusterer.addMarkers(created); } catch (e) {
+            window.__clusterer = null;
+            created.forEach(function(marker) { marker.setMap(map); });
+          }
+        }
       };
       if (${hasRegionChange}) {
         map.addListener('idle', function() {
@@ -210,6 +230,7 @@ function buildMapHtml(
       }
     }
   </script>
+  <script async src="https://unpkg.com/@googlemaps/markerclusterer@2.5.3/dist/index.min.js" onload="if (window.__lastMarkersArgs && typeof window.__updateMarkers === 'function') { window.__updateMarkers(window.__lastMarkersArgs[0], window.__lastMarkersArgs[1]); }"></script>
   <script async defer src="https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap"></script>
 </body>
 </html>`;
@@ -242,18 +263,24 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
       .filter((m): m is MapMarker => m != null);
   }, [markers]);
 
+  // The HTML is built once with the initial center/zoom; later center changes
+  // pan the existing map via injected JS instead of reloading the WebView
+  // (a reload would redownload the Maps SDK and flash the whole map).
+  const initialCenterRef = useRef(center);
+  const initialZoomRef = useRef(zoom);
   const html = useMemo(
     () =>
       usesGoogleMaps ? buildMapHtml(
         apiKey,
-        center,
-        zoom,
+        initialCenterRef.current,
+        initialZoomRef.current,
         !!onMapPress,
         !!onMarkerPress,
         !!onRegionChange,
         mapGesturesEnabled
-      ) : buildOpenMapHtml(center, zoom, mapGesturesEnabled, onRegionChange ? 180 : 0),
-    [apiKey, center.lat, center.lng, zoom, !!onMapPress, !!onMarkerPress, !!onRegionChange, mapGesturesEnabled, MAP_HTML_VERSION]
+      ) : buildOpenMapHtml(initialCenterRef.current, initialZoomRef.current, mapGesturesEnabled, onRegionChange ? 180 : 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [apiKey, !!onMapPress, !!onMarkerPress, !!onRegionChange, mapGesturesEnabled, MAP_HTML_VERSION]
   );
 
   const webViewRef = useRef<WebView>(null);
@@ -304,20 +331,45 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
       const script = `(function(){if(typeof window.__updateActiveMarker==='function'){try{window.__updateActiveMarker(JSON.parse('${activeEscaped}'));}catch(e){}}}());true;`;
       injectJavaScript(script);
     }
-  }, []);
+  }, [injectJavaScript]);
 
-  const animateTo = (lat: number, lng: number, zoom?: number) => {
-    const zoomPart = typeof zoom === 'number' ? `m.setZoom(${zoom});` : '';
+  const animateTo = useCallback((lat: number, lng: number, zoom?: number) => {
+    const safeLat = Number(lat);
+    const safeLng = Number(lng);
+    if (!Number.isFinite(safeLat) || !Number.isFinite(safeLng)) return;
+    const safeZoom = typeof zoom === 'number' ? Number(zoom) : NaN;
+    const zoomPart = Number.isFinite(safeZoom) ? `m.setZoom(${JSON.stringify(safeZoom)});` : '';
     injectJavaScript(
-      `(function(){var m=window.__map;if(m){m.panTo({lat:${lat},lng:${lng}});${zoomPart}}})();true;`
+      `(function(){var m=window.__map;if(m){m.panTo({lat:${JSON.stringify(safeLat)},lng:${JSON.stringify(safeLng)}});${zoomPart}}})();true;`
     );
-  };
+  }, [injectJavaScript]);
 
   useEffect(() => {
     injectMarkers();
   }, [validMarkers, activeMarkerId, injectMarkers]);
 
-  useImperativeHandle(ref, () => ({ animateTo }), []);
+  // Recenter on center-prop changes without reloading the HTML.
+  const lastCenterRef = useRef(initialCenterRef.current);
+  const centerLat = center.lat;
+  const centerLng = center.lng;
+  useEffect(() => {
+    const last = lastCenterRef.current;
+    if (centerLat === last.lat && centerLng === last.lng) return;
+    lastCenterRef.current = { lat: centerLat, lng: centerLng };
+    animateTo(centerLat, centerLng);
+  }, [centerLat, centerLng, animateTo]);
+
+  useImperativeHandle(ref, () => ({ animateTo }), [animateTo]);
+
+  // If the center prop moved before the map finished loading (the injected pan
+  // would have been lost), re-apply it once the map reports ready.
+  const recenterIfNeeded = useCallback(() => {
+    const current = lastCenterRef.current;
+    const initial = initialCenterRef.current;
+    if (current.lat !== initial.lat || current.lng !== initial.lng) {
+      animateTo(current.lat, current.lng);
+    }
+  }, [animateTo]);
 
   const handleMessage = useCallback((data: string) => {
     try {
@@ -326,6 +378,7 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
         lastInjectedIdsRef.current = '';
         lastInjectedActiveRef.current = '__none__';
         injectMarkers();
+        recenterIfNeeded();
       } else if (payload.type === 'mapPress') {
         onMapPress?.(payload.lat, payload.lng);
       } else if (payload.type === 'markerPress') {
@@ -334,7 +387,7 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
         onRegionChange?.(payload);
       }
     } catch { /* Discard unrelated frame messages. */ }
-  }, [injectMarkers, onMapPress, onMarkerPress, onRegionChange]);
+  }, [injectMarkers, recenterIfNeeded, onMapPress, onMarkerPress, onRegionChange]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -387,6 +440,7 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
               lastInjectedIdsRef.current = '';
               lastInjectedActiveRef.current = '__none__';
               injectMarkers();
+              recenterIfNeeded();
             }
           } catch {
             // ignore

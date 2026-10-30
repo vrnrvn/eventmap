@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
 import { Star } from 'lucide-react-native';
 import { Avatar } from '@/components/Avatar';
+import { notify } from '@/utils/notify';
 import { Colors, Spacing, Typography } from '@/constants/theme';
 import type { ReviewWithProfile } from '@/services/reviews';
 
@@ -25,7 +26,7 @@ export function ReviewCard({ review, isOwner, onRespond, onReport, canReport }: 
       await onRespond(review.id, responseText.trim());
       setEditing(false);
     } catch {
-      Alert.alert('Error', 'Failed to post response');
+      notify.error('Failed to post response');
     } finally {
       setSaving(false);
     }
@@ -54,8 +55,8 @@ export function ReviewCard({ review, isOwner, onRespond, onReport, canReport }: 
               <Star
                 key={i}
                 size={14}
-                color={i < review.rating ? '#F59E0B' : '#D1D5DB'}
-                fill={i < review.rating ? '#F59E0B' : 'transparent'}
+                color={i < review.rating ? Colors.warning : Colors.border.light}
+                fill={i < review.rating ? Colors.warning : 'transparent'}
               />
             ))}
             <Text style={styles.date}>{formatDate(review.created_at)}</Text>

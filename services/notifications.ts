@@ -70,6 +70,27 @@ export async function getNotifications(): Promise<Notification[]> {
 }
 
 /**
+ * Exact unread-notification count for the current user. Head-only request —
+ * no rows travel, just the count — so it is cheap to refetch often (realtime
+ * bumps, app foreground).
+ */
+export async function getUnreadNotificationCount(): Promise<number> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return 0;
+
+  const { count, error } = await supabase
+    .from('notifications')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .eq('read', false);
+
+  if (error) throw error;
+  return count ?? 0;
+}
+
+/**
  * Mark a notification as read.
  */
 export async function markNotificationAsRead(id: string): Promise<void> {
@@ -78,11 +99,12 @@ export async function markNotificationAsRead(id: string): Promise<void> {
   } = await supabase.auth.getUser();
   if (!user) return;
 
-  await (supabase as any)
+  const { error } = await (supabase as any)
     .from('notifications')
     .update({ read: true })
     .eq('id', id)
     .eq('user_id', user.id);
+  if (error) throw error;
 }
 
 /**
@@ -94,10 +116,11 @@ export async function markAllNotificationsAsRead(): Promise<void> {
   } = await supabase.auth.getUser();
   if (!user) return;
 
-  await (supabase as any)
+  const { error } = await (supabase as any)
     .from('notifications')
     .update({ read: true })
     .eq('user_id', user.id);
+  if (error) throw error;
 }
 
 /**
@@ -109,19 +132,26 @@ export async function deleteNotification(id: string): Promise<void> {
   } = await supabase.auth.getUser();
   if (!user) return;
 
-  await supabase
+  const { error } = await supabase
     .from('notifications')
     .delete()
     .eq('id', id)
     .eq('user_id', user.id);
+  if (error) throw error;
 }
 
 export function subscribeToNotifications(
   userId: string,
-  handlers: RealtimeNotificationHandler
+  handlers: RealtimeNotificationHandler,
+  /**
+   * Distinguishes concurrent subscribers. Supabase channels are keyed by
+   * topic, so two subscriptions with the same topic collide (the second join
+   * supersedes the first, and either unmount removes both).
+   */
+  channelSuffix = ''
 ): () => void {
   const channel = supabase
-    .channel(`notifications:${userId}`)
+    .channel(`notifications${channelSuffix}:${userId}`)
     .on(
       'postgres_changes',
       {

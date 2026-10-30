@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   ScrollView,
   Keyboard,
+  TextInput,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -41,13 +42,14 @@ function endOfDay(d: Date): Date {
   return x;
 }
 
-export type SearchStep = 'where' | 'when' | 'who';
+export type SearchStep = 'where' | 'when';
 
 type SearchOverlayProps = {
   visible: boolean;
   onClose: () => void;
-  onSearch: (location: SearchLocation | null) => void;
+  onSearch: (location: SearchLocation | null, keyword: string) => void;
   userLocation: { lat: number; lng: number } | null;
+  initialKeyword?: string;
 };
 
 export function SearchOverlay({
@@ -55,12 +57,19 @@ export function SearchOverlay({
   onClose,
   onSearch,
   userLocation,
+  initialKeyword = '',
 }: SearchOverlayProps) {
   const insets = useSafeAreaInsets();
   const { location, setLocation, clearAll, hasSelection, setDateRange, dateRange } = useSearch();
   const [currentStep, setCurrentStep] = useState<SearchStep>('where');
   const [whereInput, setWhereInput] = useState('');
+  const [keyword, setKeyword] = useState(initialKeyword);
   const [suggestions, setSuggestions] = useState<AutocompletePrediction[]>([]);
+
+  // Re-seed the keyword field from the active filter whenever the overlay opens.
+  useEffect(() => {
+    if (visible) setKeyword(initialKeyword);
+  }, [visible, initialKeyword]);
 
   const handleLocationSelect = useCallback(
     (result: { label: string; lat: number; lng: number }) => {
@@ -123,13 +132,14 @@ export function SearchOverlay({
   );
 
   const handleSearchPress = useCallback(() => {
-    onSearch(location);
+    onSearch(location, keyword.trim());
     onClose();
-  }, [location, onSearch, onClose]);
+  }, [location, keyword, onSearch, onClose]);
 
   const handleClearAll = useCallback(() => {
     clearAll();
     setWhereInput('');
+    setKeyword('');
     setCurrentStep('where');
   }, [clearAll]);
 
@@ -174,7 +184,13 @@ export function SearchOverlay({
           onPress={() => {}}
         >
         <View style={styles.header}>
-          <TouchableOpacity onPress={handleClose} style={styles.closeButton} hitSlop={12}>
+          <TouchableOpacity
+            onPress={handleClose}
+            style={styles.closeButton}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Close search"
+          >
             <X size={24} color={Colors.text.primary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Search</Text>
@@ -192,6 +208,30 @@ export function SearchOverlay({
                 exiting={FadeOut.duration(150)}
                 style={styles.whereSection}
               >
+                <View style={styles.keywordInputShell}>
+                  <EventmapSearch size={18} color={Colors.text.tertiary} />
+                  <TextInput
+                    value={keyword}
+                    onChangeText={setKeyword}
+                    placeholder="Search events by name"
+                    placeholderTextColor={Colors.text.tertiary}
+                    style={styles.keywordInput}
+                    returnKeyType="search"
+                    autoCorrect={false}
+                    onSubmitEditing={handleSearchPress}
+                  />
+                  {keyword.length > 0 ? (
+                    <TouchableOpacity
+                      onPress={() => setKeyword('')}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Clear keyword"
+                    >
+                      <X size={16} color={Colors.text.tertiary} />
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+
                 <View style={styles.searchInputContainer}>
                   <GooglePlacesAutocomplete
                     value={whereInput}
@@ -293,7 +333,7 @@ export function SearchOverlay({
         </KeyboardAvoidingView>
 
         <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.md }]}>
-          {hasSelection && (
+          {(hasSelection || keyword.trim().length > 0) && (
             <TouchableOpacity onPress={handleClearAll} style={styles.clearButton}>
               <Text style={styles.clearText}>Clear all</Text>
             </TouchableOpacity>
@@ -328,8 +368,6 @@ export function SearchBarCollapsed({ locationLabel, onPress }: SearchBarCollapse
         </Text>
         <Text style={styles.collapsedDivider}>|</Text>
         <Text style={styles.collapsedSegment}>Dates</Text>
-        <Text style={styles.collapsedDivider}>|</Text>
-        <Text style={styles.collapsedSegment}>Guests</Text>
       </View>
     </TouchableOpacity>
   );
@@ -382,6 +420,25 @@ const styles = StyleSheet.create({
   },
   searchInputContainer: {
     marginBottom: Spacing.md,
+  },
+  keywordInputShell: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+    backgroundColor: Colors.background.secondary,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+    marginBottom: Spacing.md,
+  },
+  keywordInput: {
+    flex: 1,
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.primary,
+    padding: 0,
   },
   resultsScroll: {
     flex: 1,
@@ -469,7 +526,7 @@ const styles = StyleSheet.create({
   },
   dateChipActive: {
     borderColor: Colors.primary,
-    backgroundColor: Colors.primary + '14',
+    backgroundColor: Colors.primarySoft,
   },
   dateChipText: {
     fontSize: Typography.sizes.sm,

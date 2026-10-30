@@ -27,16 +27,7 @@ import { useApp } from '@/contexts/AppContext';
 import { usePremium } from '@/contexts/PremiumContext';
 import { analyticsService, type AnalyticsTopEvent, type AnalyticsTrendPoint } from '@/services/analytics';
 import { Business } from '@/types/database';
-import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
-
-const Palette = {
-  gradientStart: Colors.primary,
-  gradientEnd: Colors.accent,
-  cardBg: Colors.background.primary,
-  surfaceMuted: Colors.background.primary,
-  accentSoft: 'rgba(196, 92, 62, 0.12)',
-  separator: Colors.border.light,
-};
+import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 
 const PERIOD_OPTIONS = [7, 30, 90] as const;
 type PeriodDays = (typeof PERIOD_OPTIONS)[number];
@@ -149,7 +140,7 @@ export default function ProfileAnalyticsScreen() {
   return (
     <View style={styles.root}>
       <LinearGradient
-        colors={[Palette.gradientStart, Palette.gradientEnd]}
+        colors={[Colors.primary, Colors.accent]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={[styles.header, { paddingTop: insets.top + Spacing.md }]}
@@ -159,6 +150,9 @@ export default function ProfileAnalyticsScreen() {
             style={styles.backButton}
             onPress={() => router.back()}
             activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <ArrowLeft size={18} color={Colors.text.inverse} />
           </TouchableOpacity>
@@ -202,7 +196,7 @@ export default function ProfileAnalyticsScreen() {
           />
         ) : loading ? (
           <View style={styles.loadingWrap}>
-            <ActivityIndicator size="large" color={Palette.gradientStart} />
+            <ActivityIndicator size="large" color={Colors.primary} />
             <Text style={styles.loadingText}>Loading analytics...</Text>
           </View>
         ) : (
@@ -446,7 +440,7 @@ function formatNumber(value: number) {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Palette.surfaceMuted,
+    backgroundColor: Colors.background.primary,
   },
   header: {
     paddingHorizontal: Spacing.lg,
@@ -539,11 +533,11 @@ const styles = StyleSheet.create({
   },
   kpiCard: {
     width: '48.5%',
-    backgroundColor: Palette.cardBg,
+    backgroundColor: Colors.background.primary,
     borderRadius: BorderRadius.lg,
     padding: Spacing.md,
     borderWidth: 1,
-    borderColor: Palette.separator,
+    borderColor: Colors.border.light,
     ...Shadows.sm,
   },
   kpiIcon: {
@@ -552,7 +546,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Palette.accentSoft,
+    backgroundColor: Colors.primarySoft,
     marginBottom: 10,
   },
   kpiValue: {
@@ -569,10 +563,10 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.medium,
   },
   card: {
-    backgroundColor: Palette.cardBg,
+    backgroundColor: Colors.background.primary,
     borderRadius: BorderRadius.lg,
     borderWidth: 1,
-    borderColor: Palette.separator,
+    borderColor: Colors.border.light,
     overflow: 'hidden',
     ...Shadows.sm,
   },
@@ -583,7 +577,7 @@ const styles = StyleSheet.create({
   },
   topEventSeparator: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Palette.separator,
+    borderBottomColor: Colors.border.light,
   },
   topEventMain: {
     flex: 1,
@@ -603,7 +597,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: BorderRadius.round,
-    backgroundColor: 'rgba(13,79,79,0.1)',
+    backgroundColor: alpha(Colors.secondary, 0.1),
   },
   topEventPillText: {
     color: Colors.secondary,
@@ -655,10 +649,10 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xl,
     borderRadius: BorderRadius.xl,
     padding: Spacing.xl,
-    backgroundColor: Palette.cardBg,
+    backgroundColor: Colors.background.primary,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: Palette.separator,
+    borderColor: Colors.border.light,
     ...Shadows.md,
   },
   lockedIcon: {
@@ -667,7 +661,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(232,168,56,0.15)',
+    backgroundColor: alpha(Colors.accent, 0.15),
     marginBottom: Spacing.md,
   },
   lockedTitle: {
@@ -705,9 +699,9 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.lg,
     marginTop: Spacing.xl,
     borderRadius: BorderRadius.lg,
-    backgroundColor: Palette.cardBg,
+    backgroundColor: Colors.background.primary,
     borderWidth: 1,
-    borderColor: Palette.separator,
+    borderColor: Colors.border.light,
     padding: Spacing.lg,
     ...Shadows.sm,
   },

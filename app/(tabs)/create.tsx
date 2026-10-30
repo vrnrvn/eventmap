@@ -7,8 +7,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  ActivityIndicator,
-  Alert,
   TouchableOpacity,
   Image,
 } from 'react-native';
@@ -20,7 +18,6 @@ import DateTimePicker, {
 import {
   ChevronRight,
   ChevronDown,
-  CalendarPlus,
   Type,
   AlignLeft,
   Tag,
@@ -28,15 +25,17 @@ import {
   CalendarDays,
   Repeat,
   MapPin,
-  Briefcase,
   Sparkles,
   Navigation,
   ImageIcon,
+  Users,
 } from 'lucide-react-native';
 import { useApp } from '@/contexts/AppContext';
+import { usePremium } from '@/contexts/PremiumContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { router } from 'expo-router';
 import { Input } from '@/components/Input';
+import { Button } from '@/components/ui/Button';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import {
@@ -51,6 +50,7 @@ import { Category } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { eventLocationStore } from '@/stores/eventLocationStore';
 import type { RecurrenceOption } from '@/utils/recurrence';
+import { notify, notifyConfirm } from '@/utils/notify';
 
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
 const MAX_EVENT_DATE = new Date();
@@ -61,7 +61,7 @@ const Palette = {
   gradientEnd: Colors.accent,
   cardBg: Colors.background.primary,
   surfaceMuted: Colors.background.primary,
-  accentSoft: 'rgba(180, 25, 36, 0.12)',
+  accentSoft: Colors.primarySoft,
   separator: Colors.border.light,
   badge: Colors.primary,
 };
@@ -69,6 +69,7 @@ const Palette = {
 export default function CreateScreen() {
   const insets = useSafeAreaInsets();
   const { hasBusiness, userBusiness } = useApp();
+  const { currentPlan } = usePremium();
   const { isBanned } = useAuth();
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(false);
@@ -81,13 +82,14 @@ export default function CreateScreen() {
     title: '',
     description: '',
     categoryId: '',
-    startDatetime: new Date(),
-    endDatetime: new Date(Date.now() + 2 * 60 * 60 * 1000),
+    startDatetime: new Date(Date.now() + 60 * 60 * 1000),
+    endDatetime: new Date(Date.now() + 3 * 60 * 60 * 1000),
     recurrence: null as RecurrenceOption,
     address: '',
     lat: DEFAULT_LOCATION.lat,
     lng: DEFAULT_LOCATION.lng,
     images: [] as ImageAsset[],
+    maxAttendees: '',
   });
   const recurrencePickerRef = useRef<RecurrencePickerHandle>(null);
 
@@ -122,6 +124,7 @@ export default function CreateScreen() {
       DateTimePickerAndroid.open({
         value: currentDate,
         mode: 'date',
+        minimumDate: new Date(),
         maximumDate: MAX_EVENT_DATE,
         onChange: (_, dateResult) => {
           if (dateResult) {
@@ -168,8 +171,17 @@ export default function CreateScreen() {
     if (!formData.title.trim()) e.title = 'Title is required';
     if (!formData.description.trim()) e.description = 'Description is required';
     if (!formData.categoryId) e.categoryId = 'Select a category';
+    if (formData.startDatetime.getTime() <= Date.now()) {
+      e.startDatetime = 'Start must be in the future';
+    }
     if (formData.endDatetime <= formData.startDatetime) {
       e.endDatetime = 'End must be after start';
+    }
+    if (formData.maxAttendees.trim()) {
+      const n = Number(formData.maxAttendees.trim());
+      if (!Number.isInteger(n) || n <= 0) {
+        e.maxAttendees = 'Enter a whole number greater than 0';
+      }
     }
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -178,17 +190,15 @@ export default function CreateScreen() {
   const handleSubmit = async () => {
     if (!validate() || !userBusiness) return;
     if (isBanned) {
-      Alert.alert('Account Suspended', 'Your account has been suspended. Please contact support.');
+      notify.error('Your account has been suspended. Please contact support.');
       return;
     }
 
     const { canCreate, currentCount, maxCount } =
       await businessesService.checkEventLimit(userBusiness.id);
     if (!canCreate) {
-      Alert.alert(
-        'Limit Reached',
-        `You've created ${currentCount} of ${maxCount} events this month. Upgrade to Premium for more events.`,
-        [{ text: 'OK' }]
+      notify.error(
+        `You've created ${currentCount} of ${maxCount} events this month. Upgrade to Premium for more events.`
       );
       return;
     }
@@ -203,20 +213,8 @@ export default function CreateScreen() {
 
     setLoading(true);
     try {
-      let coverImageUrl: string | null = null;
-      const uploadedUrls: string[] = [];
-      for (const img of formData.images) {
-        const url = await eventsService.uploadEventImage({
-          uri: img.uri,
-          name: img.name,
-          type: img.type,
-        });
-        uploadedUrls.push(url);
-      }
-      if (uploadedUrls.length > 0) {
-        coverImageUrl = uploadedUrls[0];
-      }
-
+      // Create the event FIRST so a create failure never leaves orphaned
+      // uploads; images are uploaded and attached afterwards, non-fatally.
       const eventId = await eventsService.createEvent({
         businessId: userBusiness.id,
         title: formData.title.trim(),
@@ -227,32 +225,103 @@ export default function CreateScreen() {
         address,
         lat,
         lng,
-        coverImageUrl,
+        coverImageUrl: null,
         isRecurring: formData.recurrence != null,
         recurrencePattern: formData.recurrence ?? undefined,
       });
 
-      for (let i = 0; i < uploadedUrls.length; i++) {
-        await eventsService.addEventPhoto(eventId, uploadedUrls[i], i);
+      // Optional capacity: the column only exists once 20261030108000 is
+      // applied, so a missing-column error is tolerated.
+      let capacityUnavailable = false;
+      const maxAttendeesValue = formData.maxAttendees.trim()
+        ? Number(formData.maxAttendees.trim())
+        : null;
+      if (maxAttendeesValue != null) {
+        try {
+          await eventsService.updateEvent(eventId, {
+            max_attendees: maxAttendeesValue,
+          } as never);
+        } catch (capErr: unknown) {
+          const code = (capErr as { code?: string })?.code;
+          // TODO: remove once 20261030108000 is applied
+          if (code === '42703' || code === 'PGRST204') {
+            capacityUnavailable = true;
+          } else {
+            capacityUnavailable = true; // non-fatal either way
+          }
+        }
       }
 
-      Alert.alert('Success', 'Event created!', [
-        {
-          text: 'OK',
-          onPress: () =>
-            router.push({
-              pathname: '/(tabs)/discover',
-              params: { centerLat: lat.toString(), centerLng: lng.toString() },
-            }),
-        },
-      ]);
+      // Upload and attach photos; failures are non-fatal (event stays
+      // published, successes are kept).
+      let photoFailures = 0;
+      const uploadedUrls: string[] = [];
+      for (const img of formData.images) {
+        try {
+          const url = await eventsService.uploadEventImage({
+            uri: img.uri,
+            name: img.name,
+            type: img.type,
+          });
+          await eventsService.addEventPhoto(eventId, url, uploadedUrls.length);
+          uploadedUrls.push(url);
+        } catch {
+          photoFailures += 1;
+        }
+      }
+      if (uploadedUrls.length > 0) {
+        try {
+          await eventsService.updateEvent(eventId, {
+            cover_image_url: uploadedUrls[0],
+          });
+        } catch {
+          // Non-fatal: the first photo still shows via event_photos fallback.
+        }
+      }
+
+      // Reset the form so re-tapping Publish can't create a duplicate event.
+      setFormData({
+        title: '',
+        description: '',
+        categoryId: '',
+        startDatetime: new Date(Date.now() + 60 * 60 * 1000),
+        endDatetime: new Date(Date.now() + 3 * 60 * 60 * 1000),
+        recurrence: null,
+        address: businessLocation?.address ?? '',
+        lat: businessLocation?.lat ?? DEFAULT_LOCATION.lat,
+        lng: businessLocation?.lng ?? DEFAULT_LOCATION.lng,
+        images: [],
+        maxAttendees: '',
+      });
+      setErrors({});
+
+      const warnings: string[] = [];
+      if (photoFailures > 0) {
+        warnings.push(
+          `${photoFailures} photo(s) failed to upload — you can add them by editing the event.`
+        );
+      }
+      if (capacityUnavailable) {
+        warnings.push(
+          'Attendee capacity is not enabled yet, so the limit was not saved.'
+        );
+      }
+      notify.success(
+        warnings.length > 0
+          ? `Event published, but ${warnings.join(' Also, ')}`
+          : 'Event created!'
+      );
+      router.push({
+        pathname: '/(tabs)/discover',
+        params: { centerLat: lat.toString(), centerLng: lng.toString() },
+      });
     } catch (err: unknown) {
       const message =
         err instanceof Error
           ? err.message
           : (err as { message?: string })?.message ?? 'Failed to create event';
       if (__DEV__) console.error('[CreateEvent]', err);
-      Alert.alert('Error', message);
+      notify.error(message);
     } finally {
       setLoading(false);
     }
@@ -449,6 +518,12 @@ export default function CreateScreen() {
               <ChevronRight size={18} color={Colors.text.tertiary} />
             )}
           </TouchableOpacity>
+
+          {errors.startDatetime && (
+            <View style={styles.inlineError}>
+              <Text style={styles.errorText}>{errors.startDatetime}</Text>
+            </View>
+          )}
         </View>
 
         {/* Start picker rendered OUTSIDE the card */}
@@ -458,6 +533,7 @@ export default function CreateScreen() {
               value={formData.startDatetime}
               mode="datetime"
               display="spinner"
+              minimumDate={new Date()}
               maximumDate={MAX_EVENT_DATE}
               textColor={Colors.text.primary}
               themeVariant="light"
@@ -522,6 +598,7 @@ export default function CreateScreen() {
               value={formData.endDatetime}
               mode="datetime"
               display="spinner"
+              minimumDate={new Date()}
               maximumDate={MAX_EVENT_DATE}
               textColor={Colors.text.primary}
               themeVariant="light"
@@ -548,17 +625,14 @@ export default function CreateScreen() {
               activeOpacity={0.6}
               onPress={() => {
                 if (userBusiness?.subscription_tier !== 'premium') {
-                  Alert.alert(
-                    'Premium Feature',
-                    'Recurring events are only available for Premium businesses. Upgrade to create recurring events.',
-                    [
-                      { text: 'OK' },
-                      {
-                        text: 'Upgrade',
-                        onPress: () => router.push('/(tabs)/profile'),
-                      },
-                    ]
-                  );
+                  notifyConfirm({
+                    title: 'Premium Feature',
+                    message:
+                      'Recurring events are only available for Premium businesses. Upgrade to create recurring events.',
+                    cancelLabel: 'OK',
+                    confirmLabel: 'Upgrade',
+                    onConfirm: () => router.push('/premium/plans' as never),
+                  });
                   return;
                 }
                 recurrencePickerRef.current?.present();
@@ -629,6 +703,31 @@ export default function CreateScreen() {
           </View>
         </View>
 
+        {/* ── Section: Capacity ── */}
+        <Text style={styles.sectionLabel}>Capacity</Text>
+        <View style={styles.card}>
+          <View style={styles.fieldRow}>
+            <View style={styles.fieldIcon}>
+              <Users size={16} color={Colors.primary} />
+            </View>
+            <View style={styles.fieldContent}>
+              <Input
+                label="Max attendees (optional)"
+                value={formData.maxAttendees}
+                onChangeText={(t) =>
+                  setFormData((f) => ({
+                    ...f,
+                    maxAttendees: t.replace(/[^0-9]/g, ''),
+                  }))
+                }
+                placeholder="Unlimited"
+                keyboardType="number-pad"
+                error={errors.maxAttendees}
+              />
+            </View>
+          </View>
+        </View>
+
         {/* ── Section: Photos ── */}
         <Text style={styles.sectionLabel}>Photos</Text>
         <View style={styles.card}>
@@ -643,39 +742,23 @@ export default function CreateScreen() {
               <ImagePickerButton
                 images={formData.images}
                 onChange={(imgs) => setFormData((f) => ({ ...f, images: imgs }))}
-                maxImages={5}
+                maxImages={currentPlan?.max_photos_per_event ?? 5}
               />
             </View>
           </View>
         </View>
 
         {/* ── Submit ── */}
-        <TouchableOpacity
-          style={styles.submitWrap}
+        <Button
+          label="Publish Event"
           onPress={handleSubmit}
-          disabled={loading}
-          activeOpacity={0.85}
-        >
-          <LinearGradient
-            colors={
-              loading
-                ? ['#A5B4FC', '#C4B5FD']
-                : [Colors.primary, Palette.gradientEnd]
-            }
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.submitGradient}
-          >
-            {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <>
-                <Sparkles size={18} color="#FFFFFF" />
-                <Text style={styles.submitText}>Publish Event</Text>
-              </>
-            )}
-          </LinearGradient>
-        </TouchableOpacity>
+          loading={loading}
+          size="lg"
+          fullWidth
+          gradient
+          icon={<Sparkles size={18} color="#FFFFFF" />}
+          style={styles.submitWrap}
+        />
       </ScrollView>
 
       <RecurrencePicker
@@ -729,7 +812,7 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
   },
   pageSubtitle: {
-    fontSize: 13,
+    fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
     marginTop: 2,
@@ -737,7 +820,7 @@ const styles = StyleSheet.create({
 
   /* ── Section labels ── */
   sectionLabel: {
-    fontSize: 13,
+    fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.tertiary,
@@ -825,7 +908,7 @@ const styles = StyleSheet.create({
     borderColor: Palette.badge,
   },
   catChipText: {
-    fontSize: 13,
+    fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
     color: Colors.text.primary,
@@ -855,7 +938,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   dateValue: {
-    fontSize: 15,
+    fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
@@ -895,7 +978,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   pickerDoneText: {
-    fontSize: 15,
+    fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.primary,
@@ -951,9 +1034,7 @@ const styles = StyleSheet.create({
 
   /* ── Submit ── */
   submitWrap: {
-    marginTop: 32,
-    borderRadius: 16,
-    overflow: 'hidden',
+    marginTop: Spacing.xl,
     ...Platform.select({
       ios: {
         shadowColor: Colors.primary,
@@ -964,21 +1045,6 @@ const styles = StyleSheet.create({
       android: { elevation: 8 },
     }),
   },
-  submitGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 17,
-  },
-  submitText: {
-    fontSize: 16,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: '#FFFFFF',
-    letterSpacing: 0.3,
-  },
-
   /* ── No-business state ── */
   noBizContainer: {
     flex: 1,
@@ -1009,7 +1075,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   noBizSubtitle: {
-    fontSize: 15,
+    fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
     textAlign: 'center',

@@ -1,12 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Alert,
-  ActivityIndicator,
   Image,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -15,17 +13,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import { usePremium } from '@/contexts/PremiumContext';
-import { premiumService } from '@/services/premium';
 import { eventChatService } from '@/services/eventChat';
 import { profilesService } from '@/services/profiles';
+import { notify } from '@/utils/notify';
 import { businessesService } from '@/services/businesses';
 import { eventsService } from '@/services/events';
 import { socialService } from '@/services/social';
 import { useFocusEffect, router } from 'expo-router';
-import { Colors, Typography, BorderRadius } from '@/constants/theme';
+import { Colors, Typography, BorderRadius, Spacing } from '@/constants/theme';
 import { Event, RankedEvent } from '@/types/database';
 import { hasEventEnded } from '@/utils/eventStatus';
 import { AvatarRing } from '@/components/AvatarRing';
+import { Button } from '@/components/ui/Button';
 import { confirmAction } from '@/utils/confirm';
 import {
   MapPin,
@@ -41,6 +40,7 @@ import {
   BarChart3,
   Users,
   Heart,
+  Eye,
 } from 'lucide-react-native';
 
 const CREATED_PREVIEW_LIMIT = 3;
@@ -55,14 +55,14 @@ type ProfileStats = {
 
 const Palette = {
   surface: Colors.background.primary,
-  card: '#FFFFFF',
+  card: Colors.surface,
   text: Colors.text.primary,
   muted: Colors.text.secondary,
   lightMuted: Colors.text.tertiary,
   primary: Colors.primary,
   secondary: Colors.secondary,
   outline: Colors.border.medium,
-  softBorder: 'rgba(0,0,0,0.06)',
+  softBorder: Colors.neutralSoft,
   softCard: Colors.background.secondary,
 };
 
@@ -71,10 +71,8 @@ export default function ProfileScreen() {
   const { profile, signOut, refreshProfile, user } = useAuth();
   const { hasBusiness, userMode, setUserMode, userBusiness, refreshBusiness, loading: appLoading } =
     useApp();
-  const { isPremium, currentPlan, refreshSubscription } = usePremium();
+  const { isPremium, currentPlan } = usePremium();
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const [upgrading, setUpgrading] = useState(false);
-  const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [createdEvents, setCreatedEvents] = useState<Event[]>([]);
   const [joinedEvents, setJoinedEvents] = useState<RankedEvent[]>([]);
   const [chatUnread, setChatUnread] = useState<Record<string, number>>({});
@@ -158,10 +156,6 @@ export default function ProfileScreen() {
     }, [loadProfileData])
   );
 
-  useEffect(() => {
-    if (!isBizMode) setShowPremiumModal(false);
-  }, [isBizMode]);
-
   const handleSignOut = async () => {
     const ok = await confirmAction({
       title: 'Sign Out',
@@ -172,33 +166,6 @@ export default function ProfileScreen() {
     if (!ok) return;
     await signOut();
     router.replace('/');
-  };
-
-  const handleUpgradeToPremium = async () => {
-    if (!userBusiness) {
-      Alert.alert('Business Required', 'Create a business profile before upgrading.');
-      return;
-    }
-    if (upgrading) return;
-
-    setUpgrading(true);
-    try {
-      const { success } = await premiumService.subscribeToPlan(
-        userBusiness.id,
-        'pro',
-        'monthly'
-      );
-      if (success) {
-        await refreshBusiness();
-        await refreshSubscription();
-        setShowPremiumModal(false);
-        Alert.alert('Premium Activated', 'Your premium subscription is now active.');
-      }
-    } catch {
-      Alert.alert('Error', 'Failed to upgrade to premium. Please try again.');
-    } finally {
-      setUpgrading(false);
-    }
   };
 
   const handleAvatarPick = async () => {
@@ -235,7 +202,7 @@ export default function ProfileScreen() {
         await refreshProfile();
       }
     } catch {
-      Alert.alert('Error', `Failed to upload ${isBizMode ? 'logo' : 'avatar'}`);
+      notify.error(`Failed to upload ${isBizMode ? 'logo' : 'avatar'}`);
     } finally {
       setUploadingAvatar(false);
     }
@@ -265,6 +232,9 @@ export default function ProfileScreen() {
             style={styles.settingsIcon}
             activeOpacity={0.8}
             onPress={() => router.push('/settings')}
+            accessibilityRole="button"
+            accessibilityLabel="Open settings"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <SlidersHorizontal size={17} color={Palette.muted} />
           </TouchableOpacity>
@@ -275,6 +245,8 @@ export default function ProfileScreen() {
             style={styles.avatarFrame}
             activeOpacity={0.88}
             onPress={handleAvatarPick}
+            accessibilityRole="button"
+            accessibilityLabel="Change profile photo"
           >
             <AvatarRing
               imageUrl={headerAvatarUrl}
@@ -379,6 +351,16 @@ export default function ProfileScreen() {
               </>
             )}
           </View>
+
+          {isBizMode && userBusiness ? (
+            <View style={styles.quickLinks}>
+              <QuickLink
+                icon={<Eye size={15} color={Palette.primary} />}
+                label="View public profile"
+                onPress={() => router.push(`/business/${userBusiness.id}` as never)}
+              />
+            </View>
+          ) : null}
 
           {hasBusiness ? (
             <TouchableOpacity style={styles.modeSwitchPill} onPress={toggleMode} activeOpacity={0.8}>
@@ -547,13 +529,11 @@ export default function ProfileScreen() {
               <Text style={styles.joinedEmptyText}>
                 Events you join will appear here once you RSVP as going.
               </Text>
-              <TouchableOpacity
-                style={styles.joinedEmptyButton}
+              <Button
+                label="Discover events"
                 onPress={() => router.push('/(tabs)/discover')}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.joinedEmptyButtonText}>Discover events</Text>
-              </TouchableOpacity>
+                style={styles.joinedEmptyButton}
+              />
             </View>
           )}
         </View>
@@ -561,7 +541,7 @@ export default function ProfileScreen() {
         {!isPremium && isBizMode && (
           <TouchableOpacity
             style={styles.upgradeCard}
-            onPress={() => setShowPremiumModal(true)}
+            onPress={() => router.push('/premium/plans' as never)}
             activeOpacity={0.9}
           >
             <LinearGradient
@@ -603,40 +583,6 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {showPremiumModal && isBizMode && (
-        <View style={styles.premiumModalOverlay}>
-          <TouchableOpacity
-            style={styles.premiumModalBackdrop}
-            activeOpacity={1}
-            onPress={() => !upgrading && setShowPremiumModal(false)}
-          />
-          <View style={styles.premiumModalCard}>
-            <Text style={styles.premiumModalTitle}>Go Premium</Text>
-            <Text style={styles.premiumModalSubtitle}>
-              Unlock boosted event placement, analytics, and recurring scheduling.
-            </Text>
-            <TouchableOpacity
-              style={styles.premiumBuyButton}
-              onPress={handleUpgradeToPremium}
-              disabled={upgrading}
-              activeOpacity={0.85}
-            >
-              {upgrading ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text style={styles.premiumBuyButtonText}>Buy Premium (Mock)</Text>
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.premiumCloseButton}
-              onPress={() => !upgrading && setShowPremiumModal(false)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.premiumCloseButtonText}>Maybe later</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
     </View>
   );
 }
@@ -809,7 +755,7 @@ const styles = StyleSheet.create({
   },
   bioPlaceholder: {
     marginTop: 10,
-    fontSize: 13,
+    fontSize: Typography.sizes.sm,
     color: Palette.primary,
     fontFamily: Typography.labelFontFamilies.semibold,
   },
@@ -855,7 +801,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1.2,
     color: Palette.muted,
-    fontSize: 11,
+    fontSize: Typography.sizes.xs,
     fontFamily: Typography.labelFontFamilies.semibold,
   },
   quickLinks: {
@@ -878,7 +824,7 @@ const styles = StyleSheet.create({
   },
   quickLinkText: {
     flex: 1,
-    fontSize: 13,
+    fontSize: Typography.sizes.sm,
     color: Palette.text,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
@@ -944,13 +890,13 @@ const styles = StyleSheet.create({
   },
   createEventTitle: {
     color: '#FFFFFF',
-    fontSize: 17,
+    fontSize: Typography.sizes.lg,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
   },
   createEventSub: {
     color: 'rgba(255,255,255,0.88)',
-    fontSize: 13,
+    fontSize: Typography.sizes.sm,
     marginTop: 2,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
@@ -1040,7 +986,7 @@ const styles = StyleSheet.create({
   },
   eventMetaText: {
     color: Palette.muted,
-    fontSize: 13,
+    fontSize: Typography.sizes.sm,
     fontFamily: Typography.labelFontFamilies.medium,
   },
   joinedCard: {
@@ -1107,7 +1053,7 @@ const styles = StyleSheet.create({
   },
   joinedDay: {
     color: Palette.primary,
-    fontSize: 11,
+    fontSize: Typography.sizes.xs,
     fontFamily: Typography.labelFontFamilies.semibold,
   },
   joinedTime: {
@@ -1136,31 +1082,21 @@ const styles = StyleSheet.create({
   },
   joinedEmptyTitle: {
     color: Palette.text,
-    fontSize: 17,
+    fontSize: Typography.sizes.lg,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
   },
   joinedEmptyText: {
     marginTop: 6,
     color: Palette.muted,
-    fontSize: 13,
+    fontSize: Typography.sizes.sm,
     lineHeight: 19,
     textAlign: 'center',
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
   },
   joinedEmptyButton: {
-    marginTop: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Palette.primary,
-  },
-  joinedEmptyButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
+    marginTop: Spacing.md,
   },
   upgradeCard: {
     marginTop: 12,
@@ -1206,7 +1142,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   createBusinessTitle: {
-    fontSize: 15,
+    fontSize: Typography.sizes.md,
     color: Palette.text,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
@@ -1232,68 +1168,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-  },
-  premiumModalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-  },
-  premiumModalBackdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  premiumModalCard: {
-    width: '100%',
-    maxWidth: 420,
-    borderRadius: 24,
-    padding: 22,
-    backgroundColor: Palette.card,
-  },
-  premiumModalTitle: {
-    fontSize: 22,
-    color: Palette.text,
-    fontFamily: Typography.displayFontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-  },
-  premiumModalSubtitle: {
-    marginTop: 8,
-    fontSize: 14,
-    lineHeight: 21,
-    color: Palette.muted,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-  },
-  premiumBuyButton: {
-    marginTop: 20,
-    borderRadius: 14,
-    backgroundColor: Palette.primary,
-    alignItems: 'center',
-    paddingVertical: 13,
-  },
-  premiumBuyButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-  },
-  premiumCloseButton: {
-    alignItems: 'center',
-    paddingVertical: 11,
-    marginTop: 4,
-  },
-  premiumCloseButtonText: {
-    color: Palette.lightMuted,
-    fontSize: 13,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
   },
 });

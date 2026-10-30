@@ -1,17 +1,15 @@
-import { useState, useEffect } from 'react';
 import {
   View,
   Image,
   Text,
   StyleSheet,
   TouchableOpacity,
-  Alert,
-  Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Plus, X } from 'lucide-react-native';
 import { Colors, Typography, Spacing } from '@/constants/theme';
+import { notify } from '@/utils/notify';
 
 export type ImageAsset = {
   uri: string;
@@ -34,17 +32,6 @@ const THUMB_SIZE = 100;
 /**
  * Checks if a URI or MIME type indicates HEIC/HEIF format
  */
-function isHeic(uri: string, mimeType?: string | null): boolean {
-  const lower = (mimeType || '').toLowerCase();
-  const ext = uri.split('.').pop()?.toLowerCase()?.split('?')[0] || '';
-  return (
-    lower.includes('heic') ||
-    lower.includes('heif') ||
-    ext === 'heic' ||
-    ext === 'heif'
-  );
-}
-
 /**
  * Converts any image to JPEG using expo-image-manipulator.
  * This guarantees the output is a proper JPEG file regardless of input format.
@@ -77,7 +64,7 @@ export function ImagePickerButton({
 }: ImagePickerButtonProps) {
   const handleAdd = async () => {
     if (images.length >= maxImages) {
-      Alert.alert('Limit reached', `You can upload up to ${maxImages} images.`);
+      notify.error(`You can upload up to ${maxImages} images.`);
       return;
     }
 
@@ -138,6 +125,8 @@ export function ImagePickerButton({
             style={styles.removeButton}
             onPress={() => handleRemove(index)}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Remove photo ${index + 1}`}
           >
             <X size={14} color="#FFFFFF" />
           </TouchableOpacity>
@@ -149,6 +138,8 @@ export function ImagePickerButton({
           style={styles.addButton}
           onPress={handleAdd}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Add photo"
         >
           <Plus size={24} color={Colors.text.tertiary} />
           <Text style={styles.addText}>Add</Text>
@@ -215,7 +206,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background.secondary,
   },
   addText: {
-    fontSize: 11,
+    fontSize: Typography.sizes.xs,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
     color: Colors.text.tertiary,

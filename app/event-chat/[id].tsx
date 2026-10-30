@@ -69,7 +69,7 @@ import {
   tombstoneLabel,
   typingLabel,
 } from '@/utils/chatMessages';
-import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 
 const NEAR_BOTTOM_THRESHOLD = 80;
 const MAX_MESSAGE_LENGTH = 1000;
@@ -1456,7 +1456,11 @@ export default function EventChatScreen() {
                 ? postStatus.block_expires_at
                   ? `The host paused your posting until ${new Date(postStatus.block_expires_at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}. You can still read along.`
                   : 'The host removed you from this chat. You can still read along.'
-                : postStatus?.locked
+                : postStatus?.is_host
+                  // Hosts get read + moderation (20261028130000/180000) but
+                  // posting still requires a 'going' RSVP, per the INSERT policy.
+                  ? "You're viewing as host — you can read and moderate, but only going attendees can post."
+                  : postStatus?.locked
                   ? 'The host locked this chat. You can read, but new messages are paused.'
                   : details?.user_rsvp === 'going'
                   ? 'Waiting for one more attendee before the chat opens.'
@@ -1569,7 +1573,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     paddingHorizontal: Spacing.md,
     paddingBottom: Spacing.sm + 4,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.border.light,
   },
@@ -1656,7 +1660,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
   },
   primaryButtonText: {
-    color: '#FFFFFF',
+    color: Colors.text.inverse,
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.semibold,
   },
@@ -1666,11 +1670,11 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   dayLabel: {
-    paddingHorizontal: 10,
+    paddingHorizontal: Spacing.sm,
     paddingVertical: 4,
     borderRadius: BorderRadius.round,
     backgroundColor: Colors.background.tertiary,
-    fontSize: 11,
+    fontSize: Typography.sizes.xs,
     lineHeight: 14,
     letterSpacing: 0.2,
     color: Colors.text.secondary,
@@ -1709,7 +1713,7 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: BorderRadius.sm,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
     ...Shadows.sm,
   },
   messageBubbleMine: {
@@ -1743,7 +1747,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   dividerLabel: {
-    fontSize: 11,
+    fontSize: Typography.sizes.xs,
     lineHeight: 14,
     letterSpacing: 0.4,
     textTransform: 'uppercase',
@@ -1751,7 +1755,7 @@ const styles = StyleSheet.create({
     fontFamily: Typography.labelFontFamilies.semibold,
   },
   unreadJumpPill: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.primary,
   },
@@ -1790,7 +1794,7 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.semibold,
   },
   mentionMine: {
-    color: '#FFFFFF',
+    color: Colors.text.inverse,
     textDecorationLine: 'underline',
   },
   mentionStrip: {
@@ -1831,25 +1835,25 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.regular,
   },
   messageTextMine: {
-    color: '#FFFFFF',
+    color: Colors.text.inverse,
   },
   messageLink: {
     color: Colors.primary,
     textDecorationLine: 'underline',
   },
   messageLinkMine: {
-    color: '#FFFFFF',
+    color: Colors.text.inverse,
   },
   messageMeta: {
     marginTop: 4,
     alignSelf: 'flex-end',
-    fontSize: 11,
+    fontSize: Typography.sizes.xs,
     lineHeight: 14,
     color: Colors.text.tertiary,
     fontFamily: Typography.labelFontFamilies.medium,
   },
   messageMetaMine: {
-    color: 'rgba(255,255,255,0.75)',
+    color: alpha(Colors.surface, 0.75),
   },
   messageMetaFailed: {
     color: Colors.error,
@@ -1861,8 +1865,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingLeft: 10,
-    paddingRight: 14,
+    paddingLeft: Spacing.sm,
+    paddingRight: Spacing.md,
     height: 34,
     borderRadius: BorderRadius.round,
     backgroundColor: Colors.primary,
@@ -1880,7 +1884,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     paddingHorizontal: Spacing.md,
     paddingTop: Spacing.sm + 4,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.border.light,
   },
@@ -1894,7 +1898,7 @@ const styles = StyleSheet.create({
   composerWrap: {
     paddingHorizontal: Spacing.md,
     paddingTop: Spacing.xs,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.border.light,
   },

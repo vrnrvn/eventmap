@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, MapPin, Check } from 'lucide-react-native';
+import { MapPin, Check } from 'lucide-react-native';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
 import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView';
 import { geocodingService } from '@/services/geocoding';
@@ -118,28 +119,32 @@ export default function BusinessLocationScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={handleBack} activeOpacity={0.7}>
-          <ArrowLeft size={22} color={Colors.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          {isOnboarding
+      <ScreenHeader
+        title={
+          isOnboarding
             ? 'Your Location'
             : isProfile
               ? 'Your location'
               : isEvent
                 ? 'Event location'
-                : 'Business Location'}
-        </Text>
-        <TouchableOpacity
-          style={styles.confirmHeaderBtn}
-          onPress={handleConfirm}
-          activeOpacity={0.7}
-        >
-          <Check size={20} color={Colors.primary} />
-          <Text style={styles.confirmHeaderText}>Confirm</Text>
-        </TouchableOpacity>
-      </View>
+                : 'Business Location'
+        }
+        onBack={handleBack}
+        safeArea={false}
+        right={
+          <TouchableOpacity
+            style={styles.confirmHeaderBtn}
+            onPress={handleConfirm}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Confirm location"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Check size={20} color={Colors.primary} />
+            <Text style={styles.confirmHeaderText}>Confirm</Text>
+          </TouchableOpacity>
+        }
+      />
 
       <KeyboardAvoidingView
         style={styles.keyboardView}
@@ -262,29 +267,6 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: Colors.background.primary,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border.light,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: Colors.background.secondary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: Colors.text.primary,
   },
   confirmHeaderBtn: {
     flexDirection: 'row',

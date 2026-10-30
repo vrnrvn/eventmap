@@ -8,12 +8,14 @@ import {
   ActivityIndicator,
   RefreshControl,
   Platform,
-  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import { socialService } from '@/services/social';
 import { confirmAction } from '@/utils/confirm';
+import { notify } from '@/utils/notify';
+import { Button } from '@/components/ui/Button';
+import { EventListItem, formatEventDate } from '@/components/EventListItem';
 import { RankedEvent } from '@/types/database';
 import { Colors, Typography } from '@/constants/theme';
 import {
@@ -26,16 +28,6 @@ import {
   Navigation,
   Repeat,
 } from 'lucide-react-native';
-
-const Palette = {
-  gradientStart: Colors.primary,
-  gradientEnd: Colors.accent,
-  cardBg: Colors.background.primary,
-  surfaceMuted: Colors.background.primary,
-  accentSoft: 'rgba(196, 92, 62, 0.12)',
-  separator: Colors.border.light,
-  badge: Colors.primary,
-};
 
 export default function SavedEvents() {
   const insets = useSafeAreaInsets();
@@ -82,20 +74,9 @@ export default function SavedEvents() {
       await socialService.unsaveEvent(event.id);
     } catch {
       setEvents(previous);
-      Alert.alert('Error', 'Failed to remove saved event');
+      notify.error('Failed to remove saved event');
     }
   }, [events]);
-
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  };
 
   const upcoming = events.filter((e) => !e.has_ended);
   const past = events.filter((e) => e.has_ended);
@@ -103,22 +84,29 @@ export default function SavedEvents() {
   const renderCard = (event: RankedEvent) => {
     const ended = !!event.has_ended;
     const when = ended ? event.start_datetime : event.next_start_datetime || event.start_datetime;
+    const metaLines: string[] = [];
+    if (event.distance_km > 0) {
+      metaLines.push(`${(event.distance_km * 0.621371).toFixed(1)} mi away`);
+    }
+    if (event.rsvp_count > 0 && !ended) {
+      metaLines.push(
+        `${event.rsvp_count} ${event.rsvp_count === 1 ? 'person' : 'people'} going`
+      );
+    }
     return (
-      <TouchableOpacity
-        key={event.id}
-        style={[styles.eventCard, ended && styles.eventCardPast]}
-        onPress={() => router.push(`/event/${event.id}` as never)}
-        activeOpacity={0.8}
-        accessibilityRole="button"
-        accessibilityLabel={`${event.title}, ${formatDate(when)}${ended ? ', ended' : ''}`}
-      >
-        <View style={[styles.savedStrip, ended && styles.savedStripPast]} />
-
-        <View style={styles.cardBody}>
-          <View style={styles.titleRow}>
-            <Text style={styles.eventTitle} numberOfLines={2}>
-              {event.title}
-            </Text>
+      <View key={event.id} style={styles.cardSpacing}>
+        <EventListItem
+          title={event.title}
+          subtitle={event.business_name}
+          dateLine={`${formatEventDate(when)}${event.is_recurring && !ended ? ' · repeats' : ''}`}
+          thumbnailUrl={event.cover_image_url}
+          dimmed={ended}
+          badge={ended ? { label: 'Ended', tone: 'neutral' } : null}
+          dateIcon={
+            event.is_recurring ? <Repeat size={12} color={Colors.text.tertiary} /> : undefined
+          }
+          metaLines={metaLines}
+          rightAccessory={
             <TouchableOpacity
               style={styles.bookmarkBadge}
               onPress={() => handleUnsave(event)}
@@ -126,60 +114,13 @@ export default function SavedEvents() {
               accessibilityRole="button"
               accessibilityLabel="Remove from saved events"
             >
-              <Bookmark size={14} color={Palette.gradientStart} fill={Palette.gradientStart} />
+              <Bookmark size={14} color={Colors.primary} fill={Colors.primary} />
             </TouchableOpacity>
-          </View>
-
-          <View style={styles.eventMeta}>
-            <View style={styles.metaRow}>
-              <View style={styles.metaIconWrap}>
-                {event.is_recurring ? (
-                  <Repeat size={13} color={Palette.gradientStart} />
-                ) : (
-                  <Calendar size={13} color={Palette.gradientStart} />
-                )}
-              </View>
-              <Text style={styles.metaText}>
-                {formatDate(when)}
-                {ended ? ' · Ended' : event.is_recurring ? ' · repeats' : ''}
-              </Text>
-            </View>
-
-            {event.distance_km > 0 && (
-              <View style={styles.metaRow}>
-                <View style={styles.metaIconWrap}>
-                  <Navigation size={13} color={Palette.gradientStart} />
-                </View>
-                <Text style={styles.metaText}>
-                  {event.distance_km < 1
-                    ? `${(event.distance_km * 1000).toFixed(0)} m away`
-                    : `${event.distance_km.toFixed(1)} km away`}
-                </Text>
-              </View>
-            )}
-
-            {event.rsvp_count > 0 && !ended && (
-              <View style={styles.metaRow}>
-                <View style={styles.metaIconWrap}>
-                  <Users size={13} color={Palette.gradientStart} />
-                </View>
-                <Text style={styles.metaText}>
-                  {event.rsvp_count} {event.rsvp_count === 1 ? 'person' : 'people'} going
-                </Text>
-              </View>
-            )}
-          </View>
-
-          <View style={styles.cardFooter}>
-            <Text style={styles.businessName} numberOfLines={1}>
-              {event.business_name}
-            </Text>
-            <View style={styles.viewPill}>
-              <Text style={styles.viewPillText}>View</Text>
-            </View>
-          </View>
-        </View>
-      </TouchableOpacity>
+          }
+          onPress={() => router.push(`/event/${event.id}` as never)}
+          accessibilityLabel={`${event.title}, ${formatEventDate(when)}${ended ? ', ended' : ''}`}
+        />
+      </View>
     );
   };
 
@@ -198,7 +139,7 @@ export default function SavedEvents() {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <View style={styles.headerIconWrap}>
-            <Bookmark size={18} color={Palette.gradientStart} />
+            <Bookmark size={18} color={Colors.primary} />
           </View>
           <View>
             <Text style={styles.headerTitle}>Saved Events</Text>
@@ -215,11 +156,11 @@ export default function SavedEvents() {
       {loading ? (
         <View style={styles.centerContainer}>
           <View style={styles.loadingIconWrap}>
-            <Bookmark size={28} color={Palette.gradientStart} />
+            <Bookmark size={28} color={Colors.primary} />
           </View>
           <ActivityIndicator
             size="large"
-            color={Palette.gradientStart}
+            color={Colors.primary}
             style={{ marginTop: 20 }}
           />
           <Text style={styles.loadingText}>Loading your saved events…</Text>
@@ -237,8 +178,8 @@ export default function SavedEvents() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor={Palette.gradientStart}
-              colors={[Palette.gradientStart]}
+              tintColor={Colors.primary}
+              colors={[Colors.primary]}
             />
           }
         >
@@ -249,20 +190,19 @@ export default function SavedEvents() {
           ) : events.length === 0 ? (
             <View style={styles.emptyContainer}>
               <View style={styles.emptyIconWrap}>
-                <BookmarkX size={36} color={Palette.gradientStart} />
+                <BookmarkX size={36} color={Colors.primary} />
               </View>
               <Text style={styles.emptyTitle}>No Saved Events</Text>
               <Text style={styles.emptySubtitle}>
                 Tap the bookmark on any event to keep it here for later.
               </Text>
-              <TouchableOpacity
-                style={styles.exploreCta}
+              <Button
+                label="Explore Events"
                 onPress={() => router.push('/(tabs)/discover' as never)}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.exploreCtaText}>Explore Events</Text>
-                <ChevronRight size={16} color={Palette.gradientStart} />
-              </TouchableOpacity>
+                variant="ghost"
+                icon={<ChevronRight size={16} color={Colors.primary} />}
+                style={styles.exploreCta}
+              />
             </View>
           ) : (
             <>
@@ -288,7 +228,7 @@ export default function SavedEvents() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Palette.surfaceMuted,
+    backgroundColor: Colors.background.primary,
   },
 
   groupLabel: {
@@ -300,12 +240,6 @@ const styles = StyleSheet.create({
     color: Colors.text.tertiary,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
-  },
-  eventCardPast: {
-    opacity: 0.72,
-  },
-  savedStripPast: {
-    backgroundColor: Colors.text.tertiary,
   },
   errorText: {
     fontSize: Typography.sizes.sm,
@@ -319,15 +253,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: Palette.cardBg,
+    backgroundColor: Colors.background.primary,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Palette.separator,
+    borderBottomColor: Colors.border.light,
   },
   backBtn: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: Palette.surfaceMuted,
+    backgroundColor: Colors.background.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -340,7 +274,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 12,
-    backgroundColor: Palette.accentSoft,
+    backgroundColor: Colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -371,7 +305,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 20,
-    backgroundColor: Palette.accentSoft,
+    backgroundColor: Colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -405,7 +339,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 24,
-    backgroundColor: Palette.accentSoft,
+    backgroundColor: Colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
@@ -426,124 +360,19 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   exploreCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 14,
-    backgroundColor: Palette.accentSoft,
-  },
-  exploreCtaText: {
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
+    backgroundColor: Colors.primarySoft,
   },
 
-  /* ── Event card ── */
-  eventCard: {
-    flexDirection: 'row',
-    backgroundColor: Palette.cardBg,
-    borderRadius: 20,
+  cardSpacing: {
     marginBottom: 12,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 10,
-      },
-      android: { elevation: 3 },
-    }),
-  },
-  savedStrip: {
-    width: 4,
-    backgroundColor: Palette.badge,
-    borderTopLeftRadius: 20,
-    borderBottomLeftRadius: 20,
-  },
-  cardBody: {
-    flex: 1,
-    padding: 16,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 10,
-    marginBottom: 10,
-  },
-  eventTitle: {
-    flex: 1,
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.text.primary,
-    lineHeight: 22,
   },
   bookmarkBadge: {
     width: 32,
     height: 32,
     borderRadius: 10,
-    backgroundColor: Palette.accentSoft,
+    backgroundColor: Colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  /* ── Meta ── */
-  eventMeta: {
-    gap: 6,
-    marginBottom: 12,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  metaIconWrap: {
-    width: 26,
-    height: 26,
-    borderRadius: 8,
-    backgroundColor: Palette.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  metaText: {
-    flex: 1,
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-    color: Colors.text.secondary,
-  },
-
-  /* ── Footer ── */
-  cardFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Palette.separator,
-  },
-  businessName: {
-    flex: 1,
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.text.tertiary,
-  },
-  viewPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 10,
-    backgroundColor: Palette.accentSoft,
-  },
-  viewPillText: {
-    fontSize: Typography.sizes.xs,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: Palette.gradientStart,
-  },
 });

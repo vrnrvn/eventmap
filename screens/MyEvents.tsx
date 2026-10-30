@@ -6,7 +6,6 @@ import {
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
   RefreshControl,
   Platform,
 } from 'react-native';
@@ -15,12 +14,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import { useApp } from '@/contexts/AppContext';
 import { eventsService } from '@/services/events';
+import { businessesService } from '@/services/businesses';
 import { confirmAction } from '@/utils/confirm';
+import { notify } from '@/utils/notify';
+import { Button } from '@/components/ui/Button';
+import { EventListItem, formatEventDate } from '@/components/EventListItem';
 import { Event } from '@/types/database';
-import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import {
   ArrowLeft,
+  BarChart3,
   Calendar,
+  Megaphone,
   Pencil,
   Trash2,
   PlusCircle,
@@ -36,13 +41,13 @@ const Palette = {
   gradientEnd: Colors.accent,
   cardBg: Colors.background.primary,
   surfaceMuted: Colors.background.primary,
-  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  accentSoft: Colors.primarySoft,
   textOnGradient: Colors.text.inverse,
-  textOnGradientMuted: 'rgba(250, 248, 245, 0.75)',
+  textOnGradientMuted: alpha(Colors.surface, 0.75),
   separator: Colors.border.light,
   badge: Colors.primary,
-  editSoft: 'rgba(196, 92, 62, 0.12)',
-  deleteSoft: 'rgba(196, 92, 62, 0.12)',
+  editSoft: Colors.primarySoft,
+  deleteSoft: Colors.errorSoft,
   deleteColor: Colors.error,
 };
 
@@ -127,30 +132,47 @@ export default function MyEvents() {
     }, [hasBusiness, userBusiness?.id])
   );
 
-  const handleDeleteEvent = useCallback(async (event: Event) => {
+  const handleCancelEvent = useCallback(
+    async (event: Event) => {
+      const ok = await confirmAction({
+        title: 'Cancel Event',
+        message: `Cancel "${event.title}"? Attendees will be notified and the event will no longer be visible to the public. This cannot be undone.`,
+        confirmLabel: 'Cancel event',
+        destructive: true,
+      });
+      if (!ok) return;
+      try {
+        // Pre-apply (20261030106000) this hard-deletes; post-apply it soft-
+        // cancels and keeps the row, so reload instead of filtering locally.
+        await eventsService.cancelEvent(event.id);
+        await loadInitial();
+      } catch {
+        notify.error('Failed to cancel event');
+      }
+    },
+    [loadInitial]
+  );
+
+  const handleNotifyFollowers = useCallback(async (event: Event) => {
     const ok = await confirmAction({
-      title: 'Delete Event',
-      message: `Delete "${event.title}"? This cannot be undone.`,
-      confirmLabel: 'Delete',
-      destructive: true,
+      title: 'Notify Followers',
+      message: `Send your followers an in-app notification about "${event.title}"? Followers who were already notified about this event won't get a duplicate.`,
+      confirmLabel: 'Notify',
     });
     if (!ok) return;
     try {
-      await eventsService.deleteEvent(event.id);
-      setEvents((prev) => prev.filter((e) => e.id !== event.id));
-    } catch {
-      Alert.alert('Error', 'Failed to delete event');
+      await businessesService.notifyFollowersAboutEvent(event.id);
+      notify.success('Followers notified.');
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
+      // RPC ships with migration 20261030112000; tolerate it being unapplied.
+      if (code === '42883' || code === 'PGRST202') {
+        notify.error('Not enabled on this server yet.');
+      } else {
+        notify.error('Failed to notify followers');
+      }
     }
   }, []);
-
-  const formatDate = (dateString: string) =>
-    new Date(dateString).toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
 
   const isUpcoming = (dateString: string) =>
     new Date(dateString).getTime() > Date.now();
@@ -158,83 +180,87 @@ export default function MyEvents() {
   const renderItem = useCallback(
     ({ item }: { item: Event }) => {
       const upcoming = isUpcoming(item.start_datetime);
+      // Tolerant check: events.status only exists once 20261030106000 is
+      // applied (rows arrive via select('*')); absent field = active.
+      const cancelled =
+        (item as Event & { status?: string }).status === 'cancelled';
 
       return (
-        <TouchableOpacity
-          style={styles.eventCard}
-          onPress={() => router.push(`/event/${item.id}` as never)}
-          activeOpacity={0.8}
-        >
-          {/* Status strip */}
-          <View
-            style={[
-              styles.statusStrip,
-              { backgroundColor: upcoming ? Palette.badge : Colors.text.tertiary },
-            ]}
-          />
-
-          <View style={styles.cardBody}>
-            {/* Top row: title + status */}
-            <View style={styles.cardTopRow}>
-              <Text style={styles.eventTitle} numberOfLines={2}>
-                {item.title}
-              </Text>
-              <View
-                style={[
-                  styles.statusPill,
-                  upcoming ? styles.statusPillUpcoming : styles.statusPillPast,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.statusPillText,
-                    upcoming
-                      ? styles.statusPillTextUpcoming
-                      : styles.statusPillTextPast,
-                  ]}
+        <View style={styles.cardSpacing}>
+          <EventListItem
+            title={item.title}
+            dateLine={formatEventDate(item.start_datetime)}
+            thumbnailUrl={(item as Event & { cover_image_url?: string | null }).cover_image_url}
+            dimmed={cancelled || !upcoming}
+            badge={
+              cancelled
+                ? { label: 'Cancelled', tone: 'danger' }
+                : upcoming
+                  ? { label: 'Upcoming', tone: 'primary' }
+                  : { label: 'Past', tone: 'neutral' }
+            }
+            dateIcon={<Clock size={12} color={Colors.text.tertiary} />}
+            onPress={() => router.push(`/event/${item.id}` as never)}
+            actions={
+              <>
+                <TouchableOpacity
+                  style={styles.editBtn}
+                  onPress={() =>
+                    router.push(`/business/edit-event/${item.id}` as never)
+                  }
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit ${item.title}`}
                 >
-                  {upcoming ? 'Upcoming' : 'Past'}
-                </Text>
-              </View>
-            </View>
+                  <Pencil size={14} color={Palette.gradientStart} />
+                  <Text style={styles.editBtnText}>Edit</Text>
+                </TouchableOpacity>
 
-            {/* Date */}
-            <View style={styles.metaRow}>
-              <View style={styles.metaIconWrap}>
-                <Clock size={13} color={Palette.gradientStart} />
-              </View>
-              <Text style={styles.metaText}>
-                {formatDate(item.start_datetime)}
-              </Text>
-            </View>
+                {!cancelled && (
+                  <TouchableOpacity
+                    style={styles.iconActionBtn}
+                    onPress={() => handleNotifyFollowers(item)}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Notify followers about ${item.title}`}
+                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                  >
+                    <Megaphone size={14} color={Palette.gradientStart} />
+                  </TouchableOpacity>
+                )}
 
-            {/* Actions */}
-            <View style={styles.actionsRow}>
-              <TouchableOpacity
-                style={styles.editBtn}
-                onPress={() =>
-                  router.push(`/business/edit-event/${item.id}` as never)
-                }
-                activeOpacity={0.7}
-              >
-                <Pencil size={14} color={Palette.gradientStart} />
-                <Text style={styles.editBtnText}>Edit</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.iconActionBtn}
+                  onPress={() =>
+                    router.push(`/business/event-insights/${item.id}` as never)
+                  }
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View insights for ${item.title}`}
+                  hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                >
+                  <BarChart3 size={14} color={Palette.gradientStart} />
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.deleteBtn}
-                onPress={() => handleDeleteEvent(item)}
-                activeOpacity={0.7}
-              >
-                <Trash2 size={14} color={Palette.deleteColor} />
-                <Text style={styles.deleteBtnText}>Delete</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </TouchableOpacity>
+                {!cancelled && (
+                  <TouchableOpacity
+                    style={styles.deleteBtn}
+                    onPress={() => handleCancelEvent(item)}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Cancel ${item.title}`}
+                  >
+                    <Trash2 size={14} color={Palette.deleteColor} />
+                    <Text style={styles.deleteBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            }
+          />
+        </View>
       );
     },
-    [handleDeleteEvent]
+    [handleCancelEvent, handleNotifyFollowers]
   );
 
   const keyExtractor = useCallback((item: Event) => item.id, []);
@@ -283,14 +309,13 @@ export default function MyEvents() {
               : 'You need a business profile to create and manage events.'}
           </Text>
           {hasBusiness && (
-            <TouchableOpacity
-              style={styles.emptyCta}
+            <Button
+              label="Create Event"
               onPress={() => router.push('/(tabs)/create' as never)}
-              activeOpacity={0.8}
-            >
-              <PlusCircle size={16} color={Palette.gradientStart} />
-              <Text style={styles.emptyCtaText}>Create Event</Text>
-            </TouchableOpacity>
+              variant="ghost"
+              icon={<PlusCircle size={16} color={Palette.gradientStart} />}
+              style={styles.emptyCta}
+            />
           )}
         </View>
       ) : null,
@@ -317,6 +342,9 @@ export default function MyEvents() {
             style={styles.backBtn}
             onPress={() => router.back()}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <ArrowLeft size={22} color={Colors.text.primary} />
           </TouchableOpacity>
@@ -337,21 +365,13 @@ export default function MyEvents() {
           <Text style={styles.noBizSubtitle}>
             Create a business profile to start{'\n'}managing your events.
           </Text>
-          <TouchableOpacity
-            style={styles.noBizCta}
+          <Button
+            label="Create Business"
             onPress={() => router.push('/business/onboarding' as never)}
-            activeOpacity={0.85}
-          >
-            <LinearGradient
-              colors={[Palette.gradientStart, Palette.gradientEnd]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.noBizCtaGradient}
-            >
-              <Text style={styles.noBizCtaText}>Create Business</Text>
-              <ChevronRight size={18} color="#fff" />
-            </LinearGradient>
-          </TouchableOpacity>
+            size="lg"
+            gradient
+            icon={<ChevronRight size={18} color="#fff" />}
+          />
         </View>
       </View>
     );
@@ -366,6 +386,9 @@ export default function MyEvents() {
           style={styles.backBtn}
           onPress={() => router.back()}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <ArrowLeft size={22} color={Colors.text.primary} />
         </TouchableOpacity>
@@ -560,100 +583,11 @@ const styles = StyleSheet.create({
   },
 
   /* ── Event card ── */
-  eventCard: {
-    flexDirection: 'row',
-    backgroundColor: Palette.cardBg,
-    borderRadius: 18,
+  cardSpacing: {
     marginBottom: 12,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 10,
-      },
-      android: { elevation: 3 },
-    }),
-  },
-  statusStrip: {
-    width: 4,
-    borderTopLeftRadius: 18,
-    borderBottomLeftRadius: 18,
-  },
-  cardBody: {
-    flex: 1,
-    padding: 16,
-  },
-  cardTopRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 10,
-    marginBottom: 8,
-  },
-  eventTitle: {
-    flex: 1,
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.text.primary,
-    lineHeight: 22,
-  },
-  statusPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  statusPillUpcoming: {
-    backgroundColor: Palette.accentSoft,
-  },
-  statusPillPast: {
-    backgroundColor: Palette.surfaceMuted,
-  },
-  statusPillText: {
-    fontSize: Typography.sizes.xs,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-  },
-  statusPillTextUpcoming: {
-    color: Palette.gradientStart,
-  },
-  statusPillTextPast: {
-    color: Colors.text.tertiary,
-  },
-
-  /* ── Meta ── */
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 14,
-  },
-  metaIconWrap: {
-    width: 26,
-    height: 26,
-    borderRadius: 8,
-    backgroundColor: Palette.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  metaText: {
-    flex: 1,
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-    color: Colors.text.secondary,
   },
 
   /* ── Action buttons ── */
-  actionsRow: {
-    flexDirection: 'row',
-    gap: 10,
-    paddingTop: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Palette.separator,
-  },
   editBtn: {
     flex: 1,
     flexDirection: 'row',
@@ -669,6 +603,14 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Palette.gradientStart,
+  },
+  iconActionBtn: {
+    width: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: Palette.editSoft,
   },
   deleteBtn: {
     flex: 1,
@@ -719,19 +661,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   emptyCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 14,
     backgroundColor: Palette.accentSoft,
-  },
-  emptyCtaText: {
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
   },
 
   /* ── Footer loader ── */

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,11 +8,11 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { businessesService } from '@/services/businesses';
+import { notify } from '@/utils/notify';
 import { eventsService } from '@/services/events';
 import { geocodingService } from '@/services/geocoding';
 import { useApp } from '@/contexts/AppContext';
@@ -21,8 +21,9 @@ import { AddressSearchInput } from '@/components/AddressSearchInput';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { GoogleMapView } from '@/components/GoogleMapView';
 import { Avatar } from '@/components/Avatar';
+import { Button } from '@/components/ui/Button';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
-import { ArrowLeft } from 'lucide-react-native';
+import { ArrowLeft, Briefcase } from 'lucide-react-native';
 
 const BUSINESS_CATEGORIES = [
   'Restaurant',
@@ -38,9 +39,18 @@ const BUSINESS_CATEGORIES = [
 ];
 
 export default function BusinessOnboarding() {
-  const { refreshBusiness, setUserMode } = useApp();
+  const { refreshBusiness, setUserMode, hasBusiness } = useApp();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  /**
+   * True only while the coordinates came from a real geocode action (picking
+   * a suggestion, the Set button, or a map tap). Typing in the address field
+   * resets it, so a hand-typed address can never silently keep the SF
+   * default pin.
+   */
+  const [locationSet, setLocationSet] = useState(false);
+  /** Address string the coordinates were geocoded for (to detect hand edits). */
+  const committedAddressRef = useRef<string | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -78,6 +88,8 @@ export default function BusinessOnboarding() {
 
     if (!formData.address.trim()) {
       newErrors.address = 'Business address is required';
+    } else if (!locationSet) {
+      newErrors.address = 'Pick the address from suggestions or tap the map';
     }
 
     setErrors(newErrors);
@@ -132,22 +144,56 @@ export default function BusinessOnboarding() {
       await refreshBusiness();
       setUserMode('business');
 
-      Alert.alert(
-        'Success',
-        'Your business profile has been created!',
-        [
-          {
-            text: 'OK',
-            onPress: () => router.replace('/(tabs)/profile'),
-          },
-        ]
-      );
+      notify.success('Your business profile has been created!');
+      router.replace('/(tabs)/profile');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to create business profile');
+      // 23505 = unique violation (businesses.owner_id): the account already
+      // has a business (e.g. created on another device). Refresh so the
+      // "already have a business" state replaces the form.
+      if (error?.code === '23505') {
+        notify.error('You already have a business — edit it in Settings.');
+        refreshBusiness().catch(() => {});
+      } else {
+        notify.error(error.message || 'Failed to create business profile');
+      }
     } finally {
       setLoading(false);
     }
   };
+
+  // One business per account (businesses.owner_id is UNIQUE): show a friendly
+  // state instead of a form that can only end in a DB error.
+  if (hasBusiness) {
+    return (
+      <View style={styles.container}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <ArrowLeft size={24} color={Colors.text.primary} />
+        </TouchableOpacity>
+        <View style={styles.alreadyContainer}>
+          <View style={styles.alreadyIconWrap}>
+            <Briefcase size={32} color={Colors.primary} />
+          </View>
+          <Text style={styles.title}>You already have a business</Text>
+          <Text style={styles.alreadySubtitle}>
+            Each account can host one business profile. You can edit your
+            existing business in Settings.
+          </Text>
+          <Button
+            label="Open Settings"
+            onPress={() => router.push('/settings')}
+            size="lg"
+            fullWidth
+          />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
@@ -266,6 +312,9 @@ export default function BusinessOnboarding() {
                       lat: result.lat,
                       lng: result.lng,
                     }));
+                    committedAddressRef.current = result.formattedAddress;
+                    setLocationSet(true);
+                    setErrors((e) => ({ ...e, address: '' }));
                   }
                 }}
               />
@@ -297,28 +346,42 @@ export default function BusinessOnboarding() {
           <AddressSearchInput
             label="Business address"
             value={formData.address}
-            onChangeText={(text) =>
-              setFormData((f) => ({ ...f, address: text }))
-            }
-            onSelect={(result) =>
+            onChangeText={(text) => {
+              // Typing alone never moves the pin, so the coords are no longer
+              // trustworthy until the user re-selects or taps the map. (The
+              // Set button echoes the geocoded address back through here, so
+              // matching text keeps the committed location.)
+              if (text !== committedAddressRef.current) setLocationSet(false);
+              setFormData((f) => ({ ...f, address: text }));
+            }}
+            onSelect={(result) => {
               setFormData((f) => ({
                 ...f,
                 address: result.formattedAddress,
                 lat: result.lat,
                 lng: result.lng,
-              }))
-            }
+              }));
+              committedAddressRef.current = result.formattedAddress;
+              setLocationSet(true);
+              setErrors((e) => ({ ...e, address: '' }));
+            }}
             placeholder="Building, street address, business or condo name"
             error={errors.address}
             approximate={false}
             addressPrecision="full"
             showSetButton
           />
-          {formData.address && (
-            <Text style={styles.locationHint}>
-              Pin at {formData.lat.toFixed(4)}, {formData.lng.toFixed(4)}
-            </Text>
-          )}
+          {formData.address ? (
+            locationSet ? (
+              <Text style={styles.locationHint}>
+                Pin at {formData.lat.toFixed(4)}, {formData.lng.toFixed(4)}
+              </Text>
+            ) : (
+              <Text style={styles.locationHint}>
+                Pin not set yet — pick a suggestion, press Set, or tap the map
+              </Text>
+            )
+          ) : null}
 
           <TouchableOpacity
             style={styles.primaryButton}
@@ -474,5 +537,28 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.xs,
     color: Colors.error,
     marginTop: Spacing.xs,
+  },
+  alreadyContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.xl * 1.5,
+  },
+  alreadyIconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.lg,
+  },
+  alreadySubtitle: {
+    fontSize: Typography.sizes.md,
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginTop: Spacing.xs,
+    marginBottom: Spacing.xl,
   },
 });

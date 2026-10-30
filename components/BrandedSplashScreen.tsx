@@ -12,7 +12,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { Colors, Shadows, Typography } from '@/constants/theme';
+import { alpha, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 
 type BrandedSplashScreenProps = {
   visible: boolean;
@@ -80,7 +80,7 @@ export function BrandedSplashScreen({ visible }: BrandedSplashScreenProps) {
 
         <Animated.View style={[styles.logoShell, logoStyle]}>
           <LinearGradient
-            colors={['rgba(255,255,255,0.22)', 'rgba(255,255,255,0.08)']}
+            colors={[alpha(Colors.surface, 0.22), alpha(Colors.surface, 0.08)]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.logoFrame}
@@ -118,7 +118,7 @@ const styles = StyleSheet.create({
     width: 280,
     height: 280,
     borderRadius: 999,
-    backgroundColor: 'rgba(232, 168, 56, 0.16)',
+    backgroundColor: alpha(Colors.accent, 0.16),
   },
   glowBottom: {
     position: 'absolute',
@@ -127,7 +127,7 @@ const styles = StyleSheet.create({
     width: 240,
     height: 240,
     borderRadius: 999,
-    backgroundColor: 'rgba(196, 92, 62, 0.2)',
+    backgroundColor: alpha(Colors.primary, 0.2),
   },
   halo: {
     position: 'absolute',
@@ -140,7 +140,7 @@ const styles = StyleSheet.create({
     ...Shadows.lg,
   },
   logoFrame: {
-    padding: 14,
+    padding: Spacing.md,
     borderRadius: 40,
   },
   logoCore: {
@@ -151,7 +151,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(250, 248, 245, 0.98)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.24)',
+    borderColor: alpha(Colors.surface, 0.24),
   },
   logo: {
     width: 98,
@@ -173,7 +173,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     color: 'rgba(250, 248, 245, 0.74)',
-    fontSize: 15,
+    fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamily,
     letterSpacing: 0.2,
   },

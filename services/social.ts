@@ -7,7 +7,28 @@ import {
   RankedEvent,
   PublicAttendee,
   AttendeesPage,
+  Business,
 } from '@/types/database';
+
+/**
+ * Global user blocking depends on the user_blocks table added by migration
+ * 20261030111000. Until it is applied, Postgres returns 42P01
+ * (undefined_table) — surfaced as this typed NOT_AVAILABLE error so the UI
+ * can degrade gracefully.
+ */
+export class BlockingUnavailableError extends Error {
+  readonly code = 'NOT_AVAILABLE' as const;
+
+  constructor() {
+    super("Blocking isn't available on this server yet.");
+    this.name = 'BlockingUnavailableError';
+  }
+}
+
+function throwBlockError(error: { code?: string }): never {
+  if (error.code === '42P01') throw new BlockingUnavailableError();
+  throw error;
+}
 
 export type GoingEventsScope = 'upcoming' | 'past' | 'interested';
 
@@ -30,6 +51,21 @@ export const socialService = {
     } = await supabase.auth.getUser();
     if (!user) throw new Error('Not authenticated');
 
+    // Capacity-aware join (20261030108000): the RPC locks the event row and
+    // rejects with EVENT_FULL when max_attendees is reached.
+    const { error: rpcError } = await (supabase as any).rpc(
+      'join_event_with_capacity',
+      { p_event_id: eventId, p_status: status }
+    );
+    if (!rpcError) return;
+    if (typeof rpcError.message === 'string' && rpcError.message.includes('EVENT_FULL')) {
+      throw new Error('EVENT_FULL');
+    }
+    if (rpcError.code !== '42883' && rpcError.code !== 'PGRST202') {
+      throw rpcError;
+    }
+    // TODO: remove fallback once 20261030108000 is applied
+    // (RPC missing pre-apply: keep today's plain upsert behavior.)
     const { error } = await supabase.from('rsvps').upsert(
       {
         user_id: user.id,
@@ -326,5 +362,105 @@ export const socialService = {
 
     if (error) throw error;
     return data || [];
+  },
+
+  /** Batched lookup for follow lists — one query instead of one per business. */
+  async getBusinessesByIds(businessIds: string[]): Promise<Business[]> {
+    const unique = Array.from(new Set(businessIds));
+    if (unique.length === 0) return [];
+
+    const { data, error } = await supabase
+      .from('businesses')
+      .select('*')
+      .in('id', unique);
+
+    if (error) throw error;
+    return (data as Business[]) || [];
+  },
+
+  /**
+   * Follower counts for many businesses in one round trip: a single follows
+   * select filtered by business_id, aggregated client-side. Every requested
+   * id is present in the result (0 when it has no followers).
+   */
+  async getFollowerCountsByBusinessIds(
+    businessIds: string[]
+  ): Promise<Record<string, number>> {
+    const unique = Array.from(new Set(businessIds));
+    const counts: Record<string, number> = {};
+    for (const id of unique) counts[id] = 0;
+    if (unique.length === 0) return counts;
+
+    const { data, error } = await supabase
+      .from('follows')
+      .select('business_id')
+      .in('business_id', unique);
+
+    if (error) throw error;
+    for (const row of data || []) {
+      counts[row.business_id] = (counts[row.business_id] ?? 0) + 1;
+    }
+    return counts;
+  },
+
+  /**
+   * Block a user globally. Storage only for now — content-level enforcement
+   * (hiding blocked users' chat/events) is a server-side follow-up.
+   * Throws BlockingUnavailableError until migration 20261030111000 is applied.
+   */
+  async blockUser(blockedUserId: string): Promise<void> {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    // Not in the generated types until migration 20261030111000 is applied.
+    const { error } = await (supabase as any).from('user_blocks').insert({
+      blocker_id: user.id,
+      blocked_id: blockedUserId,
+    });
+
+    if (error) {
+      // Unique violation: already blocked — treat as success (idempotent).
+      if (error.code === '23505') return;
+      throwBlockError(error);
+    }
+  },
+
+  /** Remove a global block. Throws BlockingUnavailableError pre-apply. */
+  async unblockUser(blockedUserId: string): Promise<void> {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { error } = await (supabase as any)
+      .from('user_blocks')
+      .delete()
+      .eq('blocker_id', user.id)
+      .eq('blocked_id', blockedUserId);
+
+    if (error) throwBlockError(error);
+  },
+
+  /**
+   * Whether the current user has blocked the given user.
+   * Throws BlockingUnavailableError pre-apply (callers may treat as false).
+   */
+  async isBlocked(blockedUserId: string): Promise<boolean> {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return false;
+
+    const { data, error } = await (supabase as any)
+      .from('user_blocks')
+      .select('blocked_id')
+      .eq('blocker_id', user.id)
+      .eq('blocked_id', blockedUserId)
+      .maybeSingle();
+
+    if (error) throwBlockError(error);
+    return !!data;
   },
 };

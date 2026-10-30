@@ -1,5 +1,6 @@
 import React from 'react';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
+import { Colors } from '@/constants/theme';
 
 type IconProps = {
   size?: number;
@@ -28,7 +29,7 @@ export function EventmapSearch({ size = 20, color = '#8A8A8A' }: IconProps) {
   );
 }
 
-export function EventmapFilter({ size = 20, color = '#C45C3E' }: IconProps) {
+export function EventmapFilter({ size = 20, color = Colors.primary }: IconProps) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" accessibilityLabel="Filter">
       <Path

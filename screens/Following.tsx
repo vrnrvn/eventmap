@@ -8,27 +8,16 @@ import {
   ActivityIndicator,
   RefreshControl,
   Platform,
-  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { socialService } from '@/services/social';
-import { businessesService } from '@/services/businesses';
+import { notify, notifyConfirm } from '@/utils/notify';
 import { Business } from '@/types/database';
 import { Colors, Typography } from '@/constants/theme';
 import { ArrowLeft, Heart, HeartOff, ChevronRight } from 'lucide-react-native';
 import { Avatar } from '@/components/Avatar';
 import { CategoryIcon } from '@/components/CategoryIcon';
-
-const Palette = {
-  gradientStart: Colors.primary,
-  gradientEnd: Colors.accent,
-  cardBg: Colors.background.primary,
-  surfaceMuted: Colors.background.primary,
-  accentSoft: 'rgba(196, 92, 62, 0.12)',
-  separator: Colors.border.light,
-  badge: Colors.primary,
-};
 
 type FollowedBusiness = Business & { followId: string };
 
@@ -42,9 +31,15 @@ export default function Following() {
   const loadFollowing = useCallback(async () => {
     try {
       const follows = await socialService.getUserFollows();
+      // One batched query instead of one getBusiness call per follow.
+      const businessesById = new Map(
+        (await socialService.getBusinessesByIds(follows.map((f) => f.business_id))).map(
+          (b) => [b.id, b] as const
+        )
+      );
       const businessList: FollowedBusiness[] = [];
       for (const f of follows) {
-        const biz = await businessesService.getBusiness(f.business_id);
+        const biz = businessesById.get(f.business_id);
         if (biz) {
           businessList.push({ ...biz, followId: f.id });
         }
@@ -67,28 +62,23 @@ export default function Following() {
   }, [loadFollowing]);
 
   const handleUnfollow = (business: FollowedBusiness) => {
-    Alert.alert(
-      'Unfollow',
-      `Stop following ${business.name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Unfollow',
-          style: 'destructive',
-          onPress: async () => {
-            setUnfollowingId(business.id);
-            try {
-              await socialService.unfollowBusiness(business.id);
-              setBusinesses((prev) => prev.filter((b) => b.id !== business.id));
-            } catch {
-              Alert.alert('Error', 'Failed to unfollow');
-            } finally {
-              setUnfollowingId(null);
-            }
-          },
-        },
-      ]
-    );
+    notifyConfirm({
+      title: 'Unfollow',
+      message: `Stop following ${business.name}?`,
+      confirmLabel: 'Unfollow',
+      destructive: true,
+      onConfirm: async () => {
+        setUnfollowingId(business.id);
+        try {
+          await socialService.unfollowBusiness(business.id);
+          setBusinesses((prev) => prev.filter((b) => b.id !== business.id));
+        } catch {
+          notify.error('Failed to unfollow');
+        } finally {
+          setUnfollowingId(null);
+        }
+      },
+    });
   };
 
   const [followerCounts, setFollowerCounts] = useState<Record<string, number>>({});
@@ -96,16 +86,15 @@ export default function Following() {
   useEffect(() => {
     if (businesses.length === 0) return;
     const loadCounts = async () => {
-      const counts: Record<string, number> = {};
-      await Promise.all(
-        businesses.map(async (b) => {
-          const count = await businessesService.getFollowerCount(b.id);
-          counts[b.id] = count;
-        })
+      // One follows query for all businesses instead of a count query each.
+      const counts = await socialService.getFollowerCountsByBusinessIds(
+        businesses.map((b) => b.id)
       );
       setFollowerCounts(counts);
     };
-    loadCounts();
+    loadCounts().catch(() => {
+      // Counts are decorative; the list renders fine without them.
+    });
   }, [businesses]);
 
   return (
@@ -115,12 +104,15 @@ export default function Following() {
           style={styles.backBtn}
           onPress={() => router.back()}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <ArrowLeft size={22} color={Colors.text.primary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <View style={styles.headerIconWrap}>
-            <Heart size={18} color={Palette.gradientStart} />
+            <Heart size={18} color={Colors.primary} />
           </View>
           <View>
             <Text style={styles.headerTitle}>Following</Text>
@@ -137,11 +129,11 @@ export default function Following() {
       {loading ? (
         <View style={styles.centerContainer}>
           <View style={styles.loadingIconWrap}>
-            <Heart size={28} color={Palette.gradientStart} />
+            <Heart size={28} color={Colors.primary} />
           </View>
           <ActivityIndicator
             size="large"
-            color={Palette.gradientStart}
+            color={Colors.primary}
             style={{ marginTop: 20 }}
           />
           <Text style={styles.loadingText}>Loading businesses you follow…</Text>
@@ -159,15 +151,15 @@ export default function Following() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor={Palette.gradientStart}
-              colors={[Palette.gradientStart]}
+              tintColor={Colors.primary}
+              colors={[Colors.primary]}
             />
           }
         >
           {businesses.length === 0 ? (
             <View style={styles.emptyContainer}>
               <View style={styles.emptyIconWrap}>
-                <Heart size={36} color={Palette.gradientStart} />
+                <Heart size={36} color={Colors.primary} />
               </View>
               <Text style={styles.emptyTitle}>Not Following Anyone</Text>
               <Text style={styles.emptySubtitle}>
@@ -179,7 +171,7 @@ export default function Following() {
                 activeOpacity={0.8}
               >
                 <Text style={styles.exploreCtaText}>Discover Events</Text>
-                <ChevronRight size={16} color={Palette.gradientStart} />
+                <ChevronRight size={16} color={Colors.primary} />
               </TouchableOpacity>
             </View>
           ) : (
@@ -230,7 +222,7 @@ export default function Following() {
                   </View>
                   <View style={styles.cardFooter}>
                     <Text style={styles.viewLabel}>View events</Text>
-                    <ChevronRight size={16} color={Palette.gradientStart} />
+                    <ChevronRight size={16} color={Colors.primary} />
                   </View>
                 </View>
               </TouchableOpacity>
@@ -245,7 +237,7 @@ export default function Following() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Palette.surfaceMuted,
+    backgroundColor: Colors.background.primary,
   },
   header: {
     flexDirection: 'row',
@@ -253,15 +245,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: Palette.cardBg,
+    backgroundColor: Colors.background.primary,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Palette.separator,
+    borderBottomColor: Colors.border.light,
   },
   backBtn: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: Palette.surfaceMuted,
+    backgroundColor: Colors.background.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -274,7 +266,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 12,
-    backgroundColor: Palette.accentSoft,
+    backgroundColor: Colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -303,7 +295,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 20,
-    backgroundColor: Palette.accentSoft,
+    backgroundColor: Colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -333,7 +325,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 24,
-    backgroundColor: Palette.accentSoft,
+    backgroundColor: Colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
@@ -360,17 +352,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 14,
-    backgroundColor: Palette.accentSoft,
+    backgroundColor: Colors.primarySoft,
   },
   exploreCtaText: {
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
+    color: Colors.primary,
   },
   businessCard: {
     flexDirection: 'row',
-    backgroundColor: Palette.cardBg,
+    backgroundColor: Colors.background.primary,
     borderRadius: 20,
     marginBottom: 12,
     overflow: 'hidden',
@@ -386,7 +378,7 @@ const styles = StyleSheet.create({
   },
   followStrip: {
     width: 4,
-    backgroundColor: Palette.badge,
+    backgroundColor: Colors.primary,
     borderTopLeftRadius: 20,
     borderBottomLeftRadius: 20,
   },
@@ -452,12 +444,12 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingTop: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Palette.separator,
+    borderTopColor: Colors.border.light,
   },
   viewLabel: {
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
-    color: Palette.gradientStart,
+    color: Colors.primary,
   },
 });

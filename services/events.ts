@@ -25,6 +25,51 @@ export const eventsService = {
     return (data || []) as RankedEvent[];
   },
 
+  /**
+   * Paged variant of getRankedEvents backed by the p_offset parameter added in
+   * 20261030110000. While that migration is unapplied the 9-arg signature
+   * doesn't exist (PostgREST reports PGRST202 / Postgres 42883 because params
+   * are part of the signature), so this falls back to the legacy no-offset
+   * call with the pre-pagination limit of 100 — identical to today's single
+   * fetch — and reports hasMore=false so callers don't keep paging.
+   */
+  async getRankedEventsPage(
+    userLat: number,
+    userLng: number,
+    filters: Partial<FilterOptions> = {},
+    page: { limit: number; offset: number }
+  ): Promise<{ items: RankedEvent[]; hasMore: boolean }> {
+    const baseParams = {
+      user_lat: userLat,
+      user_lng: userLng,
+      radius_km: filters.radiusKm || 50,
+      category_ids: filters.categories?.length ? filters.categories : undefined,
+      start_date: filters.startDate?.toISOString(),
+      end_date: filters.endDate?.toISOString(),
+      search_query: filters.searchQuery || undefined,
+    };
+    const { data, error } = await (supabase as any).rpc('get_ranked_events', {
+      ...baseParams,
+      result_limit: page.limit,
+      p_offset: page.offset,
+    });
+    if (!error) {
+      const items = (data || []) as RankedEvent[];
+      return { items, hasMore: items.length >= page.limit };
+    }
+    // TODO: remove fallback once 20261030110000 is applied.
+    if (error.code === '42883' || error.code === 'PGRST202') {
+      if (page.offset > 0) return { items: [], hasMore: false };
+      const { data: legacyData, error: legacyError } = await supabase.rpc(
+        'get_ranked_events',
+        { ...baseParams, result_limit: 100 }
+      );
+      if (legacyError) throw legacyError;
+      return { items: (legacyData || []) as RankedEvent[], hasMore: false };
+    }
+    throw error;
+  },
+
   async getEventDetails(eventId: string): Promise<EventDetails | null> {
     const { data, error } = await supabase.rpc('get_event_details', {
       event_uuid: eventId,
@@ -90,6 +135,25 @@ export const eventsService = {
       .eq('id', eventId);
 
     if (error) throw error;
+  },
+
+  /**
+   * Soft-cancels an event via the cancel_event RPC (20261030106000): keeps the
+   * row, sets status='cancelled' and notifies going/interested attendees.
+   * While that migration is unapplied the RPC doesn't exist, so this falls
+   * back to the legacy hard delete (identical to today's behavior).
+   */
+  async cancelEvent(eventId: string): Promise<void> {
+    const { error } = await (supabase as any).rpc('cancel_event', {
+      p_event_id: eventId,
+    });
+    if (!error) return;
+    // TODO: remove fallback once 20261030106000 is applied
+    if (error.code === '42883' || error.code === 'PGRST202') {
+      await this.deleteEvent(eventId);
+      return;
+    }
+    throw error;
   },
 
   async deleteEvent(eventId: string): Promise<void> {
@@ -180,11 +244,20 @@ export const eventsService = {
     file: { uri: string; name: string; type: string },
     folder: 'events' | 'logos' | 'venues' = 'events'
   ): Promise<string> {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
     const fileExt = file.name.split('.').pop() || 'jpg';
     const fileName = `${Date.now()}-${Math.random()
       .toString(36)
       .substring(7)}.${fileExt}`;
-    const filePath = `${folder}/${fileName}`;
+    // Paths are prefixed with the uploader's user id: the storage policies
+    // (20261030102000) scope INSERT/UPDATE/DELETE to the caller's own folder.
+    // This layout is also accepted by the pre-migration policies, so it is
+    // safe to ship before the migration is applied.
+    const filePath = `${user.id}/${folder}/${fileName}`;
 
     // Read file as base64 using the legacy expo-file-system API
     const base64 = await FileSystem.readAsStringAsync(file.uri, {

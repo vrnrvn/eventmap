@@ -24,6 +24,10 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,
+    // PKCE: auth redirects carry a one-time `?code=` bound to a locally stored
+    // verifier instead of raw tokens, closing the deep-link session-fixation
+    // hole. AuthRedirectHandler exchanges the code explicitly.
+    flowType: 'pkce',
   },
 });
 

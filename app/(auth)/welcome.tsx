@@ -2,7 +2,6 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   Platform,
   Dimensions,
   Image,
@@ -10,7 +9,8 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { Button } from '@/components/ui/Button';
+import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import {
   MapPin,
   Sparkles,
@@ -29,15 +29,15 @@ const Palette = {
   gradientDeep: Colors.primaryDark,
   cardBg: Colors.background.primary,
   surfaceMuted: Colors.background.primary,
-  accentSoft: 'rgba(196, 92, 62, 0.12)',
-  accentMedium: 'rgba(196, 92, 62, 0.18)',
+  accentSoft: Colors.primarySoft,
+  accentMedium: alpha(Colors.primary, 0.18),
   textOnGradient: Colors.text.inverse,
-  textOnGradientMuted: 'rgba(250, 248, 245, 0.8)',
+  textOnGradientMuted: alpha(Colors.surface, 0.8),
   separator: Colors.border.light,
   badge: Colors.primary,
-  featurePin: 'rgba(13, 79, 79, 0.12)',
-  featureHeart: 'rgba(196, 92, 62, 0.12)',
-  featureBiz: 'rgba(232, 168, 56, 0.15)',
+  featurePin: alpha(Colors.secondary, 0.12),
+  featureHeart: Colors.primarySoft,
+  featureBiz: alpha(Colors.accent, 0.15),
   featurePinIcon: Colors.secondary,
   featureHeartIcon: Colors.primary,
   featureBizIcon: Colors.accent,
@@ -74,7 +74,7 @@ export default function WelcomeScreen() {
 
         <Text style={styles.heroTitle}>Event Maps</Text>
         <Text style={styles.heroSubtitle}>
-          Discover what's happening{'\n'}around you
+          Discover what&apos;s happening{'\n'}around you
         </Text>
       </LinearGradient>
 
@@ -110,33 +110,25 @@ export default function WelcomeScreen() {
         {/* Actions */}
         <View style={[styles.actionsArea, { paddingBottom: insets.bottom + 24 }]}>
           {/* Get Started (primary) */}
-          <TouchableOpacity
-            style={styles.primaryBtnWrap}
+          <Button
+            label="Get Started"
             onPress={() => router.push('/(auth)/signup')}
-            activeOpacity={0.85}
-          >
-            <LinearGradient
-              colors={[Palette.gradientStart, Palette.gradientEnd]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.primaryBtnGradient}
-            >
-              <Text style={styles.primaryBtnText}>Get Started</Text>
-              <ChevronRight size={20} color="#FFFFFF" />
-            </LinearGradient>
-          </TouchableOpacity>
+            size="lg"
+            fullWidth
+            gradient
+            icon={<ChevronRight size={20} color="#FFFFFF" />}
+            style={styles.primaryBtnWrap}
+          />
 
           {/* Sign In (secondary) */}
-          <TouchableOpacity
-            style={styles.secondaryBtn}
+          <Button
+            label="Already have an account? Sign In"
             onPress={() => router.push('/(auth)/login')}
-            activeOpacity={0.7}
-          >
-            <LogIn size={18} color={Colors.primary} />
-            <Text style={styles.secondaryBtnText}>
-              Already have an account? Sign In
-            </Text>
-          </TouchableOpacity>
+            variant="secondary"
+            size="lg"
+            fullWidth
+            icon={<LogIn size={18} color={Colors.primary} />}
+          />
         </View>
       </View>
     </View>
@@ -242,7 +234,7 @@ const styles = StyleSheet.create({
     tintColor: Colors.primary,
   },
   heroTitle: {
-    fontSize: 36,
+    fontSize: Typography.sizes.xxl,
     fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Palette.textOnGradient,
@@ -325,8 +317,6 @@ const styles = StyleSheet.create({
 
   /* Primary button */
   primaryBtnWrap: {
-    borderRadius: 16,
-    overflow: 'hidden',
     ...Platform.select({
       ios: {
         shadowColor: Colors.primary,

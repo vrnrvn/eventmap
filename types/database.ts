@@ -226,6 +226,9 @@ export type RankedEvent = Omit<Event, 'updated_at'> & {
   /** Set by get_user_saved_events. */
   has_ended?: boolean;
   saved_at?: string;
+  /** Viewer fields added by 20261030114000; undefined until that migration is applied. */
+  user_rsvp?: RsvpStatus | null;
+  user_saved?: boolean;
 };
 
 export type EventDetails = {

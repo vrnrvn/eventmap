@@ -7,14 +7,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { authService } from '@/services/auth';
 import { Input } from '@/components/Input';
-import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { Button } from '@/components/ui/Button';
+import { Colors, Spacing, Typography } from '@/constants/theme';
 import {
   ArrowLeft,
   Mail,
@@ -23,16 +23,6 @@ import {
   LogIn,
   KeyRound,
 } from 'lucide-react-native';
-
-const Palette = {
-  gradientStart: Colors.primary,
-  gradientEnd: Colors.accent,
-  cardBg: Colors.background.primary,
-  surfaceMuted: Colors.background.primary,
-  accentSoft: 'rgba(196, 92, 62, 0.12)',
-  successSoft: 'rgba(45, 138, 110, 0.12)',
-  successColor: Colors.success,
-};
 
 export default function ForgotPasswordScreen() {
   const insets = useSafeAreaInsets();
@@ -87,6 +77,9 @@ export default function ForgotPasswordScreen() {
             style={styles.backBtn}
             onPress={() => router.back()}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <ArrowLeft size={22} color={Colors.text.primary} />
           </TouchableOpacity>
@@ -94,12 +87,12 @@ export default function ForgotPasswordScreen() {
           <View style={styles.successCenter}>
             {/* Success icon */}
             <View style={styles.successIconWrap}>
-              <CheckCircle size={40} color={Palette.successColor} />
+              <CheckCircle size={40} color={Colors.success} />
             </View>
 
             <Text style={styles.successTitle}>Check Your Email</Text>
             <Text style={styles.successSubtitle}>
-              We've sent a password reset link to
+              We&apos;ve sent a password reset link to
             </Text>
 
             {/* Email badge */}
@@ -110,25 +103,18 @@ export default function ForgotPasswordScreen() {
 
             <Text style={styles.successHint}>
               Click the link in the email to set a new password. Check your spam
-              folder if you don't see it.
+              folder if you don&apos;t see it.
             </Text>
 
             {/* Back to sign in */}
-            <TouchableOpacity
-              style={styles.successBtnWrap}
+            <Button
+              label="Back to Sign In"
               onPress={() => router.replace('/(auth)/login')}
-              activeOpacity={0.85}
-            >
-              <LinearGradient
-                colors={[Palette.gradientStart, Palette.gradientEnd]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.successBtnGradient}
-              >
-                <LogIn size={18} color="#FFFFFF" />
-                <Text style={styles.successBtnText}>Back to Sign In</Text>
-              </LinearGradient>
-            </TouchableOpacity>
+              size="lg"
+              fullWidth
+              gradient
+              icon={<LogIn size={18} color="#FFFFFF" />}
+            />
 
             {/* Resend */}
             <TouchableOpacity
@@ -140,7 +126,7 @@ export default function ForgotPasswordScreen() {
               activeOpacity={0.7}
             >
               <Text style={styles.resendBtnText}>
-                Didn't receive it? Try again
+                Didn&apos;t receive it? Try again
               </Text>
             </TouchableOpacity>
           </View>
@@ -169,6 +155,9 @@ export default function ForgotPasswordScreen() {
             style={styles.backBtn}
             onPress={() => router.back()}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <ArrowLeft size={22} color={Colors.text.primary} />
           </TouchableOpacity>
@@ -177,7 +166,7 @@ export default function ForgotPasswordScreen() {
           <View style={styles.heroSection}>
             <View style={styles.heroIconWrap}>
               <LinearGradient
-                colors={[Palette.gradientStart, Palette.gradientEnd]}
+                colors={[Colors.primary, Colors.accent]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.heroIconGradient}
@@ -187,7 +176,7 @@ export default function ForgotPasswordScreen() {
             </View>
             <Text style={styles.heroTitle}>Forgot Password?</Text>
             <Text style={styles.heroSubtitle}>
-              No worries — enter your email and we'll{'\n'}send you a reset link
+              No worries — enter your email and we&apos;ll{'\n'}send you a reset link
             </Text>
           </View>
 
@@ -215,32 +204,16 @@ export default function ForgotPasswordScreen() {
           </View>
 
           {/* Submit */}
-          <TouchableOpacity
-            style={styles.submitWrap}
+          <Button
+            label="Send Reset Link"
             onPress={handleResetPassword}
-            disabled={loading}
-            activeOpacity={0.85}
-          >
-            <LinearGradient
-              colors={
-                loading
-                  ? [Colors.primaryLight, Colors.accentLight]
-                  : [Palette.gradientStart, Palette.gradientEnd]
-              }
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.submitGradient}
-            >
-              {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <>
-                  <Send size={18} color="#FFFFFF" />
-                  <Text style={styles.submitText}>Send Reset Link</Text>
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
+            loading={loading}
+            size="lg"
+            fullWidth
+            gradient
+            icon={<Send size={18} color="#FFFFFF" />}
+            style={styles.submitWrap}
+          />
 
           {/* Back to sign in link */}
           <TouchableOpacity
@@ -263,7 +236,7 @@ export default function ForgotPasswordScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Palette.surfaceMuted,
+    backgroundColor: Colors.background.primary,
   },
   flex: {
     flex: 1,
@@ -281,7 +254,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: Palette.cardBg,
+    backgroundColor: Colors.background.primary,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 12,
@@ -322,7 +295,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   heroTitle: {
-    fontSize: 28,
+    fontSize: Typography.sizes.xxl,
     fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
@@ -338,7 +311,7 @@ const styles = StyleSheet.create({
 
   /* ── Form card ── */
   formCard: {
-    backgroundColor: Palette.cardBg,
+    backgroundColor: Colors.background.primary,
     borderRadius: 22,
     overflow: 'hidden',
     ...Platform.select({
@@ -361,7 +334,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 11,
-    backgroundColor: Palette.accentSoft,
+    backgroundColor: Colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -371,9 +344,7 @@ const styles = StyleSheet.create({
 
   /* ── Submit ── */
   submitWrap: {
-    marginTop: 24,
-    borderRadius: 16,
-    overflow: 'hidden',
+    marginTop: Spacing.lg,
     ...Platform.select({
       ios: {
         shadowColor: Colors.primary,
@@ -424,13 +395,13 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 28,
-    backgroundColor: Palette.successSoft,
+    backgroundColor: Colors.successSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24,
   },
   successTitle: {
-    fontSize: 26,
+    fontSize: Typography.sizes.xl,
     fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
@@ -447,7 +418,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: Palette.accentSoft,
+    backgroundColor: Colors.primarySoft,
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 12,

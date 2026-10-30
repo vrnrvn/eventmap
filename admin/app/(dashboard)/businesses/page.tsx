@@ -11,6 +11,7 @@ export default async function BusinessesPage() {
       name,
       category,
       subscription_tier,
+      verified,
       events_created_this_month,
       last_reset_date,
       created_at,

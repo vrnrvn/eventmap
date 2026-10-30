@@ -9,6 +9,7 @@ type Business = {
   name: string;
   category: string;
   subscription_tier: string;
+  verified: boolean | null;
   events_created_this_month: number;
   last_reset_date: string;
   created_at: string;
@@ -20,10 +21,14 @@ export function BusinessesTable({ businesses }: { businesses: Business[] }) {
   const [tiers, setTiers] = useState<Record<string, string>>(
     Object.fromEntries(businesses.map((b) => [b.id, b.subscription_tier]))
   );
+  const [verifiedMap, setVerifiedMap] = useState<Record<string, boolean>>(
+    Object.fromEntries(businesses.map((b) => [b.id, !!b.verified]))
+  );
   const [limits, setLimits] = useState<Record<string, number>>(
     Object.fromEntries(businesses.map((b) => [b.id, b.events_created_this_month]))
   );
   const [loading, setLoading] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const filtered = businesses.filter(
     (b) =>
@@ -34,6 +39,7 @@ export function BusinessesTable({ businesses }: { businesses: Business[] }) {
 
   const handleTogglePremium = async (businessId: string) => {
     setLoading(businessId);
+    setError(null);
     try {
       const supabase = createClient();
       const current = tiers[businessId];
@@ -46,6 +52,29 @@ export function BusinessesTable({ businesses }: { businesses: Business[] }) {
       setTiers((prev) => ({ ...prev, [businessId]: isPremium ? 'free' : 'premium' }));
     } catch (e) {
       console.error(e);
+      setError(e instanceof Error ? e.message : 'Failed to update subscription');
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const handleToggleVerified = async (businessId: string) => {
+    setLoading(businessId);
+    setError(null);
+    try {
+      const supabase = createClient();
+      const current = !!verifiedMap[businessId];
+      // RPC ships with migration 20261030113000; until applied this errors
+      // (missing function) and the message is surfaced above the table.
+      const { error } = await supabase.rpc('admin_set_business_verified', {
+        p_business_id: businessId,
+        p_verified: !current,
+      });
+      if (error) throw error;
+      setVerifiedMap((prev) => ({ ...prev, [businessId]: !current }));
+    } catch (e) {
+      console.error(e);
+      setError(e instanceof Error ? e.message : 'Failed to update verification');
     } finally {
       setLoading(null);
     }
@@ -53,6 +82,7 @@ export function BusinessesTable({ businesses }: { businesses: Business[] }) {
 
   const handleResetLimit = async (businessId: string) => {
     setLoading(businessId);
+    setError(null);
     try {
       const supabase = createClient();
       const { error } = await supabase.rpc('admin_reset_business_event_limit', {
@@ -62,6 +92,7 @@ export function BusinessesTable({ businesses }: { businesses: Business[] }) {
       setLimits((prev) => ({ ...prev, [businessId]: 0 }));
     } catch (e) {
       console.error(e);
+      setError(e instanceof Error ? e.message : 'Failed to reset event limit');
     } finally {
       setLoading(null);
     }
@@ -76,6 +107,7 @@ export function BusinessesTable({ businesses }: { businesses: Business[] }) {
         onChange={(e) => setFilter(e.target.value)}
         className="mb-4 w-full max-w-md rounded-md border border-zinc-300 px-3 py-2 text-sm"
       />
+      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
       <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
         <table className="w-full text-sm">
           <thead className="bg-zinc-50">
@@ -83,6 +115,7 @@ export function BusinessesTable({ businesses }: { businesses: Business[] }) {
               <th className="px-4 py-3 text-left font-medium text-zinc-700">Name</th>
               <th className="px-4 py-3 text-left font-medium text-zinc-700">Owner</th>
               <th className="px-4 py-3 text-left font-medium text-zinc-700">Tier</th>
+              <th className="px-4 py-3 text-left font-medium text-zinc-700">Verified</th>
               <th className="px-4 py-3 text-left font-medium text-zinc-700">Events This Month</th>
               <th className="px-4 py-3 text-left font-medium text-zinc-700">Actions</th>
             </tr>
@@ -109,6 +142,13 @@ export function BusinessesTable({ businesses }: { businesses: Business[] }) {
                     {tiers[b.id] ?? b.subscription_tier}
                   </span>
                 </td>
+                <td className="px-4 py-3">
+                  {(verifiedMap[b.id] ?? !!b.verified) ? (
+                    <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-800">verified</span>
+                  ) : (
+                    <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500">—</span>
+                  )}
+                </td>
                 <td className="px-4 py-3">{limits[b.id] ?? b.events_created_this_month}</td>
                 <td className="px-4 py-3 space-x-2">
                   {loading === b.id ? (
@@ -120,6 +160,13 @@ export function BusinessesTable({ businesses }: { businesses: Business[] }) {
                         className="text-blue-600 hover:text-blue-700"
                       >
                         {(tiers[b.id] ?? b.subscription_tier) === 'premium' ? 'Downgrade' : 'Upgrade'}
+                      </button>
+                      <span className="text-zinc-300">|</span>
+                      <button
+                        onClick={() => handleToggleVerified(b.id)}
+                        className="text-blue-600 hover:text-blue-700"
+                      >
+                        {(verifiedMap[b.id] ?? !!b.verified) ? 'Unverify' : 'Verify'}
                       </button>
                       <span className="text-zinc-300">|</span>
                       <button

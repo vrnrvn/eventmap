@@ -11,7 +11,7 @@ import {
   ChatReportedMessage,
   ChatSlowModeSeconds,
 } from '@/services/eventChat';
-import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 
 type Props = {
   eventId: string;
@@ -196,7 +196,7 @@ export function ChatModerationSheet({
                 value={locked}
                 disabled={savingSettings}
                 onValueChange={(value) => void updateSettings({ locked: value })}
-                trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+                trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                 thumbColor={locked ? Colors.primary : Colors.background.secondary}
                 accessibilityLabel="Lock chat"
               />
@@ -359,11 +359,11 @@ const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(20, 20, 20, 0.4)',
+    backgroundColor: Colors.overlay.dark,
   },
   sheet: {
     maxHeight: '80%',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
     borderTopLeftRadius: BorderRadius.xl,
     borderTopRightRadius: BorderRadius.xl,
     paddingHorizontal: Spacing.md,
@@ -426,7 +426,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     marginTop: Spacing.sm,
     marginBottom: Spacing.xs,
-    fontSize: 11,
+    fontSize: Typography.sizes.xs,
     lineHeight: 14,
     letterSpacing: 0.6,
     textTransform: 'uppercase',
@@ -565,12 +565,12 @@ const styles = StyleSheet.create({
   },
   chip: {
     height: 36,
-    paddingHorizontal: 14,
+    paddingHorizontal: Spacing.md,
     justifyContent: 'center',
     borderRadius: BorderRadius.round,
     borderWidth: 1,
     borderColor: Colors.border.medium,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
   },
   chipSelected: {
     borderColor: Colors.primary,
@@ -621,7 +621,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: Colors.border.medium,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
   },
   reportButtonText: {
     fontSize: Typography.sizes.sm,
@@ -634,7 +634,7 @@ const styles = StyleSheet.create({
   },
   reportButtonDangerText: {
     fontSize: Typography.sizes.sm,
-    color: '#FFFFFF',
+    color: Colors.text.inverse,
     fontFamily: Typography.fontFamilies.semibold,
   },
 });

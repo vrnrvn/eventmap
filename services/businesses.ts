@@ -112,6 +112,24 @@ export const businessesService = {
     };
   },
 
+  /**
+   * Sends an in-app notification about the event to every follower of the
+   * owning business (server-side deduped per follower+event, so repeat calls
+   * cannot spam). SECURITY DEFINER RPC from migration 20261030112000; until
+   * it is applied the call fails with 42883/PGRST202 (missing function) and
+   * callers should surface a "not enabled yet" message.
+   * Returns the number of notifications inserted.
+   */
+  async notifyFollowersAboutEvent(eventId: string): Promise<number> {
+    // Not in the generated types until migration 20261030112000 is applied.
+    const { data, error } = await (supabase as any).rpc(
+      'notify_followers_about_event',
+      { p_event_id: eventId }
+    );
+    if (error) throw error;
+    return typeof data === 'number' ? data : 0;
+  },
+
   async getFollowerCount(businessId: string): Promise<number> {
     const { count, error } = await supabase
       .from('follows')

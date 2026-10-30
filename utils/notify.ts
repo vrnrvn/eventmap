@@ -1,0 +1,98 @@
+import { Alert, Platform } from 'react-native';
+
+export type ToastKind = 'success' | 'error';
+
+export type ToastPayload = {
+  id: number;
+  kind: ToastKind;
+  message: string;
+};
+
+export type ConfirmPayload = {
+  title: string;
+  message?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  destructive?: boolean;
+  onConfirm: () => void;
+  onCancel?: () => void;
+};
+
+type ToastListener = (toast: ToastPayload) => void;
+type ConfirmListener = (request: ConfirmPayload) => void;
+
+let toastListener: ToastListener | null = null;
+let confirmListener: ConfirmListener | null = null;
+let nextId = 1;
+const pendingToasts: ToastPayload[] = [];
+
+/** Called once by the AppToast host when it mounts. */
+export function registerNotifyHost(onToast: ToastListener, onConfirm: ConfirmListener) {
+  toastListener = onToast;
+  confirmListener = onConfirm;
+  // Flush anything that fired before the host mounted.
+  while (pendingToasts.length > 0) {
+    const toast = pendingToasts.shift();
+    if (toast) toastListener(toast);
+  }
+  return () => {
+    if (toastListener === onToast) toastListener = null;
+    if (confirmListener === onConfirm) confirmListener = null;
+  };
+}
+
+function emitToast(kind: ToastKind, message: string) {
+  const toast: ToastPayload = { id: nextId++, kind, message };
+  if (toastListener) toastListener(toast);
+  else pendingToasts.push(toast);
+}
+
+export const notify = {
+  success(message: string) {
+    emitToast('success', message);
+  },
+  error(message: string) {
+    emitToast('error', message);
+  },
+};
+
+/**
+ * Cross-platform blocking confirmation. Uses the native Alert dialog on
+ * iOS/Android (where it works) and a themed overlay rendered by the AppToast
+ * host on web (where Alert.alert is a no-op).
+ */
+export function notifyConfirm({
+  title,
+  message,
+  confirmLabel = 'OK',
+  cancelLabel = 'Cancel',
+  destructive = false,
+  onConfirm,
+  onCancel,
+}: ConfirmPayload) {
+  if (Platform.OS !== 'web') {
+    Alert.alert(
+      title,
+      message,
+      [
+        { text: cancelLabel, style: 'cancel', onPress: () => onCancel?.() },
+        {
+          text: confirmLabel,
+          style: destructive ? 'destructive' : 'default',
+          onPress: onConfirm,
+        },
+      ],
+      { cancelable: true, onDismiss: () => onCancel?.() }
+    );
+    return;
+  }
+  if (confirmListener) {
+    confirmListener({ title, message, confirmLabel, cancelLabel, destructive, onConfirm, onCancel });
+  } else {
+    // Host not mounted yet — last-resort fallback so the action isn't lost.
+    const confirmFn = (globalThis as { confirm?: (msg: string) => boolean }).confirm;
+    const text = message ? `${title}\n\n${message}` : title;
+    if (typeof confirmFn === 'function' && confirmFn(text)) onConfirm();
+    else onCancel?.();
+  }
+}

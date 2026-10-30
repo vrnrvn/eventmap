@@ -15,12 +15,16 @@ import {
   Clock3,
   RefreshCcw,
   BellRing,
-  ChevronRight,
-  History,
+  CalendarPlus,
+  CheckCheck,
+  MapPin,
   MessageCircle,
   AtSign,
+  UserPlus,
+  Users,
+  X,
 } from 'lucide-react-native';
-import { Colors, Typography, BorderRadius } from '@/constants/theme';
+import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import {
   getNotifications,
   markNotificationAsRead,
@@ -30,25 +34,23 @@ import {
   type Notification as ApiNotification,
 } from '@/services/notifications';
 import { useAuth } from '@/contexts/AuthContext';
+import { notify } from '@/utils/notify';
 
 type Notification = ApiNotification;
 type NotificationType = ApiNotification['type'];
 
 const Palette = {
   surface: Colors.background.primary,
-  card: '#FFFFFF',
-  cardRead: 'rgba(255,255,255,0.55)',
+  card: Colors.surface,
+  cardRead: alpha(Colors.surface, 0.55),
   text: Colors.text.primary,
   muted: Colors.text.secondary,
   subtle: Colors.text.tertiary,
   primary: Colors.primary,
   secondary: Colors.secondary,
-  border: 'rgba(0,0,0,0.06)',
+  border: Colors.neutralSoft,
   readIconBg: Colors.background.tertiary,
 };
-
-const FALLBACK_FOLLOWER_IMAGE =
-  'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=300&q=60';
 
 const formatRelativeLabel = (date: Date): string => {
   const now = new Date();
@@ -70,24 +72,27 @@ const isUnreadStyle = (n: Notification) => !n.read;
 const getIconMeta = (type: NotificationType) => {
   switch (type) {
     case 'new_follower':
-      return {
-        kind: 'avatar' as const,
-        Icon: Mail,
-        bg: 'rgba(180, 25, 36, 0.08)',
-        color: Palette.primary,
-      };
+      // The notification row carries no follower id, so a neutral icon is
+      // shown rather than any placeholder photo.
+      return { Icon: UserPlus, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
     case 'event_reminder':
-      return { kind: 'icon' as const, Icon: Clock3, bg: 'rgba(155, 62, 32, 0.12)', color: Palette.secondary };
+      return { Icon: Clock3, bg: alpha(Colors.secondary, 0.12), color: Palette.secondary };
     case 'event_update':
-      return { kind: 'icon' as const, Icon: RefreshCcw, bg: Palette.readIconBg, color: Palette.subtle };
+      return { Icon: RefreshCcw, bg: Palette.readIconBg, color: Palette.subtle };
+    case 'rsvp':
+      return { Icon: Users, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
+    case 'new_event_from_followed':
+      return { Icon: CalendarPlus, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
+    case 'nearby_event':
+      return { Icon: MapPin, bg: alpha(Colors.secondary, 0.12), color: Palette.secondary };
     case 'promotion':
-      return { kind: 'icon' as const, Icon: BellRing, bg: 'rgba(180, 25, 36, 0.08)', color: Palette.primary };
+      return { Icon: BellRing, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
     case 'chat_message':
-      return { kind: 'icon' as const, Icon: MessageCircle, bg: 'rgba(180, 25, 36, 0.08)', color: Palette.primary };
+      return { Icon: MessageCircle, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
     case 'chat_mention':
-      return { kind: 'icon' as const, Icon: AtSign, bg: 'rgba(180, 25, 36, 0.08)', color: Palette.primary };
+      return { Icon: AtSign, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
     default:
-      return { kind: 'icon' as const, Icon: Mail, bg: 'rgba(180, 25, 36, 0.08)', color: Palette.primary };
+      return { Icon: Mail, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
   }
 };
 
@@ -146,17 +151,37 @@ export default function NotificationsScreen() {
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read: true } : n))
     );
-    markNotificationAsRead(id).catch(() => {});
+    markNotificationAsRead(id).catch(() => {
+      // Revert the optimistic change so the UI and badge stay in sync.
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, read: false } : n))
+      );
+      notify.error('Could not mark notification as read.');
+    });
   }, []);
 
   const markAllRead = useCallback(() => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    markAllNotificationsAsRead().catch(() => {});
+    let previous: Notification[] = [];
+    setNotifications((prev) => {
+      previous = prev;
+      return prev.map((n) => ({ ...n, read: true }));
+    });
+    markAllNotificationsAsRead().catch(() => {
+      setNotifications(previous);
+      notify.error('Could not mark all notifications as read.');
+    });
   }, []);
 
   const dismissNotification = useCallback((id: string) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-    deleteNotification(id).catch(() => {});
+    let previous: Notification[] = [];
+    setNotifications((prev) => {
+      previous = prev;
+      return prev.filter((n) => n.id !== id);
+    });
+    deleteNotification(id).catch(() => {
+      setNotifications(previous);
+      notify.error('Could not dismiss notification.');
+    });
   }, []);
 
   const handlePress = useCallback(
@@ -180,18 +205,6 @@ export default function NotificationsScreen() {
     },
     [markAsRead]
   );
-
-  const handleInviteAccept = useCallback(
-    (notification: Notification) => {
-      markAsRead(notification.id);
-      handlePress(notification);
-    },
-    [handlePress, markAsRead]
-  );
-
-  const handleInviteDecline = useCallback((notification: Notification) => {
-    dismissNotification(notification.id);
-  }, [dismissNotification]);
 
   return (
     <View style={styles.root}>
@@ -243,7 +256,6 @@ export default function NotificationsScreen() {
             notifications.map((notification) => {
               const unread = isUnreadStyle(notification);
               const iconMeta = getIconMeta(notification.type);
-              const isInvite = notification.type === 'rsvp' && unread;
 
               return (
                 <TouchableOpacity
@@ -254,18 +266,12 @@ export default function NotificationsScreen() {
                 >
                   <View style={styles.cardTopRow}>
                     <View style={styles.cardLeft}>
-                      {iconMeta.kind === 'avatar' ? (
-                        <View style={styles.avatarWrap}>
-                          <Image source={{ uri: FALLBACK_FOLLOWER_IMAGE }} style={styles.avatarImage} />
-                        </View>
-                      ) : (
-                        <View style={[styles.iconWrap, { backgroundColor: unread ? iconMeta.bg : Palette.readIconBg }]}>
-                          <iconMeta.Icon
-                            size={22}
-                            color={unread ? iconMeta.color : Palette.subtle}
-                          />
-                        </View>
-                      )}
+                      <View style={[styles.iconWrap, { backgroundColor: unread ? iconMeta.bg : Palette.readIconBg }]}>
+                        <iconMeta.Icon
+                          size={22}
+                          color={unread ? iconMeta.color : Palette.subtle}
+                        />
+                      </View>
 
                       <View style={styles.contentWrap}>
                         <View style={styles.titleRow}>
@@ -286,41 +292,30 @@ export default function NotificationsScreen() {
                     </View>
                   </View>
 
-                  {isInvite ? (
-                    <View style={styles.actionRow}>
-                      <TouchableOpacity
-                        style={styles.acceptButton}
-                        activeOpacity={0.85}
-                        onPress={() => handleInviteAccept(notification)}
-                      >
-                        <Text style={styles.acceptButtonText}>Accept</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.declineButton}
-                        activeOpacity={0.85}
-                        onPress={() => handleInviteDecline(notification)}
-                      >
-                        <Text style={styles.declineButtonText}>Decline</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.dismissButton}
-                      onPress={() => dismissNotification(notification.id)}
-                      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                    >
-                      <ChevronRight size={16} color={Palette.subtle} />
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    style={styles.dismissButton}
+                    onPress={() => dismissNotification(notification.id)}
+                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Dismiss notification"
+                  >
+                    <X size={16} color={Palette.subtle} />
+                  </TouchableOpacity>
                 </TouchableOpacity>
               );
             })
           )}
         </View>
 
-        <TouchableOpacity style={styles.historyButton} activeOpacity={0.84} onPress={markAllRead}>
-          <Text style={styles.historyText}>View Past History</Text>
-          <History size={17} color={Palette.text} />
+        <TouchableOpacity
+          style={styles.historyButton}
+          activeOpacity={0.84}
+          onPress={markAllRead}
+          accessibilityRole="button"
+          accessibilityLabel="Mark all notifications as read"
+        >
+          <Text style={styles.historyText}>Mark all as read</Text>
+          <CheckCheck size={17} color={Palette.text} />
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -376,7 +371,7 @@ const styles = StyleSheet.create({
   readAllChip: {
     marginTop: 14,
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(180,25,36,0.08)',
+    backgroundColor: alpha(Colors.primary, 0.08),
     borderRadius: BorderRadius.round,
     paddingHorizontal: 12,
     paddingVertical: 7,
@@ -413,17 +408,6 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.round,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  avatarWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: BorderRadius.round,
-    overflow: 'hidden',
-    opacity: 0.84,
-  },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
   },
   contentWrap: {
     flex: 1,
@@ -476,37 +460,6 @@ const styles = StyleSheet.create({
   bodyRead: {
     opacity: 0.88,
   },
-  actionRow: {
-    marginTop: 16,
-    marginLeft: 64,
-    flexDirection: 'row',
-    gap: 10,
-  },
-  acceptButton: {
-    borderRadius: BorderRadius.round,
-    overflow: 'hidden',
-    backgroundColor: Palette.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-  },
-  acceptButtonText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-  },
-  declineButton: {
-    borderRadius: BorderRadius.round,
-    backgroundColor: '#D9DCDD',
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-  },
-  declineButtonText: {
-    color: Palette.text,
-    fontSize: 13,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-  },
   dismissButton: {
     alignSelf: 'flex-end',
     marginTop: 8,
@@ -520,7 +473,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   emptyTitle: {
-    fontSize: 20,
+    fontSize: Typography.sizes.lg,
     color: Palette.text,
     fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
@@ -540,7 +493,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: 26,
-    paddingVertical: 14,
+    paddingVertical: Spacing.md,
     backgroundColor: Palette.card,
     borderWidth: 1,
     borderColor: Palette.border,
@@ -548,7 +501,7 @@ const styles = StyleSheet.create({
   },
   historyText: {
     color: Palette.text,
-    fontSize: 15,
+    fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
   },
@@ -558,6 +511,6 @@ const styles = StyleSheet.create({
   skeletonCard: {
     height: 138,
     borderRadius: 24,
-    backgroundColor: '#ECEEEF',
+    backgroundColor: Colors.background.tertiary,
   },
 });

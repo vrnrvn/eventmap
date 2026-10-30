@@ -3,9 +3,23 @@
  * See style.md for full documentation.
  */
 
+/**
+ * Convert a 6-digit hex color to an rgba() string at the given opacity.
+ * Use this instead of concatenating alpha hex onto color tokens.
+ */
+export function alpha(hex: string, opacity: number): string {
+  const value = hex.replace('#', '');
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+}
+
 export const Colors = {
   /** New brand red */
   primary: '#B41924',
+  /** Soft brand tint for badge/chip backgrounds and glows */
+  primarySoft: 'rgba(180, 25, 36, 0.10)',
   primaryDark: '#A3041A',
   primaryLight: '#FF7671',
 
@@ -55,6 +69,19 @@ export const Colors = {
   },
 
   premium: '#B40953',
+  /** Soft premium tint for badges and highlighted rows */
+  premiumSoft: 'rgba(180, 9, 83, 0.10)',
+
+  /** Card / elevated surface color */
+  surface: '#FFFFFF',
+  /** Neutral soft tint for muted chips and icon wells */
+  neutralSoft: 'rgba(45, 47, 47, 0.06)',
+  /** Soft error tint for destructive-action backgrounds */
+  errorSoft: 'rgba(180, 19, 64, 0.10)',
+  /** Soft success tint */
+  successSoft: 'rgba(45, 138, 110, 0.10)',
+  /** Soft warning tint (ratings, premium gold accents) */
+  warningSoft: 'rgba(212, 160, 23, 0.12)',
 };
 
 export const Spacing = {
@@ -153,9 +180,9 @@ export const Shadows = {
     shadowRadius: 16,
     elevation: 10,
   },
-  /** Softer, warmer shadow for cards */
+  /** Softer shadow for cards */
   card: {
-    shadowColor: '#C45C3E',
+    shadowColor: '#2D2F2F',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
     shadowRadius: 12,

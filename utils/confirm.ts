@@ -1,4 +1,4 @@
-import { Alert, Platform } from 'react-native';
+import { notifyConfirm } from './notify';
 
 type ConfirmOptions = {
   title: string;
@@ -9,35 +9,18 @@ type ConfirmOptions = {
 };
 
 /**
- * Cross-platform confirmation. React Native's `Alert.alert` with buttons is a
- * no-op in browsers, so on web this falls back to `window.confirm`.
- * Resolves `true` when the user confirms.
+ * Cross-platform confirmation that resolves `true` when the user confirms.
+ * Thin promise wrapper over `notifyConfirm` (utils/notify.ts) so there is a
+ * single confirmation code path: native Alert on iOS/Android, themed overlay
+ * (or `window.confirm` fallback) on web. If no confirm mechanism is
+ * available, it resolves `false` — never auto-confirming the action.
  */
-export function confirmAction({
-  title,
-  message,
-  confirmLabel = 'OK',
-  cancelLabel = 'Cancel',
-  destructive = false,
-}: ConfirmOptions): Promise<boolean> {
-  if (Platform.OS === 'web') {
-    const text = message ? `${title}\n\n${message}` : title;
-    const confirmFn = (globalThis as { confirm?: (msg: string) => boolean }).confirm;
-    return Promise.resolve(typeof confirmFn === 'function' ? confirmFn(text) : true);
-  }
+export function confirmAction(options: ConfirmOptions): Promise<boolean> {
   return new Promise((resolve) => {
-    Alert.alert(
-      title,
-      message,
-      [
-        { text: cancelLabel, style: 'cancel', onPress: () => resolve(false) },
-        {
-          text: confirmLabel,
-          style: destructive ? 'destructive' : 'default',
-          onPress: () => resolve(true),
-        },
-      ],
-      { cancelable: true, onDismiss: () => resolve(false) }
-    );
+    notifyConfirm({
+      ...options,
+      onConfirm: () => resolve(true),
+      onCancel: () => resolve(false),
+    });
   });
 }

@@ -10,7 +10,6 @@ import {
   Platform,
   Dimensions,
   RefreshControl,
-  Alert,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -31,6 +30,7 @@ import { GoogleMapView } from '@/components/GoogleMapView';
 import { EventCardCarousel } from '@/components/EventCardCarousel';
 import {
   ArrowLeft,
+  BadgeCheck,
   MapPin,
   Mail,
   ExternalLink,
@@ -40,6 +40,7 @@ import {
 } from 'lucide-react-native';
 import { FacebookIcon, InstagramIcon } from '@/components/icons/BrandIcons';
 import { complaintsService } from '@/services/complaints';
+import { notify, notifyConfirm } from '@/utils/notify';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -210,25 +211,20 @@ export default function BusinessDetail() {
             <TouchableOpacity
               style={styles.reportButton}
               onPress={() => {
-                Alert.alert(
-                  'Report Business',
-                  'Report this business for inappropriate content?',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                      text: 'Report',
-                      style: 'destructive',
-                      onPress: async () => {
-                        try {
-                          await complaintsService.createComplaint('business', id);
-                          Alert.alert('Thank you', 'Your report has been submitted.');
-                        } catch {
-                          Alert.alert('Error', 'Failed to submit report.');
-                        }
-                      },
-                    },
-                  ]
-                );
+                notifyConfirm({
+                  title: 'Report Business',
+                  message: 'Report this business for inappropriate content?',
+                  confirmLabel: 'Report',
+                  destructive: true,
+                  onConfirm: async () => {
+                    try {
+                      await complaintsService.createComplaint('business', id);
+                      notify.success('Your report has been submitted.');
+                    } catch {
+                      notify.error('Failed to submit report.');
+                    }
+                  },
+                });
               }}
             >
               <Flag size={20} color={Colors.text.tertiary} />
@@ -249,6 +245,15 @@ export default function BusinessDetail() {
         <View style={styles.hero}>
           <Avatar imageUrl={business.logo_url} name={business.name} size={100} />
           <Text style={styles.businessName}>{business.name}</Text>
+          {business.verified ? (
+            <View
+              style={styles.verifiedBadge}
+              accessibilityLabel="Verified business"
+            >
+              <BadgeCheck size={14} color={Colors.text.inverse} />
+              <Text style={styles.verifiedBadgeText}>Verified</Text>
+            </View>
+          ) : null}
           <View style={styles.categoryBadge}>
             <CategoryIcon category={business.category} size="sm" variant="pill" />
             <Text style={styles.categoryText}>{business.category}</Text>
@@ -399,25 +404,20 @@ export default function BusinessDetail() {
               onReport={
                 user
                   ? (reviewId) => {
-                      Alert.alert(
-                        'Report Review',
-                        'Report this review for inappropriate content?',
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          {
-                            text: 'Report',
-                            style: 'destructive',
-                            onPress: async () => {
-                              try {
-                                await complaintsService.createComplaint('review', reviewId);
-                                Alert.alert('Thank you', 'Your report has been submitted.');
-                              } catch {
-                                Alert.alert('Error', 'Failed to submit report.');
-                              }
-                            },
-                          },
-                        ]
-                      );
+                      notifyConfirm({
+                        title: 'Report Review',
+                        message: 'Report this review for inappropriate content?',
+                        confirmLabel: 'Report',
+                        destructive: true,
+                        onConfirm: async () => {
+                          try {
+                            await complaintsService.createComplaint('review', reviewId);
+                            notify.success('Your report has been submitted.');
+                          } catch {
+                            notify.error('Failed to submit report.');
+                          }
+                        },
+                      });
                     }
                   : undefined
               }
@@ -528,6 +528,22 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     marginTop: Spacing.md,
     textAlign: 'center',
+  },
+  verifiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.primary,
+  },
+  verifiedBadgeText: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.text.inverse,
   },
   categoryBadge: {
     flexDirection: 'row',

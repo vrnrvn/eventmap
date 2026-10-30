@@ -11,9 +11,10 @@ import {
   Image,
   ScrollView,
   Modal,
+  Linking,
 } from 'react-native';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BottomSheet, { BottomSheetFlatList } from '@gorhom/bottom-sheet';
@@ -26,7 +27,7 @@ import { RankedEvent, Category } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { getCategoryIconColor } from '@/constants/categoryIcons';
 import { CategoryIcon } from '@/components/CategoryIcon';
-import { Users, List, Repeat, X, Search, SlidersHorizontal, Plus, MapPin } from 'lucide-react-native';
+import { Users, List, Repeat, X, Search, SlidersHorizontal, Plus, MapPin, BookmarkCheck } from 'lucide-react-native';
 import { EventmapFilter, EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView';
 import { EventCardCarousel } from '@/components/EventCardCarousel';
@@ -40,6 +41,40 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const DEFAULT_CENTER = { lat: 37.7749, lng: -122.4194 };
 const REGION_DEBOUNCE_MS = 500;
 const HEADER_HEIGHT_PX = 170;
+// Search radius follows the map viewport (see radiusKmFromBounds); the old
+// fixed 50 km stays as the fallback until the map reports its first bounds.
+const DEFAULT_RADIUS_KM = 50;
+const MIN_RADIUS_KM = 5;
+const MAX_RADIUS_KM = 150;
+
+function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+/**
+ * Zoom-derived search radius: half the viewport diagonal (so the search circle
+ * roughly circumscribes what's on screen), clamped to [5, 150] km. Both map
+ * HTMLs (Google and the Leaflet fallback) already include `bounds` in their
+ * regionChange messages; an older cached map HTML without bounds simply leaves
+ * this null and the legacy 50 km default applies — fully backward compatible.
+ */
+function radiusKmFromBounds(
+  bounds: { ne: { lat: number; lng: number }; sw: { lat: number; lng: number } } | null
+): number {
+  if (!bounds) return DEFAULT_RADIUS_KM;
+  const diagonalKm = haversineKm(bounds.ne, bounds.sw);
+  if (!Number.isFinite(diagonalKm) || diagonalKm <= 0) return DEFAULT_RADIUS_KM;
+  return Math.min(MAX_RADIUS_KM, Math.max(MIN_RADIUS_KM, diagonalKm / 2));
+}
+// Smaller pages scroll in smoothly; pre-apply (20261030110000) the service
+// falls back to one legacy 100-event fetch and reports no further pages.
+const EVENTS_PAGE_SIZE = 50;
 
 function truncateText(text: string, limit = 50): string {
   if (!text || text.length <= limit) return text;
@@ -50,7 +85,7 @@ export default function DiscoverScreen() {
   const insets = useSafeAreaInsets();
   const { profile } = useAuth();
   const { hasBusiness, loading: appLoading } = useApp();
-  const { location: searchLocation, dateRange } = useSearch();
+  const { location: searchLocation, dateRange, setDateRange } = useSearch();
   const [events, setEvents] = useState<RankedEvent[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,6 +105,11 @@ export default function DiscoverScreen() {
   const [showFloatingCard, setShowFloatingCard] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [banners, setBanners] = useState<AppBanner[]>([]);
+  const [locationDenied, setLocationDenied] = useState(false);
+  const [locationBannerDismissed, setLocationBannerDismissed] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreEvents, setHasMoreEvents] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const bottomSheetRef = useRef<BottomSheet>(null);
   const mapRef = useRef<GoogleMapHandle>(null);
@@ -117,6 +157,8 @@ export default function DiscoverScreen() {
 
   const mapCenterRef = useRef(mapCenter);
   mapCenterRef.current = mapCenter;
+  const mapBoundsRef = useRef(mapBounds);
+  mapBoundsRef.current = mapBounds;
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadEventsWithCenterRef = useRef<
     (lat: number, lng: number) => Promise<void>
@@ -132,18 +174,29 @@ export default function DiscoverScreen() {
         profile?.lat != null && profile?.lng != null
           ? { lat: profile.lat, lng: profile.lng }
           : null;
+      let hasRealLocation = false;
       if (profileLocation) {
         fetchLat = profileLocation.lat;
         fetchLng = profileLocation.lng;
+        hasRealLocation = true;
       } else {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
           const loc = await Location.getCurrentPositionAsync({});
           fetchLat = loc.coords.latitude;
           fetchLng = loc.coords.longitude;
+          hasRealLocation = true;
+        } else {
+          // Keep userLocation null (the SF fallback is a map center, not the
+          // user's location) and surface the banner instead.
+          setLocationDenied(true);
         }
       }
-      setUserLocation({ lat: fetchLat, lng: fetchLng });
+      // Only a real location (saved profile location or GPS fix) counts as
+      // "my location" for the search overlay; the SF default never does.
+      if (hasRealLocation) {
+        setUserLocation({ lat: fetchLat, lng: fetchLng });
+      }
       if (!hasInitializedMapRef.current) {
         const loc = { lat: fetchLat, lng: fetchLng };
         setCenter(loc);
@@ -171,28 +224,151 @@ export default function DiscoverScreen() {
     }
   };
 
+  // Paging state: offset counts raw fetched rows (date filtering happens
+  // client-side, so the displayed list can be shorter than the offset).
+  const fetchOffsetRef = useRef(0);
+  // Mirrors `events` so async pagination can de-dupe without stale closures.
+  const eventsRef = useRef<RankedEvent[]>([]);
+  useEffect(() => {
+    eventsRef.current = events;
+  }, [events]);
+  const loadRequestIdRef = useRef(0);
+  const loadingMoreRef = useRef(false);
+
+  const currentFilters = () => ({
+    // Read through a ref: pagination and debounced region loads call this from
+    // closures that may hold a stale `mapBounds` render value.
+    radiusKm: radiusKmFromBounds(mapBoundsRef.current),
+    searchQuery: searchQuery || undefined,
+    categories: selectedCategories.length > 0 ? selectedCategories : undefined,
+    startDate: dateRange?.start ?? null,
+    endDate: dateRange?.end ?? null,
+  });
+
+  const applyDateFilter = (data: RankedEvent[]) =>
+    dateRange != null
+      ? filterEventsByDateRange(data, dateRange.start, dateRange.end)
+      : data;
+
+  // First page: resets paging. Any filter or region change routes through
+  // here, so paging always restarts from offset 0 for the new query.
   const loadEventsWithCenter = async (lat: number, lng: number) => {
+    const requestId = ++loadRequestIdRef.current;
     try {
       setLoading(true);
-      const data = await eventsService.getRankedEvents(lat, lng, {
-        radiusKm: 50,
-        searchQuery: searchQuery || undefined,
-        categories: selectedCategories.length > 0 ? selectedCategories : undefined,
-        startDate: dateRange?.start ?? null,
-        endDate: dateRange?.end ?? null,
-      });
-      const filtered =
-        dateRange != null
-          ? filterEventsByDateRange(data, dateRange.start, dateRange.end)
-          : data;
-      setEvents(filtered);
+      const { items, hasMore } = await eventsService.getRankedEventsPage(
+        lat,
+        lng,
+        currentFilters(),
+        { limit: EVENTS_PAGE_SIZE, offset: 0 }
+      );
+      if (requestId !== loadRequestIdRef.current) return;
+      fetchOffsetRef.current = items.length;
+      setHasMoreEvents(hasMore);
+      setEvents(applyDateFilter(items));
     } catch (err) {
       console.error('Failed to load events:', err);
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestIdRef.current) setLoading(false);
     }
   };
   loadEventsWithCenterRef.current = loadEventsWithCenter;
+
+  // Next page, appended on list end. De-duped by id (page boundaries can
+  // shift if RSVPs change the premium/distance ordering between fetches).
+  // If a page nets zero new items (all duplicates / date-filtered out) the
+  // list size doesn't change, so onEndReached never re-fires; auto-fetch the
+  // next page, capped at MAX_CONSECUTIVE_EMPTY_PAGES so we can't loop forever.
+  const MAX_CONSECUTIVE_EMPTY_PAGES = 5;
+  const loadMoreEvents = async (consecutiveEmptyPages = 0) => {
+    if (loading || loadingMoreRef.current || !hasMoreEvents) return;
+    const requestId = loadRequestIdRef.current;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    let shouldChain = false;
+    try {
+      const { items, hasMore } = await eventsService.getRankedEventsPage(
+        center.lat,
+        center.lng,
+        currentFilters(),
+        { limit: EVENTS_PAGE_SIZE, offset: fetchOffsetRef.current }
+      );
+      // A filter/region change superseded this page; drop it.
+      if (requestId !== loadRequestIdRef.current) return;
+      fetchOffsetRef.current += items.length;
+      setHasMoreEvents(hasMore);
+      const filtered = applyDateFilter(items);
+      const seen = new Set(eventsRef.current.map((e) => e.id));
+      const fresh = filtered.filter((e) => !seen.has(e.id));
+      if (fresh.length > 0) {
+        setEvents((prev) => {
+          const prevIds = new Set(prev.map((e) => e.id));
+          const toAdd = fresh.filter((e) => !prevIds.has(e.id));
+          return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
+        });
+      }
+      shouldChain =
+        hasMore &&
+        fresh.length === 0 &&
+        consecutiveEmptyPages + 1 < MAX_CONSECUTIVE_EMPTY_PAGES;
+    } catch (err) {
+      console.error('Failed to load more events:', err);
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+    if (shouldChain && requestId === loadRequestIdRef.current) {
+      void loadMoreEvents(consecutiveEmptyPages + 1);
+    }
+  };
+
+  // Pull-to-refresh on the bottom-sheet list: re-run the first page for the
+  // current center/filters (@gorhom/bottom-sheet v5 scrollables support the
+  // refreshing/onRefresh pair natively).
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const target = mapCenterRef.current;
+      await loadEventsWithCenterRef.current(target.lat, target.lng);
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  // Clear the location banner once the user grants permission in Settings:
+  // re-check on every focus, and recenter on their real position when granted.
+  useFocusEffect(
+    useCallback(() => {
+      if (!locationDenied) return;
+      let cancelled = false;
+      (async () => {
+        try {
+          const { status } = await Location.getForegroundPermissionsAsync();
+          if (cancelled || status !== 'granted') return;
+          // Fetch the position BEFORE touching state: setLocationDenied(false)
+          // changes a dep of this callback, which re-runs the effect and flips
+          // `cancelled` — aborting this very fetch and never recentering.
+          const loc = await Location.getCurrentPositionAsync({});
+          if (cancelled) return;
+          const target = { lat: loc.coords.latitude, lng: loc.coords.longitude };
+          setLocationDenied(false);
+          setLocationBannerDismissed(false);
+          setUserLocation(target);
+          beginProgrammaticMove(1200);
+          setCenter(target);
+          setMapCenter(target);
+          setExplicitMoveTrigger((t) => t + 1);
+          mapRef.current?.animateTo(target.lat, target.lng);
+          void loadEventsWithCenterRef.current(target.lat, target.lng);
+        } catch {
+          // Permission check/position fetch failed; banner stays until next focus.
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [locationDenied, beginProgrammaticMove])
+  );
 
   const toggleCategory = (categoryId: string) => {
     setSelectedCategories((prev) =>
@@ -205,10 +381,12 @@ export default function DiscoverScreen() {
   const clearFilters = () => {
     setSelectedCategories([]);
     setSearchQuery('');
+    setDateRange(null);
   };
 
   const handleSearchFromOverlay = useCallback(
-    (location: { lat: number; lng: number; label: string } | null) => {
+    (location: { lat: number; lng: number; label: string } | null, keyword: string) => {
+      setSearchQuery(keyword);
       const target = location ?? userLocation ?? { lat: DEFAULT_CENTER.lat, lng: DEFAULT_CENTER.lng };
       beginProgrammaticMove(1200);
       setCenter(target);
@@ -227,7 +405,12 @@ export default function DiscoverScreen() {
       bounds?: { ne: { lat: number; lng: number }; sw: { lat: number; lng: number } };
     }) => {
       setMapCenter({ lat: region.lat, lng: region.lng });
-      if (region.bounds) setMapBounds(region.bounds);
+      if (region.bounds) {
+        // Keep the ref in sync immediately so the debounced reload below (and
+        // pagination) computes the radius from the freshest viewport.
+        mapBoundsRef.current = region.bounds;
+        setMapBounds(region.bounds);
+      }
 
       if (!hasInitializedMapRef.current) return;
       if (isProgrammaticMoveRef.current) return;
@@ -366,7 +549,7 @@ export default function DiscoverScreen() {
           <View style={styles.eventMeta}>
             <View style={styles.metaRow}>
               <MapPin size={14} color={Colors.text.tertiary} />
-              <Text style={styles.metaText}>{item.distance_km.toFixed(1)} mi</Text>
+              <Text style={styles.metaText}>{(item.distance_km * 0.621371).toFixed(1)} mi</Text>
               <Text style={styles.metaDot}>•</Text>
               <Text style={styles.metaText} numberOfLines={1}>
                 {item.business_name}
@@ -382,6 +565,20 @@ export default function DiscoverScreen() {
             <View style={styles.eventBadgeDark}>
               <Text style={styles.eventBadgeDarkText}>{item.category_label.toUpperCase()}</Text>
             </View>
+            {/* Viewer fields are undefined until 20261030114000 is applied — nothing renders. */}
+            {item.user_rsvp === 'going' ? (
+              <View style={styles.eventBadgeGoing}>
+                <Text style={styles.eventBadgeGoingText}>GOING</Text>
+              </View>
+            ) : null}
+            {item.user_saved ? (
+              <View
+                style={styles.eventSavedGlyph}
+                accessibilityLabel="Saved event"
+              >
+                <BookmarkCheck size={14} color={Colors.primary} />
+              </View>
+            ) : null}
           </View>
           <TouchableOpacity style={styles.businessRow} onPress={() => router.push(`/business/${item.business_id}` as never)} activeOpacity={0.7}>
             <Avatar imageUrl={item.business_logo_url} name={item.business_name} size={24} />
@@ -484,8 +681,10 @@ export default function DiscoverScreen() {
                       setShowFloatingCard(false);
                     }}
                     hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Close event preview"
                   >
-                    <X size={22} color="#1a1a1a" />
+                    <X size={22} color={Colors.text.primary} />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -512,6 +711,8 @@ export default function DiscoverScreen() {
             style={styles.topBarLeft}
             onPress={() => setShowSearchOverlay(true)}
             activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Open search"
           >
             <Search size={21} color={Colors.primary} />
             <Image source={require('@/assets/images/EMlogo.png')} style={styles.topBarLogo} />
@@ -521,6 +722,9 @@ export default function DiscoverScreen() {
             style={styles.filterIconButton}
             onPress={() => setShowFilters(!showFilters)}
             activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Open filters"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <SlidersHorizontal size={20} color={Colors.text.secondary} />
           </TouchableOpacity>
@@ -560,6 +764,32 @@ export default function DiscoverScreen() {
         </ScrollView>
       </View>
 
+      {locationDenied && !locationBannerDismissed && (
+        <View style={[styles.locationBanner, { top: headerHeight + 8 }]}>
+          <MapPin size={16} color={Colors.text.secondary} />
+          <Text style={styles.locationBannerText} numberOfLines={2}>
+            Location is off — showing San Francisco
+          </Text>
+          <TouchableOpacity
+            style={styles.locationBannerButton}
+            onPress={() => Linking.openSettings()}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Enable location in settings"
+          >
+            <Text style={styles.locationBannerButtonText}>Enable</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setLocationBannerDismissed(true)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss location banner"
+          >
+            <X size={16} color={Colors.text.tertiary} />
+          </TouchableOpacity>
+        </View>
+      )}
+
       <Modal
         visible={showFilters}
         animationType="slide"
@@ -572,6 +802,8 @@ export default function DiscoverScreen() {
               onPress={() => setShowFilters(false)}
               style={styles.filtersPageClose}
               hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Close filters"
             >
               <X size={24} color={Colors.text.primary} />
             </TouchableOpacity>
@@ -628,6 +860,7 @@ export default function DiscoverScreen() {
         onClose={() => setShowSearchOverlay(false)}
         onSearch={handleSearchFromOverlay}
         userLocation={userLocation}
+        initialKeyword={searchQuery}
       />
 
       {loading && events.length === 0 && (
@@ -670,6 +903,8 @@ export default function DiscoverScreen() {
             data={visibleEvents}
             keyExtractor={(item: RankedEvent) => item.id}
             renderItem={renderEventCard}
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
             ListHeaderComponent={renderListHeader}
             ListEmptyComponent={
             loading ? (
@@ -686,11 +921,11 @@ export default function DiscoverScreen() {
                     resizeMode="contain"
                   />
                 </View>
-                <Text style={styles.emptyTitle}>Event not found</Text>
+                <Text style={styles.emptyTitle}>No events nearby</Text>
                 <Text style={styles.emptySubtitle}>
                   No events in this area. Try moving the map or adjusting your filters
                 </Text>
-                {(selectedCategories.length > 0 || searchQuery) && (
+                {(selectedCategories.length > 0 || searchQuery.length > 0 || dateRange != null) && (
                   <TouchableOpacity
                     style={styles.clearFiltersButton}
                     onPress={clearFilters}
@@ -701,6 +936,15 @@ export default function DiscoverScreen() {
                 )}
               </View>
             )
+          }
+          onEndReached={() => loadMoreEvents()}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.loadMoreFooter}>
+                <ActivityIndicator size="small" color={Colors.primary} />
+              </View>
+            ) : null
           }
           onViewableItemsChanged={handleViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
@@ -878,6 +1122,44 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
     marginBottom: Spacing.md,
     textTransform: 'uppercase',
+  },
+  locationBanner: {
+    position: 'absolute',
+    left: Spacing.md,
+    right: Spacing.md,
+    zIndex: 25,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    backgroundColor: Colors.background.primary,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+    ...Shadows.md,
+  },
+  locationBannerText: {
+    flex: 1,
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
+    color: Colors.text.secondary,
+  },
+  locationBannerButton: {
+    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.primary,
+  },
+  locationBannerButtonText: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.text.inverse,
+  },
+  loadMoreFooter: {
+    paddingVertical: Spacing.lg,
+    alignItems: 'center',
   },
   mapSearchingOverlay: {
     position: 'absolute',
@@ -1208,13 +1490,13 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   eventBadgeLight: {
-    backgroundColor: 'rgba(255,255,255,0.95)',
+    backgroundColor: Colors.primarySoft,
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: BorderRadius.round,
   },
   eventBadgeLightText: {
-    color: '#0F172A',
+    color: Colors.primary,
     fontSize: 10,
     letterSpacing: 2,
     fontFamily: Typography.labelFontFamilies.semibold,
@@ -1230,6 +1512,23 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 2,
     fontFamily: Typography.labelFontFamilies.semibold,
+  },
+  eventBadgeGoing: {
+    backgroundColor: Colors.successSoft,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.round,
+  },
+  eventBadgeGoingText: {
+    color: Colors.success,
+    fontSize: 10,
+    letterSpacing: 2,
+    fontFamily: Typography.labelFontFamilies.semibold,
+  },
+  eventSavedGlyph: {
+    alignSelf: 'center',
+    marginLeft: 'auto',
+    paddingHorizontal: Spacing.xs,
   },
   categoryBadge: {
     flexDirection: 'row',
@@ -1277,7 +1576,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 24,
-    backgroundColor: 'rgba(196, 92, 62, 0.12)',
+    backgroundColor: Colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.md,

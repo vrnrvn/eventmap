@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Text } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -23,7 +23,7 @@ import {
   Inter_600SemiBold,
 } from '@expo-google-fonts/inter';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
-import { AuthProvider } from '@/contexts/AuthContext';
+import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { AuthRedirectHandler } from '@/components/AuthRedirectHandler';
 import { AppProvider } from '@/contexts/AppContext';
 import { SearchProvider } from '@/contexts/SearchContext';
@@ -36,11 +36,11 @@ import { setupNotificationResponseHandlers } from '@/services/pushNotifications'
 import { router } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { BrandedSplashScreen } from '@/components/BrandedSplashScreen';
+import { AppToast } from '@/components/AppToast';
 
-function handleNotificationData(data: Record<string, unknown> | null | undefined) {
+function resolveNotificationPath(data: Record<string, unknown> | null | undefined): string {
   if (!data || typeof data !== 'object') {
-    router.push('/(tabs)/notifications' as never);
-    return;
+    return '/(tabs)/notifications';
   }
   const eventId = data.eventId;
   const businessId = data.businessId;
@@ -50,20 +50,57 @@ function handleNotificationData(data: Record<string, unknown> | null | undefined
     const isChat = data.kind === 'chat' || data.type === 'chat_message' || data.type === 'chat_mention';
     const messageId = typeof data.messageId === 'string' ? data.messageId : null;
     const chatPath = messageId ? `/event-chat/${eventId}?messageId=${messageId}` : `/event-chat/${eventId}`;
-    router.push((isChat ? chatPath : `/event/${eventId}`) as never);
-    return;
+    return isChat ? chatPath : `/event/${eventId}`;
   }
   if (typeof businessId === 'string' && businessId.length > 0) {
-    router.push(`/business/${businessId}` as never);
-    return;
+    return `/business/${businessId}`;
   }
   if (typeof linkUrl === 'string' && linkUrl.startsWith('myapp://')) {
     const parsed = Linking.parse(linkUrl);
-    const path = parsed.path ? `/${parsed.path}` : '/(tabs)/notifications';
-    router.push(path as never);
-    return;
+    return parsed.path ? `/${parsed.path}` : '/(tabs)/notifications';
   }
-  router.push('/(tabs)/notifications' as never);
+  return '/(tabs)/notifications';
+}
+
+/**
+ * Push-notification navigation, gated on auth. Taps that arrive before the
+ * session is known are queued; once auth resolves they're flushed if the user
+ * is signed in and onboarded, and dropped otherwise (the tabs guard would
+ * bounce them anyway — dropping avoids a redirect flash).
+ */
+function PushNavigationGate() {
+  const { session, loading, profileError, hasCompletedOnboarding } = useAuth();
+  const pendingRef = useRef<string | null>(null);
+  const canNavigate = !loading && !!session && !profileError && hasCompletedOnboarding;
+  const canNavigateRef = useRef(canNavigate);
+  canNavigateRef.current = canNavigate;
+  const authKnown = !loading;
+  const authKnownRef = useRef(authKnown);
+  authKnownRef.current = authKnown;
+
+  useEffect(() => {
+    const cleanup = setupNotificationResponseHandlers((data) => {
+      const path = resolveNotificationPath(data);
+      if (canNavigateRef.current) {
+        router.push(path as never);
+      } else if (!authKnownRef.current) {
+        pendingRef.current = path; // auth still resolving: queue the latest tap
+      }
+      // Known signed-out / un-onboarded: drop the navigation.
+    });
+    return () => cleanup?.();
+  }, []);
+
+  useEffect(() => {
+    if (!authKnown || !pendingRef.current) return;
+    const path = pendingRef.current;
+    pendingRef.current = null;
+    if (canNavigate) {
+      router.push(path as never);
+    }
+  }, [authKnown, canNavigate]);
+
+  return null;
 }
 
 SplashScreen.preventAutoHideAsync();
@@ -114,11 +151,6 @@ export default function RootLayout() {
     }
   }, [fontsLoaded]);
 
-  useEffect(() => {
-    const cleanup = setupNotificationResponseHandlers(handleNotificationData);
-    return () => cleanup?.();
-  }, []);
-
   if (!fontsLoaded && !fontError) {
     return null;
   }
@@ -128,6 +160,7 @@ export default function RootLayout() {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <AuthRedirectHandler />
+          <PushNavigationGate />
           <AppProvider>
             <PremiumProvider>
               <SearchProvider>
@@ -140,6 +173,7 @@ export default function RootLayout() {
                 <Stack.Screen name="+not-found" />
               </Stack>
               <BrandedSplashScreen visible={showBrandedSplash} />
+              <AppToast />
               </BottomSheetModalProvider>
               </SearchProvider>
               <StatusBar style="auto" />

@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import { eventsService } from '@/services/events';
+import { supabase } from '@/services/supabase';
 import { eventChatService } from '@/services/eventChat';
 import { socialService } from '@/services/social';
 import { reviewsService, type ReviewWithProfile } from '@/services/reviews';
@@ -27,8 +28,10 @@ import {
   type EventChatMessageWithSender,
   type PublicAttendee,
 } from '@/types/database';
-import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { notify, notifyConfirm } from '@/utils/notify';
 import { ImageViewer } from '@/components/ImageViewer';
+import { Button } from '@/components/ui/Button';
 import { Avatar } from '@/components/Avatar';
 import {
   AttendeesBottomSheet,
@@ -49,6 +52,7 @@ import {
   Share2,
   Clock3,
   CalendarPlus,
+  Download,
   TrendingUp,
   ChevronRight,
   MessageCircle,
@@ -60,7 +64,7 @@ import { GoogleMapView } from '@/components/GoogleMapView';
 import { complaintsService } from '@/services/complaints';
 import { getNextOccurrences, getRecurrenceLabel } from '@/utils/recurrence';
 import { hasEventEnded, isEventInProgress } from '@/utils/eventStatus';
-import { getEventWebUrl, getGoogleCalendarEventUrl } from '@/utils/eventShare';
+import { getEventWebUrl, getGoogleCalendarEventUrl, shareEventIcs } from '@/utils/eventShare';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -74,6 +78,8 @@ export default function EventDetail() {
   const [saving, setSaving] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
+  // Active page of the hero photo carousel (drives the page dots).
+  const [photoIndex, setPhotoIndex] = useState(0);
   const [reviews, setReviews] = useState<ReviewWithProfile[]>([]);
   const [averageRating, setAverageRating] = useState({ average: 0, count: 0 });
   const [userReview, setUserReview] = useState<{ rating: number; text: string } | null>(null);
@@ -188,6 +194,59 @@ export default function EventDetail() {
     }, [id, chatIsOpen])
   );
 
+  // Keep the attendee count (and the chat-unlock state derived from it) fresh
+  // while the screen is open. The 20s focus-scoped poll is the PRIMARY
+  // mechanism today: `rsvps` is NOT in the supabase_realtime publication
+  // (only event_chat_messages is — 20260301000000), so the postgres_changes
+  // subscription below subscribes fine but never receives events pre-publication.
+  //
+  // Upgrade path (zero client work needed): once a migration runs
+  // `ALTER PUBLICATION supabase_realtime ADD TABLE rsvps`, the subscription
+  // starts firing and attendance updates become near-instant (1s debounce);
+  // the poll then only serves as a fallback. Tracked in docs/ISSUES.md.
+  useFocusEffect(
+    useCallback(() => {
+      if (!id) return;
+      const refetchCount = async () => {
+        try {
+          const data = await eventsService.getEventDetails(id);
+          if (!data) return;
+          setDetails((d) => {
+            if (!d || d.rsvp_count === data.rsvp_count) return d;
+            // Merge only the count: the user's own RSVP state may have an
+            // optimistic local update in flight.
+            return { ...d, rsvp_count: data.rsvp_count };
+          });
+        } catch {
+          // Transient failure; next tick / next realtime event retries.
+        }
+      };
+      const timer = setInterval(refetchCount, 20000);
+      // Realtime-ready subscription: coalesce bursts of RSVP changes into one
+      // refetch at most every second.
+      let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+      const channel = supabase
+        .channel(`event-rsvps:${id}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'rsvps', filter: `event_id=eq.${id}` },
+          () => {
+            if (debounceTimer) return;
+            debounceTimer = setTimeout(() => {
+              debounceTimer = null;
+              void refetchCount();
+            }, 1000);
+          }
+        )
+        .subscribe();
+      return () => {
+        clearInterval(timer);
+        if (debounceTimer) clearTimeout(debounceTimer);
+        supabase.removeChannel(channel);
+      };
+    }, [id])
+  );
+
   const businessId = details?.business.id;
 
   useEffect(() => {
@@ -234,11 +293,11 @@ export default function EventDetail() {
   const handleRsvp = async (status: 'going' | 'interested') => {
     if (!user || !id) return;
     if (isBanned) {
-      Alert.alert('Account Suspended', 'Your account has been suspended. Please contact support.');
+      notify.error('Your account has been suspended. Please contact support.');
       return;
     }
     if (details && hasEventEnded(details.event)) {
-      Alert.alert('Event ended', 'This event is over, so it can no longer be joined.');
+      notify.error('This event is over, so it can no longer be joined.');
       return;
     }
     setSaving(true);
@@ -263,8 +322,12 @@ export default function EventDetail() {
       );
       void loadAttendees();
       setAttendeesRefresh((n) => n + 1);
-    } catch {
-      Alert.alert('Error', 'Failed to update RSVP');
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message === 'EVENT_FULL') {
+        notify.error('This event has reached its maximum number of attendees.');
+      } else {
+        notify.error('Failed to update RSVP');
+      }
     } finally {
       setSaving(false);
     }
@@ -288,7 +351,7 @@ export default function EventDetail() {
       void loadAttendees();
       setAttendeesRefresh((n) => n + 1);
     } catch {
-      Alert.alert('Error', 'Failed to remove RSVP');
+      notify.error('Failed to remove RSVP');
     } finally {
       setSaving(false);
     }
@@ -309,7 +372,7 @@ export default function EventDetail() {
       setDetails((d) =>
         d ? { ...d, user_saved: wasSaved, save_count: Math.max(0, d.save_count + (wasSaved ? 1 : -1)) } : d
       );
-      Alert.alert('Error', wasSaved ? 'Failed to remove from saved events' : 'Failed to save event');
+      notify.error(wasSaved ? 'Failed to remove from saved events' : 'Failed to save event');
     } finally {
       setTogglingSave(false);
     }
@@ -327,29 +390,31 @@ export default function EventDetail() {
         setDetails((d) => (d ? { ...d, user_following_business: true } : null));
       }
     } catch {
-      Alert.alert('Error', 'Failed to update follow');
+      notify.error('Failed to update follow');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = () => {
+  const handleCancelEvent = () => {
     if (!id) return;
-    Alert.alert('Delete Event', 'Are you sure? This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await eventsService.deleteEvent(id);
-            router.back();
-          } catch {
-            Alert.alert('Error', 'Failed to delete event');
-          }
-        },
+    notifyConfirm({
+      title: 'Cancel Event',
+      message:
+        'Cancel this event? Attendees will be notified and the event will no longer be visible to the public. This cannot be undone.',
+      cancelLabel: 'Keep event',
+      confirmLabel: 'Cancel event',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          // Pre-apply (20261030106000) this falls back to a hard delete.
+          await eventsService.cancelEvent(id);
+          router.back();
+        } catch {
+          notify.error('Failed to cancel event');
+        }
       },
-    ]);
+    });
   };
 
   const handleShareEvent = async () => {
@@ -379,20 +444,64 @@ export default function EventDetail() {
     Linking.openURL(url);
   };
 
+  const handleShareIcs = async () => {
+    if (!details) return;
+    try {
+      await shareEventIcs({
+        id: details.event.id,
+        title: details.event.title,
+        startIso: details.event.start_datetime,
+        endIso: details.event.end_datetime,
+        address: details.event.address,
+        description: [
+          details.event.description?.trim(),
+          `${getEventWebUrl(details.event.id)}\n\nHosted by ${details.business.name}`,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+      });
+    } catch {
+      notify.error('Could not create the calendar file.');
+    }
+  };
+
   const submitEventReport = async (reason: string) => {
     if (!id) return;
     try {
       await complaintsService.createComplaint('event', id, reason);
-      Alert.alert(
-        'Report received',
-        'Thanks for helping keep EventMaps safe. We typically review reports within about 48 hours and may remove content that violates our guidelines.'
+      notify.success(
+        'Report received. We typically review reports within about 48 hours.'
       );
     } catch {
-      Alert.alert('Error', 'Failed to submit report. Please try again.');
+      notify.error('Failed to submit report. Please try again.');
     }
   };
 
   const handleReportEvent = () => {
+    if (Platform.OS === 'web') {
+      // Alert.alert with buttons is a no-op in browsers. notifyConfirm only
+      // supports two buttons, so chain the two most important reasons:
+      // confirm picks the reason, cancel moves to the next question.
+      notifyConfirm({
+        title: 'Report this event',
+        message: 'Is this event spam or misleading?',
+        confirmLabel: 'Report as spam',
+        onConfirm: () => void submitEventReport('Spam or misleading'),
+        onCancel: () => {
+          notifyConfirm({
+            title: 'Report this event',
+            message: 'Is this a safety concern?',
+            confirmLabel: 'Report safety concern',
+            cancelLabel: 'Never mind',
+            destructive: true,
+            onConfirm: () => void submitEventReport('Safety concern'),
+          });
+        },
+      });
+      return;
+    }
+    // Native: Alert.alert supports the full 4-option picker that notifyConfirm
+    // (2 buttons) cannot express.
     Alert.alert('Report this event', 'What best describes the issue?', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -453,7 +562,13 @@ export default function EventDetail() {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <ArrowLeft size={24} color={Colors.text.primary} />
           </TouchableOpacity>
         </View>
@@ -473,6 +588,13 @@ export default function EventDetail() {
   const hasJoinedEvent = details.user_rsvp === 'going';
   const eventEnded = hasEventEnded(event);
   const eventLive = isEventInProgress(event);
+  // Tolerant capacity check: events.max_attendees only exists once
+  // 20261030108000 is applied. Pre-apply the field is absent (null here), so
+  // the UI is identical to today.
+  const maxAttendees =
+    (event as { max_attendees?: number | null }).max_attendees ?? null;
+  const eventFull =
+    maxAttendees != null && details.rsvp_count >= maxAttendees && !hasJoinedEvent;
   // Recurring events that already started show their next occurrence in the
   // header; everything else shows the scheduled start.
   const displayStartIso = (() => {
@@ -486,7 +608,13 @@ export default function EventDetail() {
     <View style={styles.container}>
       <View style={[styles.heroTopBarWrap, { top: insets.top + 10 }]}>
         <View style={styles.heroTopBar}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <ArrowLeft size={24} color={Colors.text.primary} />
           </TouchableOpacity>
           <Text style={styles.brandTitle}>EventMaps</Text>
@@ -531,6 +659,10 @@ export default function EventDetail() {
               horizontal
               pagingEnabled
               showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={(e) => {
+                const page = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                setPhotoIndex(Math.max(0, Math.min(page, allPhotoUrls.length - 1)));
+              }}
               keyExtractor={(_, i) => `photo-${i}`}
               renderItem={({ item, index }) => (
                 <TouchableOpacity
@@ -539,6 +671,8 @@ export default function EventDetail() {
                     setViewerIndex(index);
                     setViewerVisible(true);
                   }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View photo ${index + 1} of ${allPhotoUrls.length}`}
                 >
                   <Image
                     source={{ uri: item }}
@@ -555,6 +689,16 @@ export default function EventDetail() {
           )}
           <View style={styles.heroGradient} />
           <View style={styles.heroTitleWrap}>
+            {allPhotoUrls.length > 1 ? (
+              <View style={styles.photoDots} pointerEvents="none">
+                {allPhotoUrls.map((_, i) => (
+                  <View
+                    key={`photo-dot-${i}`}
+                    style={[styles.photoDot, i === photoIndex && styles.photoDotActive]}
+                  />
+                ))}
+              </View>
+            ) : null}
             <View style={styles.heroCategoryPill}>
               <Text style={styles.heroCategoryText}>{category.label.toUpperCase()}</Text>
             </View>
@@ -607,20 +751,36 @@ export default function EventDetail() {
             )}
           </View>
 
-          <TouchableOpacity
-            style={styles.calendarRow}
-            onPress={handleOpenCalendar}
-            activeOpacity={0.75}
-          >
+          <View style={styles.calendarRow}>
             <View style={styles.metaIconWrap}>
               <CalendarPlus size={18} color={Colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.metaLabel}>Add to calendar</Text>
-              <Text style={styles.metaValue}>Google Calendar</Text>
+              <View style={styles.calendarChoiceRow}>
+                <TouchableOpacity
+                  style={styles.calendarChoiceBtn}
+                  onPress={handleOpenCalendar}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add to Google Calendar"
+                >
+                  <Text style={styles.calendarChoiceText}>Google Calendar</Text>
+                  <ExternalLink size={14} color={Colors.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.calendarChoiceBtn}
+                  onPress={handleShareIcs}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add to calendar as an ics file"
+                >
+                  <Text style={styles.calendarChoiceText}>.ics file</Text>
+                  <Download size={14} color={Colors.primary} />
+                </TouchableOpacity>
+              </View>
             </View>
-            <ExternalLink size={18} color={Colors.text.tertiary} />
-          </TouchableOpacity>
+          </View>
 
           <Text style={styles.promoFootnote}>
             Listings may be ordered using distance, relevance, and paid promotion from hosts.
@@ -654,7 +814,9 @@ export default function EventDetail() {
               <Text style={styles.attendeeText}>
                 {details.rsvp_count === 0
                   ? 'Be the first to RSVP'
-                  : `${details.rsvp_count} going — tap to see who’s coming`}
+                  : maxAttendees != null
+                    ? `${details.rsvp_count} / ${maxAttendees} going — tap to see who’s coming`
+                    : `${details.rsvp_count} going — tap to see who’s coming`}
               </Text>
             </View>
           </TouchableOpacity>
@@ -705,6 +867,30 @@ export default function EventDetail() {
             </TouchableOpacity>
           )}
 
+          {/* Hosts rarely RSVP to their own event, so the attendee chat row
+              above never shows for them — but the DB (20261028130000/180000)
+              grants hosts chat read + moderation. Give them an entry point. */}
+          {isOwner && details.user_rsvp !== 'going' && (
+            <TouchableOpacity
+              style={styles.chatPromptRow}
+              onPress={() => router.push(`/event-chat/${event.id}` as never)}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Manage event chat"
+            >
+              <View style={styles.chatIconWrap}>
+                <MessageCircle size={20} color={Colors.primary} />
+              </View>
+              <View style={styles.chatPromptMeta}>
+                <Text style={styles.chatPromptTitle}>Manage chat</Text>
+                <Text style={styles.chatPromptSubtitle} numberOfLines={1}>
+                  Read and moderate your event&apos;s chat
+                </Text>
+              </View>
+              <ChevronRight size={22} color={Colors.text.tertiary} />
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             style={styles.hostBusinessRow}
             onPress={() => router.push(`/business/${business.id}` as never)}
@@ -725,9 +911,11 @@ export default function EventDetail() {
 
           <View style={styles.descriptionSection}>
             <Text style={styles.bigSectionTitle}>About Event</Text>
-            <Text style={styles.descriptionText}>
-              {event.description || 'Experience an immersive journey through sound and light.'}
-            </Text>
+            {event.description ? (
+              <Text style={styles.descriptionText}>{event.description}</Text>
+            ) : (
+              <Text style={styles.noDescriptionText}>No description provided.</Text>
+            )}
           </View>
 
           {event.is_recurring && event.recurrence_pattern && (
@@ -820,17 +1008,20 @@ export default function EventDetail() {
                 <Text style={styles.insightsBannerText}>Reach, saves & RSVPs</Text>
               </TouchableOpacity>
               <View style={styles.ownerActions}>
-                <TouchableOpacity
-                  style={styles.editButton}
+                <Button
+                  label="Edit Event"
+                  variant="secondary"
                   onPress={() => router.push(`/business/edit-event/${event.id}` as any)}
-                >
-                  <Pencil size={18} color={Colors.primary} />
-                  <Text style={styles.editButtonText}>Edit Event</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
-                  <Trash2 size={18} color={Colors.error} />
-                  <Text style={styles.deleteButtonText}>Delete Event</Text>
-                </TouchableOpacity>
+                  icon={<Pencil size={18} color={Colors.primary} />}
+                  style={styles.ownerActionBtn}
+                />
+                <Button
+                  label="Cancel Event"
+                  variant="destructive"
+                  onPress={handleCancelEvent}
+                  icon={<Trash2 size={18} color="#FFFFFF" />}
+                  style={styles.ownerActionBtn}
+                />
               </View>
             </>
           )}
@@ -847,7 +1038,11 @@ export default function EventDetail() {
           </Text>
 
           <View style={styles.reviewsSection}>
-            <Text style={styles.sectionTitle}>Reviews</Text>
+            {/* These are reviews of the hosting BUSINESS (venue), not of this
+                single event — label them as such. */}
+            <Text style={styles.sectionTitle}>
+              {business.name ? `Reviews of ${business.name}` : 'Venue reviews'}
+            </Text>
             <View style={{ marginBottom: Spacing.md }}>
               <StarRatingDisplay
                 average={averageRating.average}
@@ -856,6 +1051,10 @@ export default function EventDetail() {
             </View>
             {user && !isOwner && (
               showReviewForm ? (
+                <>
+                <Text style={styles.reviewFormTitle}>
+                  {business.name ? `Review ${business.name}` : 'Review this venue'}
+                </Text>
                 <ReviewForm
                   initialRating={userReview?.rating || 0}
                   initialText={userReview?.text || ''}
@@ -863,6 +1062,7 @@ export default function EventDetail() {
                   onCancel={() => setShowReviewForm(false)}
                   isEditing={!!userReview}
                 />
+                </>
               ) : (
                 <TouchableOpacity
                   style={styles.writeReviewBtn}
@@ -884,28 +1084,22 @@ export default function EventDetail() {
                 onReport={
                   user
                     ? (reviewId) => {
-                        Alert.alert(
-                          'Report Review',
-                          'Report this review for inappropriate content?',
-                          [
-                            { text: 'Cancel', style: 'cancel' },
-                            {
-                              text: 'Report',
-                              style: 'destructive',
-                              onPress: async () => {
-                                try {
-                                  await complaintsService.createComplaint('review', reviewId);
-                                  Alert.alert(
-                                    'Thank you',
-                                    'Your report has been submitted. We typically review within about 48 hours.'
-                                  );
-                                } catch {
-                                  Alert.alert('Error', 'Failed to submit report.');
-                                }
-                              },
-                            },
-                          ]
-                        );
+                        notifyConfirm({
+                          title: 'Report Review',
+                          message: 'Report this review for inappropriate content?',
+                          confirmLabel: 'Report',
+                          destructive: true,
+                          onConfirm: async () => {
+                            try {
+                              await complaintsService.createComplaint('review', reviewId);
+                              notify.success(
+                                'Your report has been submitted. We typically review within about 48 hours.'
+                              );
+                            } catch {
+                              notify.error('Failed to submit report.');
+                            }
+                          },
+                        });
                       }
                     : undefined
                 }
@@ -921,27 +1115,52 @@ export default function EventDetail() {
               style={[
                 styles.joinButton,
                 hasJoinedEvent && styles.joinButtonJoined,
-                eventEnded && styles.joinButtonEnded,
+                (eventEnded || eventFull) && styles.joinButtonEnded,
               ]}
               onPress={() => {
-                if (!user || saving || hasJoinedEvent || eventEnded) return;
+                if (!user) {
+                  if (eventEnded || eventFull) return;
+                  // Send signed-out users to login with a return path to this event.
+                  router.push({
+                    pathname: '/(auth)/login',
+                    params: { redirect: `/event/${id}` },
+                  });
+                  return;
+                }
+                if (saving || hasJoinedEvent || eventEnded || eventFull) return;
                 handleRsvp('going');
               }}
-              disabled={saving || hasJoinedEvent || eventEnded}
+              disabled={
+                user
+                  ? saving || hasJoinedEvent || eventEnded || eventFull
+                  : eventEnded || eventFull
+              }
               activeOpacity={0.9}
               accessibilityRole="button"
-              accessibilityState={{ disabled: saving || hasJoinedEvent || eventEnded }}
+              accessibilityState={{
+                disabled: user
+                  ? saving || hasJoinedEvent || eventEnded || eventFull
+                  : eventEnded || eventFull,
+              }}
             >
               <Text style={styles.joinButtonText}>
                 {eventEnded
                   ? hasJoinedEvent
                     ? 'You attended'
                     : 'Event ended'
-                  : hasJoinedEvent
-                    ? 'Event Joined'
-                    : 'Join Event'}
+                  : eventFull
+                    ? 'Event full'
+                    : !user
+                      ? 'Sign in to join'
+                      : hasJoinedEvent
+                        ? 'Event Joined'
+                        : maxAttendees != null
+                          ? `Join Event (${details.rsvp_count} / ${maxAttendees})`
+                          : 'Join Event'}
               </Text>
-              <Text style={styles.joinArrow}>{eventEnded ? '' : hasJoinedEvent ? '✓' : '→'}</Text>
+              <Text style={styles.joinArrow}>
+                {eventEnded || eventFull ? '' : hasJoinedEvent ? '✓' : '→'}
+              </Text>
             </TouchableOpacity>
 
             {/* One secondary control replaces the old Going / Interested / Remove row:
@@ -1116,11 +1335,13 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   photoDots: {
-    position: 'absolute',
-    bottom: 10,
+    // In-flow above the category pill/title: the contentCard's -32 overlap and
+    // the title text make an absolute bottom placement collide, so the dots
+    // ride on top of the hero title block instead.
     alignSelf: 'center',
     flexDirection: 'row',
     gap: 5,
+    marginBottom: 10,
   },
   photoDot: {
     width: 6,
@@ -1189,6 +1410,28 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.border.light,
   },
+  calendarChoiceRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+    marginTop: 6,
+  },
+  calendarChoiceBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.round,
+    borderWidth: 1,
+    borderColor: alpha(Colors.primary, 0.27),
+    backgroundColor: Colors.primarySoft,
+  },
+  calendarChoiceText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+  },
   promoFootnote: {
     fontSize: Typography.sizes.xs,
     lineHeight: 16,
@@ -1223,7 +1466,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   attendeePlus: {
-    fontSize: 11,
+    fontSize: Typography.sizes.xs,
     color: Colors.text.secondary,
     fontFamily: Typography.labelFontFamilies.semibold,
   },
@@ -1283,7 +1526,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chatUnreadBadgeText: {
-    fontSize: 11,
+    fontSize: Typography.sizes.xs,
     lineHeight: 14,
     color: '#FFFFFF',
     fontFamily: Typography.labelFontFamilies.semibold,
@@ -1350,6 +1593,13 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.md,
     lineHeight: 24,
     color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+  },
+  noDescriptionText: {
+    fontSize: Typography.sizes.md,
+    lineHeight: 24,
+    color: Colors.text.tertiary,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
   },
@@ -1577,8 +1827,8 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
     borderRadius: BorderRadius.lg,
     borderWidth: 1,
-    borderColor: Colors.primary + '44',
-    backgroundColor: Colors.primary + '10',
+    borderColor: alpha(Colors.primary, 0.27),
+    backgroundColor: Colors.primarySoft,
   },
   insightsBannerText: {
     fontSize: Typography.sizes.sm,
@@ -1591,39 +1841,8 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     marginBottom: Spacing.lg,
   },
-  editButton: {
+  ownerActionBtn: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.primary,
-  },
-  editButtonText: {
-    fontSize: Typography.sizes.sm,
-    color: Colors.primary,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-  },
-  deleteButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    borderColor: Colors.error,
-  },
-  deleteButtonText: {
-    fontSize: Typography.sizes.sm,
-    color: Colors.error,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
   },
   reportEventRow: {
     flexDirection: 'row',
@@ -1639,7 +1858,7 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.medium,
   },
   trustFootnote: {
-    fontSize: 11,
+    fontSize: Typography.sizes.xs,
     lineHeight: 15,
     color: Colors.text.tertiary,
     fontFamily: Typography.fontFamilies.regular,
@@ -1651,6 +1870,14 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.xl,
     padding: Spacing.lg,
     ...Shadows.md,
+  },
+  reviewFormTitle: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.text.primary,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.xs,
   },
   writeReviewBtn: {
     alignSelf: 'flex-start',

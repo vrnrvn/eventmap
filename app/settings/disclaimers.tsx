@@ -1,16 +1,10 @@
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
-import { ArrowLeft, AlertTriangle, MapPin, Bell, Shield, FileText } from 'lucide-react-native';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { AlertTriangle, MapPin, Bell, Shield, FileText } from 'lucide-react-native';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Colors, Typography } from '@/constants/theme';
 
-// Theme compatibility: some themes expose `Colors.border` as a string, others as an object.
-const subtleBorderColor =
-  (Colors as any)?.border?.subtle ??
-  (Colors as any)?.border?.primary ??
-  (Colors as any)?.border ??
-  'rgba(255,255,255,0.08)';
+const subtleBorderColor = Colors.border.light;
 
 type DisclaimerBlock = {
   id: string;
@@ -20,7 +14,6 @@ type DisclaimerBlock = {
 };
 
 export default function DisclaimersScreen() {
-  const insets = useSafeAreaInsets();
 
   const blocks = useMemo<DisclaimerBlock[]>(
     () => [
@@ -64,14 +57,8 @@ export default function DisclaimersScreen() {
   );
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
-      {/* header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn} activeOpacity={0.7}>
-          <ArrowLeft size={22} color={Colors.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Disclaimers</Text>
-      </View>
+    <View style={styles.root}>
+      <ScreenHeader title="Disclaimers" backgroundColor={Colors.background.primary} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.subtitle}>
@@ -101,19 +88,6 @@ export default function DisclaimersScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background.primary },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: Colors.background.primary,
-  },
-  backBtn: { marginRight: 12 },
-  title: {
-    fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.semibold,
-    color: Colors.text.primary,
-  },
   content: { padding: 16, paddingBottom: 40 },
   subtitle: {
     marginTop: 4,

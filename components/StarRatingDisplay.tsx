@@ -16,10 +16,10 @@ export function StarRatingDisplay({ average, count, size = 18 }: StarRatingDispl
     <View style={styles.row}>
       <View style={styles.stars}>
         {Array.from({ length: fullStars }).map((_, i) => (
-          <Star key={`full-${i}`} size={size} color="#F59E0B" fill="#F59E0B" />
+          <Star key={`full-${i}`} size={size} color={Colors.warning} fill={Colors.warning} />
         ))}
         {Array.from({ length: emptyStars }).map((_, i) => (
-          <Star key={`empty-${i}`} size={size} color="#D1D5DB" fill="transparent" />
+          <Star key={`empty-${i}`} size={size} color={Colors.border.light} fill="transparent" />
         ))}
       </View>
       <Text style={styles.text}>

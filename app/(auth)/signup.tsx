@@ -7,19 +7,20 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  ActivityIndicator,
   Image,
   TextInput,
-  Alert,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { Colors, Typography, BorderRadius } from '@/constants/theme';
+import { Button } from '@/components/ui/Button';
+import { Colors, Typography, BorderRadius, Spacing } from '@/constants/theme';
 import { ArrowLeft, Eye, EyeOff, ArrowRight } from 'lucide-react-native';
 import { GoogleIcon } from '@/components/icons/BrandIcons';
 import { oauthEnabled } from '@/services/runtime';
+import { notify } from '@/utils/notify';
+
+const EYE_HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
 
 export default function SignupScreen() {
   const insets = useSafeAreaInsets();
@@ -29,6 +30,7 @@ export default function SignupScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -37,9 +39,9 @@ export default function SignupScreen() {
     const next: Record<string, string> = {};
     if (!name.trim()) next.name = 'Full name is required';
     if (!email.trim()) next.email = 'Email is required';
-    else if (!/\S+@\S+\.\S+/.test(email)) next.email = 'Email is invalid';
+    else if (!/\S+@\S+\.\S+/.test(email.trim())) next.email = 'Email is invalid';
     if (!password) next.password = 'Password is required';
-    else if (password.length < 6) next.password = 'Minimum 6 characters';
+    else if (password.length < 8) next.password = 'Minimum 8 characters';
     if (confirmPassword !== password) next.confirm = 'Passwords do not match';
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -48,16 +50,20 @@ export default function SignupScreen() {
   const handleSignUp = async () => {
     if (!validate()) return;
     setLoading(true);
+    const trimmedEmail = email.trim();
     try {
-      await signUp(email, password, name);
-      Alert.alert(
-        'Check Your Email',
-        'Please verify your email, then sign in to continue.',
-        [{ text: 'OK', onPress: () => router.replace('/(auth)/login') }]
-      );
+      const result = await signUp(trimmedEmail, password, name.trim());
+      if (result?.session) {
+        // Email confirmation disabled (or auto-confirmed): user is signed in.
+        notify.success('Account created. Welcome to EventMap!');
+        router.replace('/');
+      } else {
+        notify.success('Check your email to verify your account, then sign in.');
+        router.replace({ pathname: '/(auth)/login', params: { email: trimmedEmail } });
+      }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
-      Alert.alert('Sign Up Failed', msg || 'Please try again');
+      notify.error(msg || 'Sign up failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -70,7 +76,7 @@ export default function SignupScreen() {
       router.replace('/');
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
-      Alert.alert('Google Sign Up', msg.includes('cancelled') ? 'Sign up was cancelled.' : msg);
+      notify.error(msg.includes('cancelled') ? 'Sign up was cancelled.' : msg);
     } finally {
       setOauthLoading(false);
     }
@@ -85,12 +91,19 @@ export default function SignupScreen() {
           contentContainerStyle={{
             paddingTop: insets.top + 10,
             paddingBottom: insets.bottom + 24,
-            paddingHorizontal: 22,
+            paddingHorizontal: Spacing.lg,
           }}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.75}>
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => router.back()}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <ArrowLeft size={20} color={Colors.text.primary} />
           </TouchableOpacity>
 
@@ -120,28 +133,51 @@ export default function SignupScreen() {
                   secureTextEntry={!showPassword}
                   style={styles.input}
                 />
-                <TouchableOpacity onPress={() => setShowPassword((v) => !v)}>
+                <TouchableOpacity
+                  onPress={() => setShowPassword((v) => !v)}
+                  hitSlop={EYE_HIT_SLOP}
+                  accessibilityRole="button"
+                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                >
                   {showPassword ? <EyeOff size={21} color={Colors.text.tertiary} /> : <Eye size={21} color={Colors.text.tertiary} />}
                 </TouchableOpacity>
               </View>
             </View>
             {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
 
-            <Field label="Confirm Password" value={confirmPassword} onChangeText={setConfirmPassword} placeholder="••••••••" secureTextEntry />
+            <View style={styles.fieldBlock}>
+              <Text style={styles.fieldLabel}>Confirm Password</Text>
+              <View style={styles.inputShell}>
+                <TextInput
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  placeholder="••••••••"
+                  placeholderTextColor={Colors.text.tertiary}
+                  secureTextEntry={!showConfirmPassword}
+                  style={styles.input}
+                />
+                <TouchableOpacity
+                  onPress={() => setShowConfirmPassword((v) => !v)}
+                  hitSlop={EYE_HIT_SLOP}
+                  accessibilityRole="button"
+                  accessibilityLabel={showConfirmPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showConfirmPassword ? <EyeOff size={21} color={Colors.text.tertiary} /> : <Eye size={21} color={Colors.text.tertiary} />}
+                </TouchableOpacity>
+              </View>
+            </View>
             {errors.confirm ? <Text style={styles.errorText}>{errors.confirm}</Text> : null}
 
-            <TouchableOpacity style={styles.ctaWrap} onPress={handleSignUp} disabled={loading} activeOpacity={0.9}>
-              <LinearGradient colors={[Colors.primary, Colors.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.cta}>
-                {loading ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <>
-                    <Text style={styles.ctaText}>Sign Up</Text>
-                    <ArrowRight size={22} color="#FFFFFF" />
-                  </>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
+            <Button
+              label="Sign Up"
+              onPress={handleSignUp}
+              loading={loading}
+              size="lg"
+              fullWidth
+              gradient
+              icon={<ArrowRight size={22} color="#FFFFFF" />}
+              style={styles.ctaWrap}
+            />
 
             {oauthEnabled && <><View style={styles.divider}>
               <View style={styles.dividerLine} />
@@ -228,8 +264,8 @@ const styles = StyleSheet.create({
   logo: { width: 52, height: 52 },
   logoTint: { tintColor: Colors.primary },
   heroTitle: {
-    fontSize: 50,
-    lineHeight: 56,
+    fontSize: Typography.sizes.xxl,
+    lineHeight: 38,
     color: Colors.text.primary,
     fontFamily: Typography.displayFontFamilies.extrabold,
     fontWeight: '800',
@@ -283,20 +319,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Typography.fontFamilies.medium,
   },
-  ctaWrap: { marginTop: 8, borderRadius: BorderRadius.round, overflow: 'hidden' },
-  cta: {
-    height: 64,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
-  },
-  ctaText: {
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontFamily: Typography.displayFontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-  },
+  ctaWrap: { marginTop: Spacing.sm },
   divider: {
     marginTop: 24,
     marginBottom: 18,
@@ -307,7 +330,7 @@ const styles = StyleSheet.create({
   dividerLine: { flex: 1, height: 1, backgroundColor: Colors.border.light },
   dividerText: {
     color: Colors.text.tertiary,
-    fontSize: 11,
+    fontSize: Typography.sizes.xs,
     letterSpacing: 2,
     fontFamily: Typography.labelFontFamilies.semibold,
   },

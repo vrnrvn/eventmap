@@ -7,7 +7,6 @@ import {
   Dimensions,
   TouchableOpacity,
   Platform,
-  Alert,
   ActivityIndicator,
   Image,
   ScrollView,
@@ -22,6 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { notify } from '@/utils/notify';
 import * as Location from 'expo-location';
 import {
   Compass,
@@ -47,7 +47,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { onboardingLocationStore } from '@/stores/onboardingLocationStore';
 import { Category, Profile } from '@/types/database';
 import { getCategoryColor } from '@/constants/categories';
-import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { Avatar } from '@/components/Avatar';
 import { AvatarRing } from '@/components/AvatarRing';
 import { CategoryIcon } from '@/components/CategoryIcon';
@@ -79,12 +79,12 @@ const Palette = {
   gradientDeep: Colors.primaryDark,
   cardBg: Colors.background.primary,
   surfaceMuted: Colors.background.primary,
-  accentSoft: 'rgba(196, 92, 62, 0.12)',
+  accentSoft: Colors.primarySoft,
   textOnGradient: Colors.text.inverse,
-  textOnGradientMuted: 'rgba(250, 248, 245, 0.7)',
+  textOnGradientMuted: alpha(Colors.surface, 0.7),
   separator: Colors.border.light,
   successGreen: Colors.success,
-  successBg: 'rgba(45, 138, 110, 0.12)',
+  successBg: Colors.successSoft,
 };
 
 type Insets = { top: number; bottom: number };
@@ -122,6 +122,7 @@ export default function OnboardingScreen() {
   const [currentPage, setCurrentPage] = useState(0);
 
   const [categories, setCategories] = useState<Category[]>([]);
+  const [categoriesStatus, setCategoriesStatus] = useState<'loading' | 'error' | 'loaded'>('loading');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [name, setName] = useState('');
   const [bio, setBio] = useState('');
@@ -146,9 +147,31 @@ export default function OnboardingScreen() {
   const signupName =
     (user?.user_metadata as { name?: string } | undefined)?.name?.trim() || '';
 
-  useEffect(() => {
-    categoriesService.getAllCategories().then(setCategories).catch(() => setCategories([]));
+  const loadCategories = useCallback(() => {
+    setCategoriesStatus('loading');
+    categoriesService
+      .getAllCategories()
+      .then((cats) => {
+        setCategories(cats);
+        setCategoriesStatus('loaded');
+      })
+      .catch(() => setCategoriesStatus('error'));
   }, []);
+
+  useEffect(() => {
+    loadCategories();
+  }, [loadCategories]);
+
+  // Ensure the profile row exists before any per-step UPDATE. Signups created
+  // outside the OAuth path can lack a row, which would make every onboarding
+  // write a silent no-op and loop onboarding forever.
+  useEffect(() => {
+    if (!user) return;
+    profilesService.ensureProfileExists(user.id, signupName).catch((err) => {
+      console.error('ensureProfileExists failed:', err);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   // ---- Hydrate: server profile first, then local draft on top ---------------
   useEffect(() => {
@@ -158,6 +181,10 @@ export default function OnboardingScreen() {
       setHydrated(true);
       return;
     }
+    // Wait for the profile to load before hydrating: setting hydrated while
+    // `profile` is still null would lock in defaults, and completing
+    // onboarding would then overwrite the user's real preferences.
+    if (profile === null) return;
     let cancelled = false;
     (async () => {
       const p: Profile | null = profile;
@@ -224,7 +251,7 @@ export default function OnboardingScreen() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, hydrated]);
+  }, [user?.id, hydrated, profile]);
 
   // ---- Persist draft (debounced) --------------------------------------------
   const draft = useMemo<Draft>(
@@ -292,7 +319,7 @@ export default function OnboardingScreen() {
         await profilesService.updateProfile(user.id, updates);
         return true;
       } catch (err: unknown) {
-        Alert.alert('Could not save', err instanceof Error ? err.message : failureMessage);
+        notify.error(err instanceof Error ? err.message : failureMessage);
         return false;
       } finally {
         setSavingStep(false);
@@ -340,7 +367,7 @@ export default function OnboardingScreen() {
       setAvatarUrl(publicUrl);
       successHaptic();
     } catch {
-      Alert.alert('Upload failed', 'Could not upload that photo. You can add one later from your profile.');
+      notify.error('Could not upload that photo. You can add one later from your profile.');
     } finally {
       setUploadingAvatar(false);
     }
@@ -407,10 +434,10 @@ export default function OnboardingScreen() {
         const geo = await geocodingService.reverseGeocode(coords.lat, coords.lng);
         if (geo) setUserCity(geo.formattedAddress);
       } else {
-        Alert.alert('Permission denied', 'You can enable location later in Settings.');
+        notify.error('Location permission denied. You can enable it later in Settings.');
       }
     } catch {
-      Alert.alert('Error', 'Could not get location. You can enable it later in Settings.');
+      notify.error('Could not get location. You can enable it later in Settings.');
     }
   };
 
@@ -421,7 +448,7 @@ export default function OnboardingScreen() {
       setNotificationGranted(status === 'granted');
       if (status === 'granted') tapHaptic();
       if (status !== 'granted') {
-        Alert.alert('Permission denied', 'You can enable notifications later in Settings.');
+        notify.error('Notification permission denied. You can enable it later in Settings.');
       }
     } catch {
       setNotificationGranted(false);
@@ -460,7 +487,7 @@ export default function OnboardingScreen() {
       successHaptic();
       router.replace('/(tabs)/discover');
     } catch (err: unknown) {
-      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to save preferences');
+      notify.error(err instanceof Error ? err.message : 'Failed to save preferences');
     } finally {
       setCompleting(false);
     }
@@ -499,6 +526,8 @@ export default function OnboardingScreen() {
           <CategoriesPage
             {...shellProps}
             categories={categories}
+            categoriesStatus={categoriesStatus}
+            onRetryCategories={loadCategories}
             selectedCategories={selectedCategories}
             onToggle={toggleCategory}
             onNext={handleCategoriesContinue}
@@ -776,7 +805,7 @@ function WelcomePage({
             text="Join, save, and chat with attendees"
           />
           <WelcomeFeature
-            icon={<MapPin size={20} color="#F59E0B" />}
+            icon={<MapPin size={20} color={Colors.warning} />}
             text="Navigate with the map"
           />
         </View>
@@ -946,6 +975,8 @@ function ProfilePage({
 
 function CategoriesPage({
   categories,
+  categoriesStatus,
+  onRetryCategories,
   selectedCategories,
   onToggle,
   onNext,
@@ -953,6 +984,8 @@ function CategoriesPage({
   ...shell
 }: ShellProps & {
   categories: Category[];
+  categoriesStatus: 'loading' | 'error' | 'loaded';
+  onRetryCategories: () => void;
   selectedCategories: string[];
   onToggle: (id: string) => void;
   onNext: () => void;
@@ -964,17 +997,31 @@ function CategoriesPage({
       {...shell}
       onSkip={onSkip}
       title="What interests you?"
-      subtitle="Pick a few so Discover leads with events you'll actually want to go to."
+      subtitle="Pick a few so Discover leads with events you'll actually want to go to. This step is optional."
       footer={
         <PrimaryButton
-          label={none ? 'Pick at least one' : 'Continue'}
+          label={none ? 'Continue without' : 'Continue'}
           onPress={onNext}
-          disabled={none}
           loading={shell.saving}
         />
       }
     >
-      {categories.length === 0 ? (
+      {categoriesStatus === 'error' ? (
+        <View style={styles.categoriesError}>
+          <Text style={styles.categoriesErrorText}>
+            Couldn&apos;t load interests. Check your connection and try again.
+          </Text>
+          <TouchableOpacity
+            style={styles.categoriesRetryBtn}
+            onPress={onRetryCategories}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading interests"
+          >
+            <Text style={styles.categoriesRetryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : categoriesStatus === 'loading' ? (
         <ActivityIndicator color={Colors.primary} style={{ marginTop: 24 }} />
       ) : (
         <View style={styles.categoriesGrid}>
@@ -1309,7 +1356,7 @@ function PrivacyRow({
           onChange(v);
         }}
         disabled={disabled}
-        trackColor={{ false: Colors.border.medium, true: Colors.primary + '80' }}
+        trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
         thumbColor={effective ? Colors.primary : Colors.background.secondary}
         accessibilityLabel={title}
       />
@@ -1353,7 +1400,7 @@ function TutorialPage({
           description="Open the event card, join, save, or share it."
         />
         <TutorialCard
-          icon={<ArrowUpFromLine size={28} color="#F59E0B" />}
+          icon={<ArrowUpFromLine size={28} color={Colors.warning} />}
           title="Pull up the list"
           description="Drag the bottom panel up to browse everything in view."
         />
@@ -1725,6 +1772,31 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
+  },
+  categoriesError: {
+    marginTop: 24,
+    alignItems: 'center',
+    gap: 14,
+  },
+  categoriesErrorText: {
+    fontSize: Typography.sizes.md,
+    color: Colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  categoriesRetryBtn: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: Palette.accentSoft,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+  },
+  categoriesRetryText: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.primary,
   },
   selectedCount: {
     marginTop: 16,

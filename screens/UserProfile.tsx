@@ -12,16 +12,19 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ban, Flag } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
+import { complaintsService } from '@/services/complaints';
+import { notify, notifyConfirm } from '@/utils/notify';
 import { profilesService } from '@/services/profiles';
 import { socialService } from '@/services/social';
 import { Profile, RankedEvent } from '@/types/database';
-import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { Avatar } from '@/components/Avatar';
 import { EventCardCarousel } from '@/components/EventCardCarousel';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { getCategoryIconColor } from '@/constants/categoryIcons';
-import { ArrowLeft } from 'lucide-react-native';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { FacebookIcon, InstagramIcon } from '@/components/icons/BrandIcons';
 
@@ -60,13 +63,18 @@ export default function UserProfile() {
   const [isPrivate, setIsPrivate] = useState(false);
   const [upcomingEvents, setUpcomingEvents] = useState<RankedEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+  const [blockBusy, setBlockBusy] = useState(false);
 
   const isOwnProfile = user?.id === id;
 
   const load = useCallback(async () => {
     if (!id) return;
     try {
+      setLoadError(false);
       if (isOwnProfile) {
         const [p, events] = await Promise.all([
           profilesService.getProfile(id),
@@ -76,7 +84,13 @@ export default function UserProfile() {
         setIsPrivate(false);
         setUpcomingEvents(events);
       } else {
-        const result = await profilesService.getPublicProfile(id);
+        const [result, isBlockedResult] = await Promise.all([
+          profilesService.getPublicProfile(id),
+          // Best-effort: blocking is NOT_AVAILABLE until migration
+          // 20261030111000 is applied — treat any failure as "not blocked".
+          socialService.isBlocked(id).catch(() => false),
+        ]);
+        setBlocked(isBlockedResult);
         if (!result) {
           setProfile(null);
           setIsPrivate(false);
@@ -99,9 +113,12 @@ export default function UserProfile() {
         }
       }
     } catch {
+      // Fetch failure (network/server) — not a missing profile. Surface an
+      // error state with Retry instead of a misleading "Profile not found".
       setProfile(null);
       setIsPrivate(false);
       setUpcomingEvents([]);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -121,6 +138,101 @@ export default function UserProfile() {
 
   const socialHandles = (profile?.social_handles as { instagram?: string; facebook?: string } | null) ?? {};
 
+  const handleReportUser = useCallback(() => {
+    if (!id || reportSubmitting) return;
+    notifyConfirm({
+      title: 'Report user',
+      message: 'Report this user for inappropriate content or behavior? Our team reviews reports within about 48 hours.',
+      confirmLabel: 'Report',
+      destructive: true,
+      onConfirm: () => {
+        void (async () => {
+          setReportSubmitting(true);
+          try {
+            await complaintsService.createComplaint('user', id, 'Reported from profile');
+            notify.success('Thanks for your report. We will review it shortly.');
+          } catch (err) {
+            // Unique violation: this user was already reported by this account.
+            if ((err as { code?: string } | null)?.code === '23505') {
+              notify.success('You have already reported this user. Our team is on it.');
+            } else {
+              notify.error('Failed to submit report. Please try again.');
+            }
+          } finally {
+            setReportSubmitting(false);
+          }
+        })();
+      },
+    });
+  }, [id, reportSubmitting]);
+
+  const handleToggleBlock = useCallback(() => {
+    if (!id || blockBusy) return;
+    const blocking = !blocked;
+    notifyConfirm({
+      title: blocking ? 'Block user' : 'Unblock user',
+      message: blocking
+        ? 'Block this user? They will not be notified. You can unblock them from their profile at any time.'
+        : 'Unblock this user?',
+      confirmLabel: blocking ? 'Block' : 'Unblock',
+      destructive: blocking,
+      onConfirm: () => {
+        void (async () => {
+          setBlockBusy(true);
+          try {
+            if (blocking) {
+              await socialService.blockUser(id);
+            } else {
+              await socialService.unblockUser(id);
+            }
+            setBlocked(blocking);
+            notify.success(blocking ? 'User blocked.' : 'User unblocked.');
+          } catch (err) {
+            if ((err as { code?: string } | null)?.code === 'NOT_AVAILABLE') {
+              notify.error("Blocking isn't enabled on this server yet.");
+            } else {
+              notify.error(
+                blocking
+                  ? 'Failed to block user. Please try again.'
+                  : 'Failed to unblock user. Please try again.'
+              );
+            }
+          } finally {
+            setBlockBusy(false);
+          }
+        })();
+      },
+    });
+  }, [id, blocked, blockBusy]);
+
+  const headerActions =
+    user && !isOwnProfile ? (
+      <View style={styles.headerActions}>
+        <TouchableOpacity
+          onPress={handleToggleBlock}
+          disabled={blockBusy}
+          style={styles.reportBtn}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel={blocked ? 'Unblock user' : 'Block user'}
+          activeOpacity={0.7}
+        >
+          <Ban size={20} color={blocked ? Colors.error : Colors.text.tertiary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={handleReportUser}
+          disabled={reportSubmitting}
+          style={styles.reportBtn}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel="Report user"
+          activeOpacity={0.7}
+        >
+          <Flag size={20} color={Colors.text.tertiary} />
+        </TouchableOpacity>
+      </View>
+    ) : undefined;
+
   if (loading) {
     return (
       <View style={[styles.center, { paddingTop: insets.top }]}>
@@ -132,15 +244,7 @@ export default function UserProfile() {
   if (isPrivate) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backBtn}
-            onPress={() => router.back()}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <ArrowLeft size={24} color={Colors.text.primary} />
-          </TouchableOpacity>
-        </View>
+        <ScreenHeader title="Profile" safeArea={false} />
         <View style={styles.privateState}>
           <View style={styles.privateIconWrap}>
             <Avatar imageUrl={null} name="?" size={80} />
@@ -154,18 +258,35 @@ export default function UserProfile() {
     );
   }
 
+  if (loadError) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <ScreenHeader title="Profile" safeArea={false} />
+        <View style={styles.center}>
+          <Text style={styles.errorText}>
+            Couldn&apos;t load this profile. Check your connection and try again.
+          </Text>
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={() => {
+              setLoading(true);
+              load();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Retry loading profile"
+            activeOpacity={0.8}
+          >
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   if (!profile) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backBtn}
-            onPress={() => router.back()}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <ArrowLeft size={24} color={Colors.text.primary} />
-          </TouchableOpacity>
-        </View>
+        <ScreenHeader title="Profile" safeArea={false} />
         <View style={styles.center}>
           <Text style={styles.errorText}>Profile not found</Text>
         </View>
@@ -175,15 +296,7 @@ export default function UserProfile() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => router.back()}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <ArrowLeft size={24} color={Colors.text.primary} />
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader title="Profile" safeArea={false} right={headerActions} />
 
       <ScrollView
         style={styles.scroll}
@@ -193,6 +306,22 @@ export default function UserProfile() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
         }
       >
+        {blocked ? (
+          <View style={styles.blockedBanner}>
+            <Ban size={16} color={Colors.error} />
+            <Text style={styles.blockedBannerText}>You&apos;ve blocked this user.</Text>
+            <TouchableOpacity
+              onPress={handleToggleBlock}
+              disabled={blockBusy}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Unblock user"
+            >
+              <Text style={styles.blockedBannerAction}>Unblock</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         <View style={styles.hero}>
           <Avatar imageUrl={profile.avatar_url} name={profile.name} size={100} />
           <Text style={styles.name}>{profile.name}</Text>
@@ -293,15 +422,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  backBtn: {
-    padding: Spacing.xs,
   },
   scroll: {
     flex: 1,
@@ -447,5 +567,55 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: Typography.sizes.md,
     color: Colors.text.secondary,
+    textAlign: 'center',
+    paddingHorizontal: Spacing.xl,
+  },
+  retryBtn: {
+    marginTop: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.primarySoft,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retryText: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.primary,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  reportBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  blockedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginHorizontal: Spacing.xl,
+    marginBottom: Spacing.lg,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md,
+    backgroundColor: alpha(Colors.error, 0.08),
+  },
+  blockedBannerText: {
+    flex: 1,
+    fontSize: Typography.sizes.sm,
+    color: Colors.text.secondary,
+  },
+  blockedBannerAction: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.error,
   },
 });

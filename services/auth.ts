@@ -4,7 +4,7 @@ import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import { supabase } from './supabase';
-import { getAuthRedirectUrl } from './authRedirect';
+import { getAuthRedirectUrl, getAuthEmailRedirectUrl } from './authRedirect';
 import { oauthEnabled } from './runtime';
 
 const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim() || '';
@@ -97,6 +97,16 @@ export const authService = {
 
     if (errorCode) throw new Error(errorCode);
 
+    // PKCE flow: the redirect carries a one-time `?code=`.
+    if (params.code) {
+      const { data: sessionData, error: exchangeError } =
+        await supabase.auth.exchangeCodeForSession(params.code);
+      if (exchangeError) throw exchangeError;
+      return sessionData;
+    }
+
+    // TODO-remove: legacy implicit-flow fallback (tokens in the fragment),
+    // kept for redirects issued before the PKCE switch.
     const { access_token, refresh_token } = params;
 
     if (!access_token) throw new Error('No access token in redirect');
@@ -114,6 +124,7 @@ export const authService = {
       password,
       options: {
         data: { name },
+        emailRedirectTo: getAuthEmailRedirectUrl(),
       },
     });
 
@@ -133,13 +144,36 @@ export const authService = {
     return data;
   },
 
+  /**
+   * Best-effort sign-out: the server-side token revoke can fail offline, but
+   * the local session must always be cleared so the user is never stranded
+   * signed-in. Never throws.
+   */
   async signOut() {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+    } catch (err) {
+      console.error(
+        'Sign-out revoke failed; clearing local session:',
+        err instanceof Error ? err.message : err
+      );
+      try {
+        await supabase.auth.signOut({ scope: 'local' });
+      } catch {
+        // Local storage cleanup failed too; AuthContext still clears in-memory state.
+      }
+    }
   },
 
   async resetPassword(email: string) {
-    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    // The recovery link redirects to the auth callback carrying a PKCE
+    // `?code=`; AuthRedirectHandler exchanges it and routes to reset-password
+    // via the PASSWORD_RECOVERY auth event (legacy fragment links use
+    // `type=recovery`).
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: getAuthEmailRedirectUrl(),
+    });
     if (error) throw error;
   },
 
@@ -147,6 +181,19 @@ export const authService = {
     const { error } = await supabase.auth.updateUser({
       password: newPassword,
     });
+    if (error) throw error;
+  },
+
+  /**
+   * Starts an email change. Supabase sends a confirmation email to the new
+   * address (and, depending on config, the old one); the change applies only
+   * after confirmation.
+   */
+  async updateEmail(newEmail: string) {
+    const { error } = await supabase.auth.updateUser(
+      { email: newEmail },
+      { emailRedirectTo: getAuthEmailRedirectUrl() }
+    );
     if (error) throw error;
   },
 

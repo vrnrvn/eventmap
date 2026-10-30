@@ -13,18 +13,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { businessesService } from '@/services/businesses';
 import { useApp } from '@/contexts/AppContext';
-import { Colors, Typography } from '@/constants/theme';
-import { ArrowLeft, Users } from 'lucide-react-native';
+import { alpha, Colors, Typography } from '@/constants/theme';
+import { ArrowLeft, ChevronRight, Users } from 'lucide-react-native';
 import { Avatar } from '@/components/Avatar';
-
-const Palette = {
-  gradientStart: Colors.secondary,
-  gradientEnd: Colors.secondaryLight,
-  cardBg: Colors.background.primary,
-  surfaceMuted: Colors.background.primary,
-  accentSoft: 'rgba(13, 79, 79, 0.12)',
-  separator: Colors.border.light,
-};
 
 type Follower = {
   id: string;
@@ -83,6 +74,9 @@ export default function Followers() {
             style={styles.backBtn}
             onPress={() => router.back()}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <ArrowLeft size={22} color={Colors.text.primary} />
           </TouchableOpacity>
@@ -103,12 +97,15 @@ export default function Followers() {
           style={styles.backBtn}
           onPress={() => router.back()}
           activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <ArrowLeft size={22} color={Colors.text.primary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <View style={styles.headerIconWrap}>
-            <Users size={18} color={Palette.gradientStart} />
+            <Users size={18} color={Colors.secondary} />
           </View>
           <View>
             <Text style={styles.headerTitle}>Followers</Text>
@@ -125,11 +122,11 @@ export default function Followers() {
       {loading ? (
         <View style={styles.centerContainer}>
           <View style={styles.loadingIconWrap}>
-            <Users size={28} color={Palette.gradientStart} />
+            <Users size={28} color={Colors.secondary} />
           </View>
           <ActivityIndicator
             size="large"
-            color={Palette.gradientStart}
+            color={Colors.secondary}
             style={{ marginTop: 20 }}
           />
           <Text style={styles.loadingText}>Loading followers…</Text>
@@ -147,15 +144,15 @@ export default function Followers() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor={Palette.gradientStart}
-              colors={[Palette.gradientStart]}
+              tintColor={Colors.secondary}
+              colors={[Colors.secondary]}
             />
           }
         >
           {followers.length === 0 ? (
             <View style={styles.emptyContainer}>
               <View style={styles.emptyIconWrap}>
-                <Users size={36} color={Palette.gradientStart} />
+                <Users size={36} color={Colors.secondary} />
               </View>
               <Text style={styles.emptyTitle}>No Followers Yet</Text>
               <Text style={styles.emptySubtitle}>
@@ -163,23 +160,44 @@ export default function Followers() {
               </Text>
             </View>
           ) : (
-            followers.map((follower) => (
-              <View key={follower.id} style={styles.followerCard}>
-                <Avatar
-                  imageUrl={follower.profile?.avatar_url}
-                  name={follower.profile?.name || 'User'}
-                  size={48}
-                />
-                <View style={styles.followerInfo}>
-                  <Text style={styles.followerName} numberOfLines={1}>
-                    {follower.profile?.name || 'User'}
-                  </Text>
-                  <Text style={styles.followerDate}>
-                    Following since {formatDate(follower.created_at)}
-                  </Text>
-                </View>
-              </View>
-            ))
+            followers.map((follower) => {
+              // Rows come straight from the follows table, so user_id should
+              // always exist — but guard anyway so a malformed row renders as
+              // a non-tappable card instead of navigating to a broken profile.
+              const canOpenProfile = !!follower.user_id;
+              return (
+                <TouchableOpacity
+                  key={follower.id}
+                  style={styles.followerCard}
+                  onPress={
+                    canOpenProfile
+                      ? () => router.push(`/user/${follower.user_id}` as never)
+                      : undefined
+                  }
+                  disabled={!canOpenProfile}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View ${follower.profile?.name || 'User'}'s profile`}
+                >
+                  <Avatar
+                    imageUrl={follower.profile?.avatar_url}
+                    name={follower.profile?.name || 'User'}
+                    size={48}
+                  />
+                  <View style={styles.followerInfo}>
+                    <Text style={styles.followerName} numberOfLines={1}>
+                      {follower.profile?.name || 'User'}
+                    </Text>
+                    <Text style={styles.followerDate}>
+                      Following since {formatDate(follower.created_at)}
+                    </Text>
+                  </View>
+                  {canOpenProfile ? (
+                    <ChevronRight size={20} color={Colors.text.tertiary} />
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })
           )}
         </ScrollView>
       )}
@@ -190,7 +208,7 @@ export default function Followers() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Palette.surfaceMuted,
+    backgroundColor: Colors.background.primary,
   },
   header: {
     flexDirection: 'row',
@@ -198,15 +216,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: Palette.cardBg,
+    backgroundColor: Colors.background.primary,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Palette.separator,
+    borderBottomColor: Colors.border.light,
   },
   backBtn: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: Palette.surfaceMuted,
+    backgroundColor: Colors.background.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -219,7 +237,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 12,
-    backgroundColor: Palette.accentSoft,
+    backgroundColor: alpha(Colors.secondary, 0.12),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -248,7 +266,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 20,
-    backgroundColor: Palette.accentSoft,
+    backgroundColor: alpha(Colors.secondary, 0.12),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -278,7 +296,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 24,
-    backgroundColor: Palette.accentSoft,
+    backgroundColor: alpha(Colors.secondary, 0.12),
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
@@ -300,7 +318,7 @@ const styles = StyleSheet.create({
   followerCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Palette.cardBg,
+    backgroundColor: Colors.background.primary,
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,

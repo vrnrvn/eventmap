@@ -6,18 +6,18 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import {
-  ArrowLeft,
   Crown,
   Check,
   Sparkles,
 } from 'lucide-react-native';
 import { usePremium } from '@/contexts/PremiumContext';
+import { notify } from '@/utils/notify';
+import { Button } from '@/components/ui/Button';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { useApp } from '@/contexts/AppContext';
 import { premiumService, PremiumPlan } from '@/services/premium';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
@@ -25,18 +25,15 @@ import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/
 const Palette = {
   gradientStart: Colors.primary,
   gradientEnd: Colors.accent,
-  cardBg: Colors.background.primary,
+  cardBg: Colors.surface,
   surface: Colors.background.primary,
-  accentSoft: 'rgba(196, 92, 62, 0.08)',
+  accentSoft: Colors.primarySoft,
   separator: Colors.border.light,
   premiumGold: Colors.accent,
-  premiumGoldSoft: 'rgba(232, 168, 56, 0.10)',
+  premiumGoldSoft: Colors.warningSoft,
   success: Colors.success,
-  successSoft: 'rgba(45, 138, 110, 0.08)',
+  successSoft: Colors.successSoft,
 };
-
-const PRO_MONTHLY = 699;
-const PRO_YEARLY = 6999;
 
 export default function PremiumPlansScreen() {
   const insets = useSafeAreaInsets();
@@ -62,7 +59,7 @@ export default function PremiumPlansScreen() {
       setSubscribingPlanId(plan.id);
       try {
         if (!userBusiness?.id) {
-          Alert.alert('Error', 'Please create a business profile first.');
+          notify.error('Please create a business profile first.');
           return;
         }
         const { success } = await premiumService.subscribeToPlan(
@@ -77,6 +74,7 @@ export default function PremiumPlansScreen() {
         }
       } catch (err) {
         console.error('Failed to subscribe:', err);
+        notify.error('We could not activate your plan. Please try again.');
       } finally {
         setSubscribingPlanId(null);
       }
@@ -84,11 +82,14 @@ export default function PremiumPlansScreen() {
     [billingCycle, refreshBusiness, refreshSubscription, subscribingPlanId, userBusiness]
   );
 
-  const price = billingCycle === 'monthly' ? PRO_MONTHLY : PRO_YEARLY;
-  const savingsPercent = Math.round(
-    ((PRO_MONTHLY * 12 - PRO_YEARLY) / (PRO_MONTHLY * 12)) * 100
-  );
-  const monthlyEquivalent = (PRO_YEARLY / 100 / 12).toFixed(2);
+  const proMonthly = proPlan?.price_monthly ?? 0;
+  const proYearly = proPlan?.price_yearly ?? 0;
+  const price = billingCycle === 'monthly' ? proMonthly : proYearly;
+  const savingsPercent =
+    proMonthly > 0
+      ? Math.round(((proMonthly * 12 - proYearly) / (proMonthly * 12)) * 100)
+      : 0;
+  const monthlyEquivalent = (proYearly / 100 / 12).toFixed(2);
 
   const fmt = (cents: number) =>
     cents === 0 ? 'Free' : `$${(cents / 100).toFixed(2)}`;
@@ -106,11 +107,7 @@ export default function PremiumPlansScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* ── Nav ── */}
-      <View style={styles.nav}>
-        <TouchableOpacity onPress={() => router.back()} activeOpacity={0.7}>
-          <ArrowLeft size={22} color={Colors.text.primary} />
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader title="Premium" safeArea={false} />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -137,7 +134,7 @@ export default function PremiumPlansScreen() {
               </Text>
               <Text style={styles.bannerSub}>
                 {subscription.current_period_end
-                  ? `Renews ${new Date(subscription.current_period_end).toLocaleDateString()}`
+                  ? `Expires ${new Date(subscription.current_period_end).toLocaleDateString()}`
                   : 'Active subscription'}
               </Text>
             </View>
@@ -219,27 +216,15 @@ export default function PremiumPlansScreen() {
                 <Text style={styles.currentBtnText}>Current Plan</Text>
               </View>
             ) : (
-              <TouchableOpacity
-                style={styles.cta}
+              <Button
+                label="Get Pro"
                 onPress={() => handleSubscribe(proPlan)}
+                loading={subscribingPlanId === proPlan.id}
                 disabled={!!subscribingPlanId}
-                activeOpacity={0.85}
-              >
-                {subscribingPlanId === proPlan.id ? (
-                  <View style={styles.ctaInner}>
-                    <ActivityIndicator size="small" color="#FFF" />
-                  </View>
-                ) : (
-                  <LinearGradient
-                    colors={[Palette.gradientStart, Palette.gradientEnd]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.ctaInner}
-                  >
-                    <Text style={styles.ctaText}>Get Pro</Text>
-                  </LinearGradient>
-                )}
-              </TouchableOpacity>
+                size="md"
+                fullWidth
+                gradient
+              />
             )}
           </View>
         )}
@@ -250,7 +235,7 @@ export default function PremiumPlansScreen() {
             <View style={styles.freeHeader}>
               <View>
                 <Text style={styles.freeName}>Free</Text>
-                <Text style={styles.freePrice}>\$0</Text>
+                <Text style={styles.freePrice}>$0</Text>
               </View>
               {currentPlanSlug === 'free' && (
                 <View style={styles.freeBadge}>
@@ -273,7 +258,8 @@ export default function PremiumPlansScreen() {
         {/* ── Footer ── */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            14-day free trial included. Cancel anytime.
+            Simulated checkout — no payment is collected. Cancel anytime from
+            Manage Subscription.
           </Text>
           <Text style={styles.footerText}>
             Questions? support@eventmap.com
@@ -316,7 +302,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   heroTitle: {
-    fontSize: 28,
+    fontSize: Typography.sizes.xl,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
@@ -432,7 +418,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   proBadgeText: {
-    fontSize: 11,
+    fontSize: Typography.sizes.xs,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: '#FFF',
@@ -489,19 +475,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 
-  /* cta */
-  cta: { borderRadius: BorderRadius.lg, overflow: 'hidden' },
-  ctaInner: {
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderRadius: BorderRadius.lg,
-  },
-  ctaText: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: '#FFF',
-  },
   currentBtn: {
     flexDirection: 'row',
     alignItems: 'center',
