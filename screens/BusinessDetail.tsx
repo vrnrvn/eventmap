@@ -27,6 +27,7 @@ import { getCategorySlug } from '@/constants/categoryIcons';
 import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ReviewCard } from '@/components/ReviewCard';
 import { GoogleMapView } from '@/components/GoogleMapView';
+import { DeferredMount } from '@/components/DeferredMount';
 import { EventCardCarousel } from '@/components/EventCardCarousel';
 import {
   ArrowLeft,
@@ -320,22 +321,25 @@ export default function BusinessDetail() {
             <Text style={styles.addressText}>{business.address}</Text>
           </View>
           <View style={styles.mapContainer}>
-            <GoogleMapView
-              center={{ lat: business.lat, lng: business.lng }}
-              zoom={15}
-              mapGesturesEnabled={false}
-              webViewScrollEnabled={false}
-              nestedScrollEnabled={false}
-              markers={[
-                {
-                  id: business.id,
-                  lat: business.lat,
-                  lng: business.lng,
-                  title: business.name,
-                  categorySlug: getCategorySlug(business.category) ?? undefined,
-                },
-              ]}
-            />
+            {/* Below the fold — don't build the map WebView mid-transition. */}
+            <DeferredMount style={styles.mapFill}>
+              <GoogleMapView
+                center={{ lat: business.lat, lng: business.lng }}
+                zoom={15}
+                mapGesturesEnabled={false}
+                webViewScrollEnabled={false}
+                nestedScrollEnabled={false}
+                markers={[
+                  {
+                    id: business.id,
+                    lat: business.lat,
+                    lng: business.lng,
+                    title: business.name,
+                    categorySlug: getCategorySlug(business.category) ?? undefined,
+                  },
+                ]}
+              />
+            </DeferredMount>
           </View>
           {photos.length > 0 && (
             <View style={styles.venueCarouselWrap}>
@@ -651,6 +655,10 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.lg,
     overflow: 'hidden',
     backgroundColor: Colors.background.secondary,
+  },
+  /** Keeps the deferred wrapper filling the map slot so there's no layout shift. */
+  mapFill: {
+    flex: 1,
   },
   linkRow: {
     flexDirection: 'row',

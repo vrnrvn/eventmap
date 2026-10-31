@@ -59,12 +59,22 @@ export function AddressSearchInput({
   const [suggestions, setSuggestions] = useState<AutocompletePrediction[]>([]);
   const [suggestionsVisible, setSuggestionsVisible] = useState(false);
   const [settingLocation, setSettingLocation] = useState(false);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectingRef = useRef(false);
+  // Monotonic guard: a slow response for "san" must not land after — and
+  // overwrite — a newer one for "san francisco".
+  const requestIdRef = useRef(0);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      // In-flight requests check mountedRef before setting state.
+      mountedRef.current = false;
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
     };
   }, []);
 
@@ -76,19 +86,31 @@ export function AddressSearchInput({
   const fetchSuggestions = useCallback(
     async (query: string) => {
       if (!query.trim()) {
+        requestIdRef.current++;
         setSuggestions([]);
         setSuggestionsVisible(false);
+        setLoadingSuggestions(false);
         return;
       }
+      const requestId = ++requestIdRef.current;
+      setLoadingSuggestions(true);
       try {
         const results = await placesService.autocomplete(query, autocompleteOpts);
+        if (requestId !== requestIdRef.current || !mountedRef.current) return;
         setSuggestions(results);
         setSuggestionsVisible(results.length > 0);
       } catch {
+        if (requestId !== requestIdRef.current || !mountedRef.current) return;
         setSuggestions([]);
         setSuggestionsVisible(false);
+      } finally {
+        if (requestId === requestIdRef.current && mountedRef.current) {
+          setLoadingSuggestions(false);
+        }
       }
     },
+    // autocompleteOpts is derived from addressPrecision, so this is complete.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [addressPrecision]
   );
 
@@ -173,20 +195,31 @@ export function AddressSearchInput({
               onChangeText={handleInputChange}
               onFocus={() => value.trim() && fetchSuggestions(value)}
               onBlur={() => {
-                setTimeout(() => {
-                  if (!selectingRef.current) setSuggestionsVisible(false);
+                if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+                // Delay so a tap on a suggestion lands before the list closes.
+                blurTimerRef.current = setTimeout(() => {
+                  blurTimerRef.current = null;
+                  if (!selectingRef.current && mountedRef.current) setSuggestionsVisible(false);
                 }, 300);
               }}
             />
-            {showClearButton && value ? (
+            {loadingSuggestions ? (
+              <View style={styles.inlineSpinner} pointerEvents="none">
+                <ActivityIndicator size="small" color={Colors.text.tertiary} />
+              </View>
+            ) : showClearButton && value ? (
               <TouchableOpacity
                 style={styles.clearBtn}
                 onPress={() => {
+                  requestIdRef.current++;
                   onChangeText('');
                   setSuggestions([]);
                   setSuggestionsVisible(false);
+                  setLoadingSuggestions(false);
                 }}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search"
               >
                 <X size={18} color={Colors.text.tertiary} />
               </TouchableOpacity>
@@ -206,7 +239,10 @@ export function AddressSearchInput({
                   style={styles.suggestionItem}
                   onPress={() => handleSelectSuggestion(item)}
                   activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={item.description}
                 >
+                  <MapPin size={16} color={Colors.text.tertiary} />
                   <Text style={styles.suggestionText} numberOfLines={2}>
                     {item.description}
                   </Text>
@@ -289,7 +325,7 @@ const styles = StyleSheet.create({
     top: '100%',
     left: 0,
     right: 0,
-    maxHeight: 200,
+    maxHeight: 240,
     backgroundColor: Colors.background.primary,
     borderRadius: BorderRadius.md,
     marginTop: Spacing.xs,
@@ -297,14 +333,26 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
+    paddingVertical: Spacing.sm + 2,
+    minHeight: 48,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border.light,
   },
   suggestionText: {
+    flex: 1,
     fontSize: Typography.sizes.md,
     color: Colors.text.primary,
+  },
+  inlineSpinner: {
+    position: 'absolute',
+    right: 12,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
   },
   setButton: {
     backgroundColor: Colors.primary,

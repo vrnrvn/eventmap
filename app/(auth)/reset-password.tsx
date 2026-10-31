@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { authService } from '@/services/auth';
 import { notify } from '@/utils/notify';
+import { authErrorMessage } from '@/utils/authErrors';
 import { Button } from '@/components/ui/Button';
 import { Colors, Typography, BorderRadius, Spacing } from '@/constants/theme';
 import { ArrowLeft, Eye, EyeOff, Lock, KeyRound, LogIn } from 'lucide-react-native';
@@ -25,21 +26,43 @@ export default function ResetPasswordScreen() {
   const { mode } = useLocalSearchParams<{ mode?: string }>();
   const isChangeMode = (Array.isArray(mode) ? mode[0] : mode) === 'change';
 
+  const [currentPassword, setCurrentPassword] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showCurrent, setShowCurrent] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
   const [hasSession, setHasSession] = useState(false);
-  const [errors, setErrors] = useState<{ password?: string; confirm?: string }>({});
+  // Change mode only: false for OAuth-only accounts setting a first password.
+  const [needsCurrentPassword, setNeedsCurrentPassword] = useState(true);
+  const [errors, setErrors] = useState<{
+    current?: string;
+    password?: string;
+    confirm?: string;
+  }>({});
+  const passwordRef = useRef<TextInput>(null);
+  const confirmRef = useRef<TextInput>(null);
 
   useEffect(() => {
     let cancelled = false;
     authService
       .getSession()
-      .then((session) => {
-        if (!cancelled) setHasSession(!!session);
+      .then(async (session) => {
+        if (cancelled) return;
+        setHasSession(!!session);
+        // An OAuth-only account has no existing password to re-verify; asking
+        // for one would lock them out of setting their first.
+        if (session && isChangeMode) {
+          try {
+            const hasPassword = await authService.hasPasswordIdentity();
+            if (!cancelled) setNeedsCurrentPassword(hasPassword);
+          } catch {
+            // Can't tell — keep the stricter path rather than skipping it.
+            if (!cancelled) setNeedsCurrentPassword(true);
+          }
+        }
       })
       .catch(() => {
         if (!cancelled) setHasSession(false);
@@ -50,12 +73,23 @@ export default function ResetPasswordScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isChangeMode]);
+
+  // Recovery mode proves possession of the emailed link, so there is nothing to
+  // re-verify. Change mode has no such proof — unless the account has no
+  // password yet (OAuth-only), in which case there is none to ask for.
+  const requiresCurrentPassword = isChangeMode && needsCurrentPassword;
 
   const validate = () => {
-    const next: { password?: string; confirm?: string } = {};
+    const next: { current?: string; password?: string; confirm?: string } = {};
+    if (requiresCurrentPassword && !currentPassword) {
+      next.current = 'Current password is required';
+    }
     if (!password) next.password = 'Password is required';
     else if (password.length < 8) next.password = 'Minimum 8 characters';
+    else if (requiresCurrentPassword && password === currentPassword) {
+      next.password = 'New password must be different from the current one';
+    }
     if (confirmPassword !== password) next.confirm = 'Passwords do not match';
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -65,13 +99,22 @@ export default function ResetPasswordScreen() {
     if (!validate()) return;
     setLoading(true);
     try {
+      // Supabase's updateUser does not require the existing password, so for an
+      // already-signed-in user this re-verification is the only thing standing
+      // between someone holding an unlocked phone and an account takeover.
+      if (requiresCurrentPassword) {
+        const verified = await authService.verifyCurrentPassword(currentPassword);
+        if (!verified) {
+          setErrors({ current: 'That password is incorrect' });
+          return;
+        }
+      }
       await authService.updatePassword(password);
       notify.success(isChangeMode ? 'Password changed.' : 'Password updated. You are signed in.');
       if (isChangeMode) router.back();
       else router.replace('/');
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : 'Please try again';
-      notify.error(msg || 'Could not update password');
+      notify.error(authErrorMessage(error, 'Could not update password. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -155,16 +198,62 @@ export default function ResetPasswordScreen() {
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.fieldLabel}>New Password</Text>
+            {requiresCurrentPassword ? (
+              <>
+                <Text style={styles.fieldLabel}>Current Password</Text>
+                <View style={styles.inputShell}>
+                  <Lock size={20} color={Colors.text.tertiary} />
+                  <TextInput
+                    value={currentPassword}
+                    onChangeText={setCurrentPassword}
+                    placeholder="••••••••"
+                    placeholderTextColor={Colors.text.tertiary}
+                    secureTextEntry={!showCurrent}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    autoComplete="current-password"
+                    textContentType="password"
+                    returnKeyType="next"
+                    submitBehavior="submit"
+                    onSubmitEditing={() => passwordRef.current?.focus()}
+                    style={styles.input}
+                  />
+                  <TouchableOpacity
+                    onPress={() => setShowCurrent((v) => !v)}
+                    hitSlop={EYE_HIT_SLOP}
+                    accessibilityRole="button"
+                    accessibilityLabel={showCurrent ? 'Hide password' : 'Show password'}
+                  >
+                    {showCurrent ? (
+                      <EyeOff size={21} color={Colors.text.tertiary} />
+                    ) : (
+                      <Eye size={21} color={Colors.text.tertiary} />
+                    )}
+                  </TouchableOpacity>
+                </View>
+                {errors.current ? <Text style={styles.errorText}>{errors.current}</Text> : null}
+              </>
+            ) : null}
+
+            <Text style={[styles.fieldLabel, requiresCurrentPassword && { marginTop: 16 }]}>
+              New Password
+            </Text>
             <View style={styles.inputShell}>
               <Lock size={20} color={Colors.text.tertiary} />
               <TextInput
+                ref={passwordRef}
                 value={password}
                 onChangeText={setPassword}
                 placeholder="••••••••"
                 placeholderTextColor={Colors.text.tertiary}
                 secureTextEntry={!showPassword}
                 autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="new-password"
+                textContentType="newPassword"
+                returnKeyType="next"
+                submitBehavior="submit"
+                onSubmitEditing={() => confirmRef.current?.focus()}
                 style={styles.input}
               />
               <TouchableOpacity
@@ -186,12 +275,18 @@ export default function ResetPasswordScreen() {
             <View style={styles.inputShell}>
               <Lock size={20} color={Colors.text.tertiary} />
               <TextInput
+                ref={confirmRef}
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
                 placeholder="••••••••"
                 placeholderTextColor={Colors.text.tertiary}
                 secureTextEntry={!showConfirm}
                 autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="new-password"
+                textContentType="newPassword"
+                returnKeyType="go"
+                onSubmitEditing={handleSubmit}
                 style={styles.input}
               />
               <TouchableOpacity

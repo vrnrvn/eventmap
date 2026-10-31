@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { forwardRef, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   ScrollView,
   Image,
   TextInput,
+  type TextInputProps,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -19,6 +20,7 @@ import { ArrowLeft, Eye, EyeOff, ArrowRight } from 'lucide-react-native';
 import { GoogleIcon } from '@/components/icons/BrandIcons';
 import { oauthEnabled } from '@/services/runtime';
 import { notify } from '@/utils/notify';
+import { authErrorMessage } from '@/utils/authErrors';
 
 const EYE_HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
 
@@ -34,6 +36,9 @@ export default function SignupScreen() {
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
+  const confirmRef = useRef<TextInput>(null);
 
   const validate = () => {
     const next: Record<string, string> = {};
@@ -62,8 +67,7 @@ export default function SignupScreen() {
         router.replace({ pathname: '/(auth)/login', params: { email: trimmedEmail } });
       }
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      notify.error(msg || 'Sign up failed. Please try again.');
+      notify.error(authErrorMessage(error, 'Sign up failed. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -75,8 +79,7 @@ export default function SignupScreen() {
       await signInWithOAuth('google');
       router.replace('/');
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      notify.error(msg.includes('cancelled') ? 'Sign up was cancelled.' : msg);
+      notify.error(authErrorMessage(error, 'Google sign-up failed. Please try again.'));
     } finally {
       setOauthLoading(false);
     }
@@ -116,21 +119,54 @@ export default function SignupScreen() {
           </View>
 
           <View style={styles.card}>
-            <Field label="Full Name" value={name} onChangeText={setName} placeholder="Enter your full name" />
+            <Field
+              label="Full Name"
+              value={name}
+              onChangeText={setName}
+              placeholder="Enter your full name"
+              autoComplete="name"
+              textContentType="name"
+              autoCapitalize="words"
+              returnKeyType="next"
+              submitBehavior="submit"
+              onSubmitEditing={() => emailRef.current?.focus()}
+            />
             {errors.name ? <Text style={styles.errorText}>{errors.name}</Text> : null}
 
-            <Field label="Email Address" value={email} onChangeText={setEmail} placeholder="name@example.com" keyboardType="email-address" autoCapitalize="none" />
+            <Field
+              ref={emailRef}
+              label="Email Address"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="name@example.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              textContentType="emailAddress"
+              returnKeyType="next"
+              submitBehavior="submit"
+              onSubmitEditing={() => passwordRef.current?.focus()}
+            />
             {errors.email ? <Text style={styles.errorText}>{errors.email}</Text> : null}
 
             <View style={styles.fieldBlock}>
               <Text style={styles.fieldLabel}>Password</Text>
               <View style={styles.inputShell}>
                 <TextInput
+                  ref={passwordRef}
                   value={password}
                   onChangeText={setPassword}
                   placeholder="••••••••"
                   placeholderTextColor={Colors.text.tertiary}
                   secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="new-password"
+                  textContentType="newPassword"
+                  returnKeyType="next"
+                  submitBehavior="submit"
+                  onSubmitEditing={() => confirmRef.current?.focus()}
                   style={styles.input}
                 />
                 <TouchableOpacity
@@ -149,11 +185,18 @@ export default function SignupScreen() {
               <Text style={styles.fieldLabel}>Confirm Password</Text>
               <View style={styles.inputShell}>
                 <TextInput
+                  ref={confirmRef}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
                   placeholder="••••••••"
                   placeholderTextColor={Colors.text.tertiary}
                   secureTextEntry={!showConfirmPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="new-password"
+                  textContentType="newPassword"
+                  returnKeyType="go"
+                  onSubmitEditing={handleSignUp}
                   style={styles.input}
                 />
                 <TouchableOpacity
@@ -172,6 +215,7 @@ export default function SignupScreen() {
               label="Sign Up"
               onPress={handleSignUp}
               loading={loading}
+              disabled={oauthLoading}
               size="lg"
               fullWidth
               gradient
@@ -185,7 +229,15 @@ export default function SignupScreen() {
               <View style={styles.dividerLine} />
             </View>
 
-            <TouchableOpacity style={styles.googleBtn} onPress={handleGoogle} activeOpacity={0.85} disabled={oauthLoading}>
+            <TouchableOpacity
+              style={[styles.googleBtn, (oauthLoading || loading) && styles.googleBtnDisabled]}
+              onPress={handleGoogle}
+              activeOpacity={0.85}
+              disabled={oauthLoading || loading}
+              accessibilityRole="button"
+              accessibilityLabel="Sign up with Google"
+              accessibilityState={{ disabled: oauthLoading || loading, busy: oauthLoading }}
+            >
               <GoogleIcon size={20} />
               <Text style={styles.googleText}>{oauthLoading ? 'Signing up...' : 'Sign up with Google'}</Text>
             </TouchableOpacity>
@@ -204,41 +256,25 @@ export default function SignupScreen() {
   );
 }
 
-function Field({
-  label,
-  value,
-  onChangeText,
-  placeholder,
-  secureTextEntry,
-  keyboardType,
-  autoCapitalize,
-}: {
-  label: string;
-  value: string;
-  onChangeText: (value: string) => void;
-  placeholder: string;
-  secureTextEntry?: boolean;
-  keyboardType?: 'email-address' | 'default';
-  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
-}) {
+/** Labelled text field; forwards any TextInput prop (autofill, keyboard flow). */
+const Field = forwardRef<TextInput, { label: string } & TextInputProps>(function Field(
+  { label, ...inputProps },
+  ref
+) {
   return (
     <View style={styles.fieldBlock}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <View style={styles.inputShell}>
         <TextInput
-          value={value}
-          onChangeText={onChangeText}
-          placeholder={placeholder}
+          ref={ref}
           placeholderTextColor={Colors.text.tertiary}
-          secureTextEntry={secureTextEntry}
-          keyboardType={keyboardType}
-          autoCapitalize={autoCapitalize}
+          {...inputProps}
           style={styles.input}
         />
       </View>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background.primary },
@@ -345,6 +381,7 @@ const styles = StyleSheet.create({
     gap: 10,
     backgroundColor: '#FFFFFF',
   },
+  googleBtnDisabled: { opacity: 0.5 },
   googleText: {
     color: Colors.text.primary,
     fontSize: 16,

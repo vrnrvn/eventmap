@@ -38,10 +38,18 @@ site_url = "http://localhost:8081"
 additional_redirect_urls = ["http://localhost:8081/**", "http://127.0.0.1:8081/**", "eventmap://**", "exp://**"]
 jwt_expiry = 3600
 enable_signup = true
+# Match the 8-character minimum the client enforces on signup and reset, so
+# another client (or a direct API call) can't create a weaker password.
+minimum_password_length = 8
 
 [auth.email]
 enable_signup = true
 enable_confirmations = false
+# NOT enabling `secure_password_change` yet: GoTrue implements it as an
+# email-OTP nonce flow (client must call reauthenticate(), then pass `nonce` to
+# updateUser), so turning it on without building that flow would make every
+# password change fail. The client currently re-verifies the existing password
+# itself (authService.verifyCurrentPassword). See docs/ISSUES.md.
 
 [analytics]
 enabled = false

@@ -156,7 +156,8 @@ export default function Followers() {
               </View>
               <Text style={styles.emptyTitle}>No Followers Yet</Text>
               <Text style={styles.emptySubtitle}>
-                When people follow your business, they'll appear here. Share your events to grow your audience!
+                When people follow your business, they&apos;ll appear here. Share your events to
+                grow your audience!
               </Text>
             </View>
           ) : (

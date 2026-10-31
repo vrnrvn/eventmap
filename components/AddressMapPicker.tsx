@@ -209,6 +209,9 @@ export const AddressMapPicker = forwardRef<AddressMapPickerHandle, AddressMapPic
                     )
                   }
                   activeOpacity={0.7}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  accessibilityRole="link"
+                  accessibilityLabel="Open this location in Google Maps"
                 >
                   <Text style={styles.mapsLinkText}>Open in Google Maps</Text>
                 </TouchableOpacity>

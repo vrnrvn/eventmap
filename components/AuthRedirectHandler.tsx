@@ -6,46 +6,14 @@ import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import { router } from 'expo-router';
 import { supabase } from '@/services/supabase';
 import { notify } from '@/utils/notify';
+import { isAuthCallbackUrl, isMissingVerifierError } from '@/utils/authCallback';
 
 WebBrowser.maybeCompleteAuthSession();
 
-function isAuthCallbackUrl(url: string): boolean {
-  try {
-    // Only the dedicated auth-callback path/host may carry session tokens.
-    // Strip query/fragment before matching so token payloads can't influence it.
-    const withoutParams = url.split(/[?#]/)[0].toLowerCase();
-
-    // Web: auth emails (recovery, signup confirmation) redirect to our own
-    // origin with tokens in the fragment. Accept same-origin URLs only.
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      if (withoutParams.startsWith('http://') || withoutParams.startsWith('https://')) {
-        return new URL(url).origin === window.location.origin;
-      }
-    }
-
-    // Native universal links (app.json applinks): https://eventmap.pro/...
-    // A reset requested on web can open in the native app via the applinks
-    // domain, so accept our own production host here too.
-    if (Platform.OS !== 'web' && withoutParams.startsWith('https://')) {
-      return new URL(withoutParams).hostname === 'eventmap.pro';
-    }
-
-    // Registered scheme host (app.json): eventmap://auth-callback
-    if (withoutParams.startsWith('eventmap://')) {
-      const rest = withoutParams.slice('eventmap://'.length).replace(/\/+$/, '');
-      return rest === 'auth-callback';
-    }
-
-    // Expo dev URLs: exp://<host>:<port>/--/auth-callback
-    if (withoutParams.startsWith('exp://') || withoutParams.startsWith('exps://')) {
-      const pathPart = withoutParams.split('/--/')[1] ?? '';
-      return pathPart.replace(/\/+$/, '') === 'auth-callback';
-    }
-
-    return false;
-  } catch {
-    return false;
-  }
+/** Current page origin on web; undefined elsewhere (and during SSR/prerender). */
+function currentWebOrigin(): string | undefined {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
+  return window.location.origin;
 }
 
 /** Scrub auth params (code / token fragment) from the web address bar and history. */
@@ -55,25 +23,8 @@ function scrubWebUrl() {
   }
 }
 
-/**
- * PKCE code exchange failed because the code_verifier stored at request time
- * is missing or doesn't match — the classic symptom of opening the link on a
- * different device/browser than the one that requested it.
- * supabase-js surfaces this as an AuthApiError: GoTrue rejects with
- * error_code `bad_code_verifier` ("code challenge does not match previously
- * saved code verifier"), or — when no verifier exists locally at all — a 400
- * "invalid request: both auth code and code verifier should be non-empty".
- */
-function isMissingVerifierError(error: unknown): boolean {
-  const err = error as { code?: string; message?: string } | null;
-  if (!err) return false;
-  if (err.code === 'bad_code_verifier') return true;
-  const message = typeof err.message === 'string' ? err.message.toLowerCase() : '';
-  return message.includes('code verifier') || message.includes('invalid request');
-}
-
 async function createSessionFromUrl(url: string) {
-  if (!isAuthCallbackUrl(url)) return;
+  if (!isAuthCallbackUrl(url, Platform.OS, currentWebOrigin())) return;
   const { params, errorCode } = QueryParams.getQueryParams(url);
   if (errorCode) throw new Error(errorCode);
 

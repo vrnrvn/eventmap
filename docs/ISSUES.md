@@ -178,5 +178,158 @@ Items marked **[DB]** require a migration — deferred until migrations can be a
 - [x] **MEDIUM [DB]** `get_event_attendees_public` deanonymizes private attendees: anonymous entries use id `'anon-' || user_id`, exposing the real profile UUID (20260222000000_attendees_include_anonymous.sql:18-24). — verified already fixed: 20261029110000 re-created it (and `get_event_attendees_page`) with `'anon-' || left(md5(rsvp.id), 16)`; no client code parses the anon ids.
 - [ ] **MEDIUM [DB]** Several SECURITY DEFINER functions lack `SET search_path` pinning (20260213092246, 20260213140000, 20260218120000, 20260219100400 incl. `is_admin_user`, 20260220000001, 20260221000000, 20260222000000). [migration written — pending apply: 20261030107000 pins all of them; the 20260220000001/20260222000000 functions were already re-created pinned in 20261029110000]
 - [ ] **LOW [DB]** Premium expiry is lazily enforced client-side only: server gates check `subscription_tier='premium'` with no expiry check, downgrade happens only when the owner's app runs services/premium.ts:115-130 — lapsed subs keep premium server-side indefinitely if the owner never opens the app (or blocks the downgrade write).
-- [ ] **LOW** GoogleMapView WebView hardening: lat/lng interpolated unencoded into HTML (components/GoogleMapView.tsx:143-154,310-312), `originWhitelist={['*']}`, `postMessage('*')` web fallback, `onMessage` without type validation; Maps API key embedded in WebView HTML needs API/referrer restriction.
+- [ ] **LOW** GoogleMapView WebView hardening: `originWhitelist={['*']}`, `postMessage('*')` web fallback, `onMessage` without type validation; Maps API key embedded in WebView HTML needs API/referrer restriction. *(Coordinate interpolation resolved: the Google branch already coerced via `Number()`+`JSON.stringify`; the Leaflet branch now does too — see Maps & auth review P1 below.)*
 - [ ] **LOW** Admin banner/promotion `link_url` accepts any scheme — restrict to https: before opening on clients.
+
+---
+
+# Maps & auth review (2026-10-31)
+
+Focused review of the maps and auth systems. Items below are additional to the
+2026-10-30 sweep above. None require a migration; the two `supabase/config.toml`
+changes need a **coordinated Supabase restart** to take effect (shared local DB).
+
+## Pass 1 — correctness (done 2026-10-31)
+
+- [x] Location-picker pin never moves: `injectMarkers` deduped on the sorted marker-id set (`components/GoogleMapView.tsx:312`), but every picker renders one marker with a fixed id (`'business'`/`'profile'`/`'onboarding'`/`'event'`) and changes its lat/lng — so after the first injection the pin stayed put while the map panned away. Affected `components/AddressMapPicker.tsx:166`, `app/business-location.tsx:195`, `screens/BusinessOnboarding.tsx:296`. Fixed: key is now `id@lat,lng#categorySlug`, so position and category changes re-inject while repeat renders still dedupe and marker taps still take the cheap active-only path.
+- [x] Event-page venue map trapped vertical scroll: rendered inside the page `ScrollView` with gestures defaulting to on → `gestureHandling:'greedy'` swallowed the pan (`screens/EventDetail.tsx:948`). Fixed with `mapGesturesEnabled={false}`, matching `screens/BusinessDetail.tsx:325`.
+- [x] Sign-in and password-reset sent untrimmed emails while signup trimmed (`app/(auth)/login.tsx:63`, `forgot-password.tsx:54` vs `signup.tsx:52`); GoTrue does not strip whitespace, so a pasted/autofilled trailing space failed as "Invalid login credentials". Fixed: all four auth call sites trim.
+- [x] Leaflet HTML interpolated coordinates raw (`utils/openMapHtml.ts:8`) where the Google branch coerced: `undefined`/`null`/`''` emitted broken JS (`.setView([,],15)`) that killed the whole map with no visible error, and non-numeric input reached the page script. Fixed with a `num()` finite-coercion helper plus boolean/numeric coercion on `gestures` and `attributionTop`; `MAP_HTML_VERSION` bumped 6→7.
+
+## Pass 2 — auth hardening (done 2026-10-31)
+
+- [x] **Change password required no reauthentication**: Settings routed straight to the reset screen (`screens/Settings.tsx:501`) and `updateUser({password})` does not ask for the current one — anyone with an unlocked, signed-in phone could take the account over. Fixed: `mode=change` now prompts for the current password and re-verifies it via `authService.verifyCurrentPassword` (a `signInWithPassword` round-trip against the session's own email) before `updatePassword`, and rejects reusing the same password. OAuth-only accounts are detected via `authService.hasPasswordIdentity()` and skip the prompt so they can still set a first password.
+- [x] Sign-out revoked every device: `supabase.auth.signOut()` defaults to global scope, so signing out on a phone killed the user's tablet/web sessions. Now `{ scope: 'local' }` (`services/auth.ts`); the now-redundant local-scope retry in the catch was removed.
+- [x] No autofill metadata on any auth input. Added across login / signup / reset-password / forgot-password: `autoComplete` + `textContentType` (`email`, `current-password`, `new-password`, `name`), `autoCorrect={false}`, and `returnKeyType` + `onSubmitEditing` so the keyboard advances field-to-field and submits on the last one. `signup.tsx`'s `Field` helper now forwards arbitrary `TextInputProps` instead of threading each one.
+- [x] Server-side `minimum_password_length` raised 6 → 8 in `supabase/config.toml` to match the client. **Needs a coordinated Supabase restart to take effect.**
+- [x] `isMissingVerifierError` matched any message containing `'invalid request'` — a generic GoTrue 400 prefix, so unrelated failures got the misleading "open this on the device where you requested it" advice. Narrowed to the verifier/challenge wording plus the `bad_code_verifier` code.
+- [x] Native-dev OAuth redirect disagreed with the callback allow-list: `getAuthRedirectUrl` returned a bare `exp://host:8081` while `isAuthCallbackUrl` only accepts `exp://` URLs pathed at `auth-callback`. Now passes `{ path: 'auth-callback' }`, matching `getAuthEmailRedirectUrl`.
+- [x] Raw Supabase error strings shown to users. Added `utils/authErrors.ts` (`authErrorMessage`) mapping the common GoTrue failures to actionable copy; unrecognised *Supabase* errors fall back to a generic message so server internals can't surface, while our own thrown `Error` copy is preserved. Adopted in all four auth screens.
+- [x] Unconfirmed signup left `user` set with a null session, firing a profile fetch and push-token registration for an identity RLS rejects. `AuthContext.signUp` now only commits to state when a session came back.
+- [x] Email/Google buttons not cross-disabled during in-flight auth (was open under P3) — both screens now disable each path while the other is running, with `accessibilityState` and a dimmed style.
+- [ ] **`secure_password_change` deliberately NOT enabled.** GoTrue implements it as an email-OTP nonce flow: the client must call `supabase.auth.reauthenticate()` and pass the resulting `nonce` to `updateUser` (confirmed in `@supabase/auth-js` `UserAttributes.nonce` / `GoTrueClient.reauthenticate`). Turning it on without building that flow would make every password change fail. The client-side current-password check above is the protection shipping now; this remains the server-side half. **[config restart + client work]**
+- [ ] `verifyCurrentPassword` issues a second `signInWithPassword`, creating an extra session row (the old refresh token stays valid until it expires). Harmless but untidy; the nonce flow above would replace it.
+
+## Pass 3 / Stage 1 + 2 — Leaflet brought to parity (done 2026-10-31)
+
+Decision: **Leaflet stays the default, Google stays optional.** OpenFreeMap was
+evaluated and rejected — it serves *vector* tiles, so adopting it would mean
+replacing Leaflet with MapLibre GL, which is the overhaul this pass was scoped
+to avoid. The Leaflet raster architecture is unchanged; what changed is what it
+draws and where the tiles come from.
+
+- [x] **Tile source is now configurable** (`constants/mapTiles.ts`): `EXPO_PUBLIC_MAP_TILE_URL` / `_ATTRIBUTION` / `_MAX_ZOOM`, defaulting to the current OSM tiles so the README's key-free local setup still works. Non-http(s) values are rejected and fall back. Documented in `.env.example` and README. **This does not by itself make the app compliant** — see the open item below.
+- [x] Clustering: `Leaflet.markercluster` 1.5.3 vendored through `scripts/vendor-map.mjs` (no CDN, works offline; +8.8 KB gz). Bulk `addLayers`, `disableClusteringAtZoom: 17` with spiderfying so co-located pins stay individually tappable. Cluster bubbles restyled to match the pin language instead of the default green/yellow blobs.
+- [x] Category colours and icons on Leaflet pins. Glyph path data moved out of the Google HTML into `constants/categoryMarkers.ts`, which now emits both a TS builder and the in-page JS both renderers inject — one definition instead of one copy per provider. This is what `MAP_HTML_VERSION` existed to paper over.
+- [x] **Business pins were always grey.** Found by a drift-guard test: `CATEGORY_ICON_CONFIG` is keyed by event slug *and* by business label ('Restaurant', 'Bar & Nightlife', …), and `BusinessDetail` passes the business label through as a marker `categorySlug`. The palette only knew event slugs, so every business map rendered the default pin — on the Google path too. Fixed via aliases; a test now asserts map colour matches the in-app `CategoryIcon` colour for every category.
+- [x] Pin tap targets raised 22px (Leaflet) / 32px (Google) → 44pt. The visible disc keeps its original ~30px; the extra space is transparent padding, so the map is no heavier-looking.
+- [x] Stage 2: vendor scripts/styles escaped and concatenated once at module load rather than per map mount (~200 KB of constant work per embedded map).
+- [x] Stage 2: `EventDetail` and `BusinessDetail` maps wrapped in `components/DeferredMount.tsx` — they sit below the fold and were building a WebView during the navigation transition. Not applied to Discover or the pickers, where the map is the primary content.
+- [x] Stage 2: WebView `cacheEnabled` turned on. The page is inline HTML and can't go stale, so this only affects subresources — i.e. map tiles, which were being re-downloaded on every mount.
+
+## Thorough test pass — maps + auth (2026-10-31)
+
+Stress/edge-case round over the two reviewed systems. **201 tests, 14 files.**
+Four real bugs surfaced and were fixed; everything else held.
+
+### Bugs found by testing and fixed
+
+- [x] **`Infinity` coordinates blanked the Leaflet map.** `validMarkers` filtered with `!Number.isNaN`, which lets `Infinity` through; the Leaflet page then threw inside `L.marker` *after* `clearMarkers()` had already run, so one bad row left the map with no pins at all and the error was swallowed by the injection's try/catch. Fixed at both layers: `Number.isFinite` in `GoogleMapView.validMarkers`, plus a per-marker coordinate guard in the Leaflet page mirroring the one the Google page already had.
+- [x] **`animateTo(null, …)` panned to 0,0.** `Number(null)` is `0`, so a null latitude silently recentred the map on the Gulf of Guinea instead of being ignored. `buildAnimateToInjection` now rejects null/undefined/boolean/empty-string while still accepting a genuine `0`.
+- [x] **GoTrue machine codes were unmatched by the error mapper.** Codes arrive underscored (`weak_password`, `invalid_credentials`, `same_password`, `signup_disabled`) while the patterns were written against prose. The haystack is now matched in both forms, and the missing code variants were added.
+- [x] **`DeferredMount` changed the layout tree between states** (wrapping `View` → bare fragment). Now always renders the same wrapper. Collapsed the resulting double-wrap in `EventDetail`.
+
+### New coverage
+
+- `tests/webviewInject.test.ts` — marker data crosses the bridge as *source code*; a malformed string literal is a syntax error that silently stops all marker updates. Extracted the builders to `utils/webviewInject.ts` and round-trip them through `new Function` with quotes, backslashes, newlines, emoji, RTL overrides, null bytes, `</script>`, template syntax and breakout attempts. Also escapes U+2028/U+2029, which `JSON.stringify` leaves raw but which terminate a JS string literal on older engines.
+- `tests/googleMapHtml.dom.test.ts` — **the Google provider had zero DOM coverage.** Extracted its page builder to `utils/googleMapHtml.ts` (mirroring `openMapHtml.ts`) and boot it in jsdom against a stubbed `google.maps`, covering marker creation, icon generation, clustering, the clusterer-missing and clusterer-throws fallbacks, and the full message contract.
+- `tests/providerParity.dom.test.ts` — pins both providers against the same contract: identical injected API, identical message types, and byte-identical marker SVGs for every category and state. Leaflet is the default and Google is opt-in, so they drift silently otherwise.
+- `tests/openMapHtml.stress.dom.test.ts` — malformed/missing fields, duplicate ids, poles and the date line, out-of-range longitudes, 60 rapid update cycles, 10k-character titles, attribution presence.
+- `tests/authCallback.stress.test.ts` — adversarial input against the deep-link allow-list (host look-alikes, `user@host` credentials tricks, scheme confusion, path suffixes, payload-laundering via query/fragment, malformed and non-string input). All held; no changes needed.
+- `tests/authErrors.stress.test.ts` — asserts unrecognised Supabase errors never reach users verbatim (SQL, goroutine traces, HTML error pages, request ids).
+
+### Still requires manual device testing
+
+Nothing below can be exercised in this environment.
+
+- [ ] **All visual output.** jsdom confirms a pin is a 44px `<svg>` with the right fill; it cannot say whether the map *looks* right — cluster bubble legibility at real density, pin contrast over tiles, chip row over the map, the new suggestion-row layout.
+- [ ] **Real touch targets.** 44pt is asserted in style values and SVG dimensions, not measured against a finger on a device.
+- [ ] **Gesture behaviour.** The `mapGesturesEnabled={false}` scroll-trap fix on the event page, pinch/pan on Discover, and cluster spiderfying at max zoom are all untestable without touch input.
+- [ ] **`DeferredMount` timing.** `InteractionManager.runAfterInteractions` has no meaningful behaviour outside a running RN runtime; whether the map appears promptly enough when scrolling to the venue section is a device question.
+- [ ] **Autofill and keyboard flow.** `autoComplete`/`textContentType` only do anything with a real password manager; the `returnKeyType` field-to-field chain needs a real keyboard.
+- [ ] **The whole auth round-trip.** Sign-in, PKCE deep links, password reset email, and the new current-password re-verification all need a live backend. Only the pure helpers around them are covered.
+- [ ] **Google provider end-to-end.** Covered against a *stubbed* SDK. Real tile rendering, real clustering and real billing behaviour are unverified — and the provider is off by default.
+
+### Flagged, not fixed (needs more than a patch)
+
+- [ ] **No React component testing.** `DeferredMount`, `AuthContext`'s state machine (the `loadSeqRef` guard, `profileLoadedFor` derivation, sign-out clearing) and `GoogleMapView`'s effect wiring are all untested — the bugs those could hide are exactly the kind that reach production. Needs a RN test renderer and a jest/RN preset, which is a setup project rather than a patch.
+- [ ] **`GoogleMapView`'s web path** posts to `window.parent` with `'*'` and filters inbound by `event.source`. Reasonable, but untestable without a component renderer and worth revisiting alongside the item above.
+
+## Minor polish sweep (done 2026-10-31)
+
+Surface pass over the remaining small findings from the maps/auth review.
+
+- [x] Discover category chips were ~21pt tall with 9pt text (`discover.tsx`) — now ~30pt with `Typography.sizes.xs`, plus `CHIP_HIT_SLOP` to clear 44pt without making the over-map row visually heavier. Added `accessibilityRole`/`accessibilityLabel`/`accessibilityState` to the chips, which had none.
+- [x] `hitSlop` + roles/labels on the remaining bare text links: discover "See all", `AddressMapPicker` "Open in Google Maps", `AddressSearchInput` clear button.
+- [x] `AddressSearchInput`: added a monotonic request guard (a slow response for "san" could land after and overwrite "san francisco"), an inline loading spinner, unmount-safe blur/debounce timers, a leading pin icon, and 48pt suggestion rows (were ~35pt).
+- [x] Antimeridian: `isInBounds` excluded everything when a viewport straddles ±180° (sw.lng > ne.lng), emptying the list near the date line. Fixed and tested.
+- [x] Extracted `haversineKm` / `radiusKmFromBounds` / `isInBounds` out of `discover.tsx` into `utils/geoBounds.ts` so the radius math that drives every search query is testable. 11 tests.
+- [x] Leaflet posted two identical `regionChange` messages per zoom (`moveend` *and* `zoomend` both fire). Now `moveend` only — verified by a DOM test counting messages, not by assumption.
+- [x] Cluster bubbles had no accessible name; now carry `role="button"` and an `aria-label` with the child count.
+- [x] Dead imports removed from `welcome.tsx`; unescaped apostrophe fixed in `Followers.tsx`.
+- [x] **ESLint was effectively unusable repo-wide**: `eslint .` reported 24,837 problems, 24,729 of them from `admin/.next` build output. Root config now ignores `admin/**` (it is a separate Next.js app with its own `eslint.config.mjs`, `tsconfig` and lint script — linting it from the root resolved its `@/` alias against the repo root and produced only false positives), plus build output and the vendored Leaflet bundle. Added a Node globals override for `scripts/**` (Buffer/__dirname were flagged as undefined under the Expo browser preset). **Repo now lints clean: 0 errors.**
+
+### Deliberately not done in this pass
+
+- [ ] Feeding `visibleEvents` rather than `events` to the Discover map (was a Pass 4 item). With clustering now in place this would be a *regression*: bounds-filtering before injection means every small pan changes the marker set and rebuilds the cluster group, while Leaflet already culls off-screen markers itself. Dropped unless marker counts grow enough to change the trade.
+- [ ] Relabelling Settings' "Change password" row for OAuth-only accounts. The row's description already reads "Set a new password for your account", which is accurate either way; making the *title* adaptive needs an async `hasPasswordIdentity()` call on Settings render for negligible gain.
+
+### Open after this pass
+
+- [ ] **Compliance still requires a real tile provider.** The default is still `tile.openstreetmap.org`. The config hook and docs exist; someone has to pick a provider and set the env vars before any public build. **Blocker for shipping, not a polish item.**
+- [ ] Selecting a pin that is inside a collapsed cluster shows no visible active state. `clusterGroup.zoomToShowLayer` would surface it, but `discover.tsx` already drives the camera on list scroll (`animateTo` + the programmatic-move guard) and a second source of viewport movement would fight it. Needs the two to be reconciled deliberately.
+- [~] Cluster bubbles are not colour-coded by dominant category (still open); accessible label added (`accessibilityLabel`/`aria-label`) for the child count.
+- [ ] `markerStateKey` still changes whenever any marker moves, so a single new event in a 300-marker set rebuilds the whole cluster group. Fine at current page sizes (50/page); revisit if marker counts grow.
+- [ ] `tests/openMapHtml.dom.test.ts` boots the real map in jsdom. Tiles are never fetched (jsdom doesn't load images by default), but if `resources: 'usable'` is ever enabled the suite would start hitting the OSM tile server.
+
+## Pass 3 (original scoping) — the default map provider is worse than the optional one
+
+`.env.example` ships `EXPO_PUBLIC_MAP_PROVIDER=openstreetmap`, so Leaflet is the
+default and Google is opt-in — but `utils/openMapHtml.ts` is far thinner than the
+Google branch. Product call: bring Leaflet to parity, or make Google the default
+(which reintroduces the API-key requirement the README deliberately avoids).
+
+- [x] No clustering on the Leaflet path — every marker is added directly to the map (`utils/openMapHtml.ts:14`) while the Google path uses `@googlemaps/markerclusterer` (`GoogleMapView.tsx:177`). Discover appends 50 events per page, so pan/zoom degrades after a few pages. Needs `Leaflet.markercluster`.
+- [x] No category colors or icons on the Leaflet path: every pin is hardcoded `#b41924` (`openMapHtml.ts:5`), discarding `categorySlug`. The 10-category icon set only ships to users with their own Google key.
+- [x] Marker tap targets below minimum: 22×22px on Leaflet (`openMapHtml.ts:12`), 32×32 on Google (`GoogleMapView.tsx:132`) — against 44pt/48dp.
+- [x] Category icon SVG paths are hand-duplicated in the map HTML (`GoogleMapView.tsx:100-131`) against the Lucide components in `constants/categoryIcons.ts`. Two sources of truth that have already drifted — that's what `MAP_HTML_VERSION` exists for. Extract to a shared constant.
+
+## Pass 4 — performance and polish
+
+- [~] 166 KB of Leaflet (`utils/leaflet.generated.ts`) is string-concatenated into the HTML on every map mount with `cacheEnabled={false}` (`GoogleMapView.tsx:413`) — rebuilt in JS, sent across the bridge, re-parsed, never cached. The HTML only varies on ~4 booleans: cache it at module level, and/or write it to a file and load via `source={{uri}}`.
+- [~] `cacheEnabled={false}` also re-downloads the Google Maps SDK and the clusterer on every mount.
+- [ ] Marker clusterer loads from `unpkg.com` at runtime with no SRI and no vendoring (`GoogleMapView.tsx:233`) — third-party network dependency on the critical path. `scripts/vendor-map.mjs` already establishes the vendoring pattern used for Leaflet.
+- [ ] Places Autocomplete has no `sessiontoken` (`services/places.ts:42`) — Google bills per-request without one and per-session with one (~10x on a typical 8-keystroke search). Also missing `locationbias`/`components`, so results rank globally rather than near the user.
+- [ ] Non-`business` address path round-trips autocomplete `description` through the **Geocoding** API (`components/AddressSearchInput.tsx:122`) instead of using `place_id` with Place Details — a second billed call, and using predictions outside a Places request is against the Places ToS.
+- [~] Discover feeds the map every event ever loaded (`discover.tsx:517` uses `events`) while the list uses the bounds-filtered `visibleEvents` (`discover.tsx:441`) — off-screen markers accumulate across pages. Compounded by the missing Leaflet clustering above.
+- [x] Map category chips are ~21pt tall: `paddingVertical: 4` + `fontSize: 9` (`discover.tsx:1035-1055`), against a 44pt minimum, and 9pt is below the legibility floor. These are the primary filter affordance over the map.
+- [x] Text-link touchables with no `hitSlop`: `discover.tsx:608` "See all", `AddressMapPicker.tsx:204` "Open in Google Maps", `login.tsx:141` "Forgot Password?"; `AddressSearchInput.tsx:300` suggestion rows are ~35pt.
+- [x] `AddressSearchInput.fetchSuggestions` has no request-sequence guard (`AddressSearchInput.tsx:76`) unlike `discover.tsx`'s `loadRequestIdRef` — a slow response for `"san"` can land after `"san francisco"` and replace the correct suggestions. Also no loading indicator, and the 300ms `onBlur` timeout (line 176) isn't cleared on unmount.
+
+## Test harness (added 2026-10-31)
+
+- [x] **No test framework at all** — nothing to pin regressions with. Added `vitest` (`npm test` / `npm run test:watch`, config in `vitest.config.mts`, specs in `tests/`). Scope is deliberately pure logic: no RN renderer, no Metro, no backend. `react-native` is aliased to `tests/stubs/react-native.ts` so modules needing only `Platform` stay testable. 38 tests covering the map HTML builder, the marker dedupe key, the auth-callback allow-list and the auth error mapper. Installed at v5 — v3/v4 carry two critical advisories (GHSA-82fw-gwwq-j7x9, GHSA-5gmw-xhrv-c9v3).
+- [ ] Coverage is thin by design: anything importing Expo/RN native modules is untested. Growing it means extracting pure helpers (as done for `utils/authCallback.ts`, `utils/mapMarkers.ts`) rather than mocking the native surface. Candidates: `utils/recurrence.ts`, `radiusKmFromBounds`/`haversineKm`/`isInBounds` in `discover.tsx`, `services/localPlaces.ts`.
+- [ ] No component or e2e coverage. `.maestro/smoke.yaml` exists but needs a running app + backend, so it can't gate a commit.
+
+## Follow-ups found while implementing Pass 1 and 2
+
+- [ ] **Pickers still have an inherent scroll-trap.** `AddressMapPicker`, `app/business-location.tsx` and `BusinessOnboarding` step 2 all put a gesture-enabled map inside a `ScrollView`. Unlike the event page this can't be fixed by disabling gestures — panning is the point of a picker. Needs a real affordance (tap-to-activate overlay, drag handle, or full-screen map mode). **Design call.**
+- [x] **Antimeridian**: `isInBounds` (`discover.tsx:431`) doesn't handle a viewport crossing ±180° longitude — all events filter out. Edge case.
+- [x] **Leaflet emits two `regionChange` messages per zoom** (`moveend` + `zoomend` both fire, `openMapHtml.ts:17`). Debounced downstream, so waste rather than breakage.
+- [ ] **Possibly-stale entry above**: the Discovery item "Mount-time race / no request cancellation can show wrong-city results" is listed open, but `loadEventsWithCenter` now has a `loadRequestIdRef` guard (`discover.tsx:256`). Re-verify before working it.
+- [ ] `app/index.tsx` never routes on `isBanned` although `AuthContext` computes it and `.github/copilot-instructions.md:74` says to redirect banned users in `_layout.tsx` — only `create.tsx:192` and `EventDetail.tsx:295` consult it, so banned users browse normally and are blocked at the point of action. May be intended; flagged as a divergence from documented intent.
+- [ ] `admin/middleware.ts:54` runs a `profiles.is_admin` query on every matched request. Fine at current scale.
+- [~] Settings' "Change password" row is shown to OAuth-only accounts too, where it really means "set a password". The screen now handles this correctly, but the row's label still says "Change" — reword based on `hasPasswordIdentity()`.
+- [ ] `authErrorMessage` patterns are matched against English GoTrue strings. If the app is ever localised, or GoTrue rewords an error, the mapping silently degrades to the generic fallback — matching on `error.code` where one exists is more durable, but GoTrue does not populate it for every failure.
+- [ ] `npm audit` reports 70 pre-existing vulnerabilities in the Expo/Metro dependency tree (unrelated to the vitest addition, which is clean at v5). Worth a separate triage pass.

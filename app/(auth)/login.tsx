@@ -17,6 +17,7 @@ import { GoogleIcon } from '@/components/icons/BrandIcons';
 import { Button } from '@/components/ui/Button';
 import { oauthEnabled } from '@/services/runtime';
 import { notify } from '@/utils/notify';
+import { authErrorMessage } from '@/utils/authErrors';
 import { Colors, Typography, BorderRadius, Spacing } from '@/constants/theme';
 import { ArrowLeft, Eye, EyeOff, Mail, Lock } from 'lucide-react-native';
 
@@ -28,6 +29,7 @@ export default function LoginScreen() {
   }>();
   const { signIn, signInWithOAuth } = useAuth();
   const scrollRef = useRef<ScrollView>(null);
+  const passwordRef = useRef<TextInput>(null);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -50,7 +52,7 @@ export default function LoginScreen() {
   const validateForm = () => {
     const newErrors: { email?: string; password?: string } = {};
     if (!email.trim()) newErrors.email = 'Email is required';
-    else if (!/\S+@\S+\.\S+/.test(email)) newErrors.email = 'Email is invalid';
+    else if (!/\S+@\S+\.\S+/.test(email.trim())) newErrors.email = 'Email is invalid';
     if (!password) newErrors.password = 'Password is required';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -60,11 +62,13 @@ export default function LoginScreen() {
     if (!validateForm()) return;
     setLoading(true);
     try {
-      await signIn(email, password);
+      // Trim to match signup (which stores the trimmed address): GoTrue does
+      // not strip whitespace, so a pasted/autofilled trailing space would
+      // otherwise fail as "Invalid login credentials".
+      await signIn(email.trim(), password);
       router.replace(redirectTo as never);
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      notify.error(msg || 'Sign in failed. Please try again.');
+      notify.error(authErrorMessage(error, 'Sign in failed. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -76,8 +80,7 @@ export default function LoginScreen() {
       await signInWithOAuth('google');
       router.replace(redirectTo as never);
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      notify.error(msg.includes('cancelled') ? 'Sign in was cancelled.' : msg);
+      notify.error(authErrorMessage(error, 'Google sign-in failed. Please try again.'));
     } finally {
       setOauthLoading(false);
     }
@@ -131,6 +134,12 @@ export default function LoginScreen() {
                 placeholderTextColor={Colors.text.tertiary}
                 keyboardType="email-address"
                 autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="email"
+                textContentType="emailAddress"
+                returnKeyType="next"
+                submitBehavior="submit"
+                onSubmitEditing={() => passwordRef.current?.focus()}
                 style={styles.input}
               />
             </View>
@@ -138,18 +147,30 @@ export default function LoginScreen() {
 
             <View style={styles.passwordRow}>
               <Text style={styles.fieldLabel}>Password</Text>
-              <TouchableOpacity onPress={() => router.push('/(auth)/forgot-password')}>
+              <TouchableOpacity
+                onPress={() => router.push('/(auth)/forgot-password')}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel="Forgot password"
+              >
                 <Text style={styles.forgotText}>Forgot Password?</Text>
               </TouchableOpacity>
             </View>
             <View style={styles.inputShell}>
               <Lock size={20} color={Colors.text.tertiary} />
               <TextInput
+                ref={passwordRef}
                 value={password}
                 onChangeText={setPassword}
                 placeholder="••••••••"
                 placeholderTextColor={Colors.text.tertiary}
                 secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="current-password"
+                textContentType="password"
+                returnKeyType="go"
+                onSubmitEditing={handleSignIn}
                 style={styles.input}
               />
               <TouchableOpacity
@@ -171,6 +192,7 @@ export default function LoginScreen() {
               label="Login"
               onPress={handleSignIn}
               loading={loading}
+              disabled={oauthLoading}
               size="lg"
               fullWidth
               gradient
@@ -183,7 +205,15 @@ export default function LoginScreen() {
               <View style={styles.dividerLine} />
             </View>
 
-            <TouchableOpacity style={styles.googleBtn} onPress={handleGoogle} activeOpacity={0.85} disabled={oauthLoading}>
+            <TouchableOpacity
+              style={[styles.googleBtn, (oauthLoading || loading) && styles.googleBtnDisabled]}
+              onPress={handleGoogle}
+              activeOpacity={0.85}
+              disabled={oauthLoading || loading}
+              accessibilityRole="button"
+              accessibilityLabel="Continue with Google"
+              accessibilityState={{ disabled: oauthLoading || loading, busy: oauthLoading }}
+            >
               <GoogleIcon size={20} />
               <Text style={styles.googleText}>{oauthLoading ? 'Signing in...' : 'Continue with Google'}</Text>
             </TouchableOpacity>
@@ -192,7 +222,12 @@ export default function LoginScreen() {
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>Don&apos;t have an account?</Text>
-            <TouchableOpacity onPress={() => router.push('/(auth)/signup')}>
+            <TouchableOpacity
+              onPress={() => router.push('/(auth)/signup')}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityRole="button"
+              accessibilityLabel="Go to sign up"
+            >
               <Text style={styles.footerLink}>Sign Up</Text>
             </TouchableOpacity>
           </View>
@@ -317,6 +352,7 @@ const styles = StyleSheet.create({
     gap: 10,
     backgroundColor: '#FFFFFF',
   },
+  googleBtnDisabled: { opacity: 0.5 },
   googleText: {
     color: Colors.text.primary,
     fontSize: 16,

@@ -160,8 +160,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = async (email: string, password: string, name: string) => {
     const data = await authService.signUp(email, password, name);
-    setSession(data.session);
-    setUser(data.user);
+    // With email confirmation on, signUp returns a user but no session. Putting
+    // that user in state would kick off a profile fetch and a push-token
+    // registration for an identity RLS rejects — every route guard keys off
+    // `session`, so the unauthenticated user object has no use here.
+    if (data.session) {
+      setSession(data.session);
+      setUser(data.user);
+    }
     if (data.user) {
       return { user: data.user, session: data.session };
     }

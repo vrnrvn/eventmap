@@ -34,6 +34,7 @@ import { EventCardCarousel } from '@/components/EventCardCarousel';
 import { Avatar } from '@/components/Avatar';
 import { SearchOverlay } from '@/components/SearchOverlay';
 import { filterEventsByDateRange } from '@/utils/recurrence';
+import { isInBounds, radiusKmFromBounds } from '@/utils/geoBounds';
 import { bannersService, type AppBanner } from '@/services/banners';
 import { AppBannerCarousel } from '@/components/AppBannerCarousel';
 
@@ -41,40 +42,12 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const DEFAULT_CENTER = { lat: 37.7749, lng: -122.4194 };
 const REGION_DEBOUNCE_MS = 500;
 const HEADER_HEIGHT_PX = 170;
-// Search radius follows the map viewport (see radiusKmFromBounds); the old
-// fixed 50 km stays as the fallback until the map reports its first bounds.
-const DEFAULT_RADIUS_KM = 50;
-const MIN_RADIUS_KM = 5;
-const MAX_RADIUS_KM = 150;
-
-function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(s)));
-}
-
-/**
- * Zoom-derived search radius: half the viewport diagonal (so the search circle
- * roughly circumscribes what's on screen), clamped to [5, 150] km. Both map
- * HTMLs (Google and the Leaflet fallback) already include `bounds` in their
- * regionChange messages; an older cached map HTML without bounds simply leaves
- * this null and the legacy 50 km default applies — fully backward compatible.
- */
-function radiusKmFromBounds(
-  bounds: { ne: { lat: number; lng: number }; sw: { lat: number; lng: number } } | null
-): number {
-  if (!bounds) return DEFAULT_RADIUS_KM;
-  const diagonalKm = haversineKm(bounds.ne, bounds.sw);
-  if (!Number.isFinite(diagonalKm) || diagonalKm <= 0) return DEFAULT_RADIUS_KM;
-  return Math.min(MAX_RADIUS_KM, Math.max(MIN_RADIUS_KM, diagonalKm / 2));
-}
 // Smaller pages scroll in smoothly; pre-apply (20261030110000) the service
 // falls back to one legacy 100-event fetch and reports no further pages.
 const EVENTS_PAGE_SIZE = 50;
+
+/** Chips sit ~30pt tall over the map; this lifts the tap target past 44pt. */
+const CHIP_HIT_SLOP = { top: 8, bottom: 8, left: 4, right: 4 };
 
 function truncateText(text: string, limit = 50): string {
   if (!text || text.length <= limit) return text;
@@ -428,16 +401,6 @@ export default function DiscoverScreen() {
     []
   );
 
-  const isInBounds = (
-    lat: number,
-    lng: number,
-    bounds: { ne: { lat: number; lng: number }; sw: { lat: number; lng: number } }
-  ) =>
-    lat >= bounds.sw.lat &&
-    lat <= bounds.ne.lat &&
-    lng >= bounds.sw.lng &&
-    lng <= bounds.ne.lng;
-
   const visibleEvents = useMemo(() => {
     if (!mapBounds) return events;
     return events.filter((e) => isInBounds(e.lat, e.lng, mapBounds));
@@ -608,6 +571,9 @@ export default function DiscoverScreen() {
         <TouchableOpacity
           onPress={() => bottomSheetRef.current?.snapToIndex(1)}
           activeOpacity={0.8}
+          hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
+          accessibilityRole="button"
+          accessibilityLabel="Expand the event list"
         >
           <Text style={styles.seeAllText}>See all</Text>
         </TouchableOpacity>
@@ -740,6 +706,10 @@ export default function DiscoverScreen() {
             style={[styles.overlayChip, selectedCategories.length === 0 && styles.overlayChipActive]}
             onPress={() => setSelectedCategories([])}
             activeOpacity={0.85}
+            hitSlop={CHIP_HIT_SLOP}
+            accessibilityRole="button"
+            accessibilityLabel="Show all event categories"
+            accessibilityState={{ selected: selectedCategories.length === 0 }}
           >
             <Text style={[styles.overlayChipText, selectedCategories.length === 0 && styles.overlayChipTextActive]}>
               ALL EVENTS
@@ -753,6 +723,10 @@ export default function DiscoverScreen() {
                 style={[styles.overlayChip, selected && styles.overlayChipActive]}
                 onPress={() => toggleCategory(category.id)}
                 activeOpacity={0.85}
+                hitSlop={CHIP_HIT_SLOP}
+                accessibilityRole="button"
+                accessibilityLabel={`${category.label} filter`}
+                accessibilityState={{ selected }}
               >
                 <CategoryIcon category={category.slug} size="sm" variant="minimal" />
                 <Text style={[styles.overlayChipText, selected && styles.overlayChipTextActive]}>
@@ -1035,9 +1009,12 @@ const styles = StyleSheet.create({
   overlayChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    // ~30pt tall; CHIP_HIT_SLOP lifts the effective target past 44pt without
+    // making the overlay row visually heavier over the map.
+    minHeight: 30,
     borderRadius: BorderRadius.round,
     backgroundColor: 'rgba(255,255,255,0.78)',
     borderWidth: 1,
@@ -1048,8 +1025,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.primary,
   },
   overlayChipText: {
-    fontSize: 9,
-    letterSpacing: 0,
+    fontSize: Typography.sizes.xs,
+    letterSpacing: 0.2,
     color: Colors.text.primary,
     fontFamily: Typography.labelFontFamilies.semibold,
   },

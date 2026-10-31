@@ -1,7 +1,6 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as WebBrowser from 'expo-web-browser';
-import * as AuthSession from 'expo-auth-session';
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import { supabase } from './supabase';
 import { getAuthRedirectUrl, getAuthEmailRedirectUrl } from './authRedirect';
@@ -148,22 +147,64 @@ export const authService = {
    * Best-effort sign-out: the server-side token revoke can fail offline, but
    * the local session must always be cleared so the user is never stranded
    * signed-in. Never throws.
+   *
+   * Scoped to this device. The supabase-js default is `global`, which revokes
+   * every session the user has — signing out on a phone would also sign them
+   * out on their tablet and on the web. A deliberate "sign out everywhere"
+   * action would pass `{ scope: 'global' }` instead.
    */
   async signOut() {
     try {
-      const { error } = await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
       if (error) throw error;
     } catch (err) {
+      // Local-scope sign-out only clears stored tokens, so there is nothing
+      // left to retry. AuthContext clears in-memory state regardless, and the
+      // tabs guard routes to welcome — the user is never stranded signed-in.
       console.error(
-        'Sign-out revoke failed; clearing local session:',
+        'Sign-out failed; clearing in-memory session anyway:',
         err instanceof Error ? err.message : err
       );
-      try {
-        await supabase.auth.signOut({ scope: 'local' });
-      } catch {
-        // Local storage cleanup failed too; AuthContext still clears in-memory state.
-      }
     }
+  },
+
+  /**
+   * Re-verifies the current user's password. Supabase's `updateUser` does not
+   * ask for the existing password, so this is what stands between someone
+   * holding an unlocked, signed-in phone and taking the account over.
+   *
+   * Uses `signInWithPassword` against the session's own email: on success the
+   * returned session simply replaces the equivalent current one; on failure it
+   * throws without disturbing the existing session.
+   */
+  async verifyCurrentPassword(password: string): Promise<boolean> {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError) throw userError;
+    const email = userData.user?.email;
+    if (!email) {
+      throw new Error('This account has no email to verify against. Sign in again and retry.');
+    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (!error) return true;
+    // Wrong password is the expected negative result, not an exception.
+    const message = error.message?.toLowerCase() ?? '';
+    if (message.includes('invalid login credentials') || error.status === 400) return false;
+    throw error;
+  },
+
+  /**
+   * Whether this account signs in with a password at all. An OAuth-only user
+   * (Google, no email identity) has nothing to re-verify — asking them for a
+   * "current password" would lock them out of setting their first one.
+   */
+  async hasPasswordIdentity(): Promise<boolean> {
+    const { data, error } = await supabase.auth.getUser();
+    if (error) throw error;
+    const identities = data.user?.identities;
+    // Older sessions may not populate `identities`; assume password-backed
+    // rather than silently skipping the re-verification.
+    if (!identities) return true;
+    return identities.some((identity) => identity.provider === 'email');
   },
 
   async resetPassword(email: string) {

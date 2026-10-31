@@ -3,25 +3,20 @@ import {
   Text,
   StyleSheet,
   Platform,
-  Dimensions,
   Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Button } from '@/components/ui/Button';
-import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { alpha, Colors, Typography } from '@/constants/theme';
 import {
-  MapPin,
-  Sparkles,
   Compass,
   Heart,
   Building2,
   ChevronRight,
   LogIn,
 } from 'lucide-react-native';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const Palette = {
   gradientStart: Colors.primary,

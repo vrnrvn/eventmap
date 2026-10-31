@@ -14,6 +14,7 @@ import { router } from 'expo-router';
 import { authService } from '@/services/auth';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/ui/Button';
+import { authErrorMessage } from '@/utils/authErrors';
 import { Colors, Spacing, Typography } from '@/constants/theme';
 import {
   ArrowLeft,
@@ -32,11 +33,11 @@ export default function ForgotPasswordScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const validateEmail = () => {
-    if (!email) {
+    if (!email.trim()) {
       setError('Email is required');
       return false;
     }
-    if (!/\S+@\S+\.\S+/.test(email)) {
+    if (!/\S+@\S+\.\S+/.test(email.trim())) {
       setError('Please enter a valid email address');
       return false;
     }
@@ -50,11 +51,10 @@ export default function ForgotPasswordScreen() {
     setLoading(true);
     setError(null);
     try {
-      await authService.resetPassword(email);
+      await authService.resetPassword(email.trim());
       setSent(true);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Please try again';
-      setError(message);
+      setError(authErrorMessage(err, 'Could not send the reset link. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -197,6 +197,11 @@ export default function ForgotPasswordScreen() {
                   placeholder="your@email.com"
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="email"
+                  textContentType="emailAddress"
+                  returnKeyType="send"
+                  onSubmitEditing={handleResetPassword}
                   error={error ?? undefined}
                 />
               </View>

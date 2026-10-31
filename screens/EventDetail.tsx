@@ -61,6 +61,7 @@ import {
 } from 'lucide-react-native';
 import { EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView } from '@/components/GoogleMapView';
+import { DeferredMount } from '@/components/DeferredMount';
 import { complaintsService } from '@/services/complaints';
 import { getNextOccurrences, getRecurrenceLabel } from '@/utils/recurrence';
 import { hasEventEnded, isEventInProgress } from '@/utils/eventStatus';
@@ -944,11 +945,14 @@ export default function EventDetail() {
               ) : null}
             </View>
             <View style={styles.venueMapCard}>
-              <View style={styles.venueMapInner}>
+              {/* Below the fold — don't build the map WebView mid-transition.
+                  DeferredMount renders the venueMapInner View itself. */}
+              <DeferredMount style={styles.venueMapInner}>
                 <GoogleMapView
                   style={{ flex: 1, minHeight: 0 }}
                   center={{ lat: venueLat, lng: venueLng }}
                   zoom={15}
+                  mapGesturesEnabled={false}
                   webViewScrollEnabled={false}
                   nestedScrollEnabled={false}
                   markers={[
@@ -964,7 +968,7 @@ export default function EventDetail() {
                     },
                   ]}
                 />
-              </View>
+              </DeferredMount>
             </View>
           </View>
 

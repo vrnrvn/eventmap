@@ -53,7 +53,17 @@ attendees and an active chat; the run club has one attendee and a locked chat.
   image storage, in-app notifications, and attendee chat use the real database.
 - Chat access requires going status and at least two current going attendees.
   If attendance drops below two, access locks again. Messages are retained.
-- Leaflet is bundled. OpenStreetMap base tiles require internet and show attribution.
+- Leaflet and Leaflet.markercluster are bundled (no CDN). Map pins are coloured
+  and iconed by category, clustered when dense, and sized to a 44pt tap target.
+- **Before distributing the app, change the map tile source.** The default points
+  at `tile.openstreetmap.org`, which is fine for local development but is not
+  permitted for a distributed app under the
+  [OSM Tile Usage Policy](https://operations.osmfoundation.org/policies/tiles/) —
+  shipping an app that uses those tiles counts as "heavy use" and gets blocked.
+  Set `EXPO_PUBLIC_MAP_TILE_URL` and `EXPO_PUBLIC_MAP_TILE_ATTRIBUTION` to any
+  XYZ raster provider you are entitled to use (Stadia Maps, Thunderforest,
+  Geoapify, MapTiler, or self-hosted). See `.env.example`.
+- OpenStreetMap base tiles require internet and show attribution.
   Key-free address search supports a small demo location list and explicit
   coordinates. It is not a global street-address search service.
 - Google Maps/Places remain optional: set `EXPO_PUBLIC_MAP_PROVIDER=google` and
