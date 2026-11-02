@@ -1,12 +1,14 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
+  AccessibilityInfo,
+  Animated,
+  Easing,
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
   RefreshControl,
-  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -14,6 +16,7 @@ import {
   Mail,
   Clock3,
   RefreshCcw,
+  BellOff,
   BellRing,
   CalendarPlus,
   CheckCheck,
@@ -35,6 +38,8 @@ import {
 } from '@/services/notifications';
 import { useAuth } from '@/contexts/AuthContext';
 import { notify } from '@/utils/notify';
+import { formatRelativeLabel } from '@/utils/relativeTime';
+import { ErrorState } from '@/components/ui/ErrorState';
 
 type Notification = ApiNotification;
 type NotificationType = ApiNotification['type'];
@@ -42,7 +47,7 @@ type NotificationType = ApiNotification['type'];
 const Palette = {
   surface: Colors.background.primary,
   card: Colors.surface,
-  cardRead: alpha(Colors.surface, 0.55),
+  cardRead: Colors.background.secondary,
   text: Colors.text.primary,
   muted: Colors.text.secondary,
   subtle: Colors.text.tertiary,
@@ -50,21 +55,6 @@ const Palette = {
   secondary: Colors.secondary,
   border: Colors.neutralSoft,
   readIconBg: Colors.background.tertiary,
-};
-
-const formatRelativeLabel = (date: Date): string => {
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  const diffHr = Math.floor(diffMs / 3600000);
-  const diffDay = Math.floor(diffMs / 86400000);
-
-  if (diffMin < 1) return 'JUST NOW';
-  if (diffMin < 60) return `${diffMin}M AGO`;
-  if (diffHr < 24) return `${diffHr}H AGO`;
-  if (diffDay === 1) return 'YESTERDAY';
-  if (diffDay < 7) return `${diffDay} DAYS AGO`;
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase();
 };
 
 const isUnreadStyle = (n: Notification) => !n.read;
@@ -102,13 +92,16 @@ export default function NotificationsScreen() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   const loadNotifications = useCallback(async () => {
     try {
       const list = await getNotifications();
       setNotifications(list);
+      setError(false);
     } catch (err) {
       console.error('Failed to load notifications:', err);
+      setError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -224,17 +217,20 @@ export default function NotificationsScreen() {
           paddingHorizontal: 16,
         }}
       >
-        <View style={styles.logoRow}>
-          <Image source={require('@/assets/images/EMlogo.png')} style={styles.headerLogo} />
-        </View>
-
         <View style={styles.editorialHeader}>
-          <Text style={styles.editorialTitle}>Updates</Text>
+          <Text style={styles.editorialTitle}>Notifications</Text>
           <Text style={styles.editorialSubtitle}>
             Stay in the loop with your latest event activity.
           </Text>
-          {!loading && unreadCount > 0 ? (
-            <TouchableOpacity style={styles.readAllChip} onPress={markAllRead} activeOpacity={0.8}>
+          {!loading && !error && unreadCount > 0 ? (
+            <TouchableOpacity
+              style={styles.readAllChip}
+              onPress={markAllRead}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={`${unreadCount} unread, mark all as read`}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
               <Text style={styles.readAllChipText}>
                 {unreadCount} unread • Mark all read
               </Text>
@@ -245,8 +241,19 @@ export default function NotificationsScreen() {
         <View style={styles.listWrap}>
           {loading ? (
             <NotificationSkeleton />
+          ) : error ? (
+            <ErrorState
+              title="Couldn't load notifications"
+              onRetry={() => {
+                setLoading(true);
+                loadNotifications();
+              }}
+            />
           ) : notifications.length === 0 ? (
             <View style={styles.emptyCard}>
+              <View style={styles.emptyIconWrap}>
+                <BellOff size={28} color={Palette.primary} />
+              </View>
               <Text style={styles.emptyTitle}>All caught up</Text>
               <Text style={styles.emptySub}>
                 You have no notifications right now. We will let you know when something happens.
@@ -263,6 +270,10 @@ export default function NotificationsScreen() {
                   style={[styles.card, !unread && styles.cardRead]}
                   activeOpacity={0.86}
                   onPress={() => handlePress(notification)}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    unread ? `Unread: ${notification.title}` : notification.title
+                  }
                 >
                   <View style={styles.cardTopRow}>
                     <View style={styles.cardLeft}>
@@ -295,7 +306,7 @@ export default function NotificationsScreen() {
                   <TouchableOpacity
                     style={styles.dismissButton}
                     onPress={() => dismissNotification(notification.id)}
-                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
                     accessibilityRole="button"
                     accessibilityLabel="Dismiss notification"
                   >
@@ -307,26 +318,64 @@ export default function NotificationsScreen() {
           )}
         </View>
 
-        <TouchableOpacity
-          style={styles.historyButton}
-          activeOpacity={0.84}
-          onPress={markAllRead}
-          accessibilityRole="button"
-          accessibilityLabel="Mark all notifications as read"
-        >
-          <Text style={styles.historyText}>Mark all as read</Text>
-          <CheckCheck size={17} color={Palette.text} />
-        </TouchableOpacity>
+        {!loading && !error && unreadCount > 0 ? (
+          <TouchableOpacity
+            style={styles.historyButton}
+            activeOpacity={0.84}
+            onPress={markAllRead}
+            accessibilityRole="button"
+            accessibilityLabel="Mark all notifications as read"
+          >
+            <Text style={styles.historyText}>Mark all as read</Text>
+            <CheckCheck size={17} color={Palette.text} />
+          </TouchableOpacity>
+        ) : null}
       </ScrollView>
     </View>
   );
 }
 
 function NotificationSkeleton() {
+  const opacity = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    let loop: Animated.CompositeAnimation | null = null;
+    let cancelled = false;
+    // Gentle pulse; skipped entirely when the user prefers reduced motion.
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((reduceMotion) => {
+        if (cancelled || reduceMotion) return;
+        loop = Animated.loop(
+          Animated.sequence([
+            Animated.timing(opacity, {
+              toValue: 0.55,
+              duration: 700,
+              easing: Easing.inOut(Easing.ease),
+              useNativeDriver: true,
+            }),
+            Animated.timing(opacity, {
+              toValue: 1,
+              duration: 700,
+              easing: Easing.inOut(Easing.ease),
+              useNativeDriver: true,
+            }),
+          ])
+        );
+        loop.start();
+      })
+      .catch(() => {
+        // Reduced-motion lookup failed; leave the skeleton static.
+      });
+    return () => {
+      cancelled = true;
+      loop?.stop();
+    };
+  }, [opacity]);
+
   return (
     <View style={styles.skeletonWrap}>
       {[0, 1, 2].map((key) => (
-        <View key={`skeleton-${key}`} style={styles.skeletonCard} />
+        <Animated.View key={`skeleton-${key}`} style={[styles.skeletonCard, { opacity }]} />
       ))}
     </View>
   );
@@ -337,20 +386,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Palette.surface,
   },
-  logoRow: {
-    alignItems: 'flex-end',
-    marginBottom: 10,
-  },
-  headerLogo: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
-    tintColor: Colors.primary,
-  },
   editorialHeader: {
-    marginTop: 8,
-    marginBottom: 20,
-    gap: 8,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.lg,
+    gap: Spacing.sm,
   },
   editorialTitle: {
     fontSize: 24,
@@ -436,8 +475,7 @@ const styles = StyleSheet.create({
   },
   timeLabel: {
     color: Palette.subtle,
-    fontSize: 12,
-    letterSpacing: 0.9,
+    fontSize: Typography.sizes.xs,
     fontFamily: Typography.labelFontFamilies.semibold,
   },
   timeRead: {
@@ -452,8 +490,8 @@ const styles = StyleSheet.create({
   body: {
     marginTop: 6,
     color: Palette.muted,
-    fontSize: 16,
-    lineHeight: 31,
+    fontSize: Typography.sizes.md,
+    lineHeight: 24,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
   },
@@ -467,10 +505,19 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     backgroundColor: Palette.card,
-    borderRadius: 24,
+    borderRadius: BorderRadius.xl,
     borderWidth: 1,
     borderColor: Palette.border,
-    padding: 20,
+    padding: Spacing.lg,
+  },
+  emptyIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: alpha(Colors.primary, 0.08),
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: Spacing.md,
   },
   emptyTitle: {
     fontSize: Typography.sizes.lg,

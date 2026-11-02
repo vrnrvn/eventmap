@@ -30,7 +30,6 @@ import { GoogleMapView } from '@/components/GoogleMapView';
 import { DeferredMount } from '@/components/DeferredMount';
 import { EventCardCarousel } from '@/components/EventCardCarousel';
 import {
-  ArrowLeft,
   BadgeCheck,
   MapPin,
   Mail,
@@ -40,6 +39,8 @@ import {
   Flag,
 } from 'lucide-react-native';
 import { FacebookIcon, InstagramIcon } from '@/components/icons/BrandIcons';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { complaintsService } from '@/services/complaints';
 import { notify, notifyConfirm } from '@/utils/notify';
 
@@ -80,6 +81,7 @@ export default function BusinessDetail() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const isOwner = userBusiness?.id === id;
 
@@ -107,9 +109,11 @@ export default function BusinessDetail() {
         const reviewsList = await reviewsService.getReviewsForBusiness(id);
         setReviews(reviewsList);
       }
+      setLoadError(false);
     } catch (error) {
       console.error('Failed to load business:', error);
       setBusiness(null);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -138,10 +142,15 @@ export default function BusinessDetail() {
         setFollowerCount((c) => c + 1);
       }
     } catch {
-      // ignore
+      notify.error(following ? 'Failed to unfollow' : 'Failed to follow');
     } finally {
       setSaving(false);
     }
+  };
+
+  const retryLoad = () => {
+    setLoading(true);
+    load();
   };
 
   const formatDate = (dateString: string) => {
@@ -157,13 +166,7 @@ export default function BusinessDetail() {
   if (loading && !business) {
     return (
       <View style={[styles.root, { paddingTop: insets.top }]}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-            <ArrowLeft size={22} color={Colors.text.primary} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Business</Text>
-          <View style={styles.headerSpacer} />
-        </View>
+        <ScreenHeader title="Business" safeArea={false} />
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color={Colors.primary} />
         </View>
@@ -174,15 +177,16 @@ export default function BusinessDetail() {
   if (!business) {
     return (
       <View style={[styles.root, { paddingTop: insets.top }]}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-            <ArrowLeft size={22} color={Colors.text.primary} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Business</Text>
-          <View style={styles.headerSpacer} />
-        </View>
+        <ScreenHeader title="Business" safeArea={false} />
         <View style={styles.centerContainer}>
-          <Text style={styles.errorText}>Business not found</Text>
+          {loadError ? (
+            <ErrorState
+              title="Couldn't load this business"
+              onRetry={retryLoad}
+            />
+          ) : (
+            <Text style={styles.errorText}>Business not found</Text>
+          )}
         </View>
       </View>
     );
@@ -200,17 +204,16 @@ export default function BusinessDetail() {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-          <ArrowLeft size={22} color={Colors.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {business.name}
-        </Text>
-        <View style={styles.headerSpacer}>
-          {user && !isOwner && (
+      <ScreenHeader
+        title={business.name}
+        safeArea={false}
+        right={
+          user && !isOwner ? (
             <TouchableOpacity
               style={styles.reportButton}
+              accessibilityRole="button"
+              accessibilityLabel="Report business"
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
               onPress={() => {
                 notifyConfirm({
                   title: 'Report Business',
@@ -230,9 +233,9 @@ export default function BusinessDetail() {
             >
               <Flag size={20} color={Colors.text.tertiary} />
             </TouchableOpacity>
-          )}
-        </View>
-      </View>
+          ) : undefined
+        }
+      />
 
       <ScrollView
         style={styles.scroll}
@@ -264,6 +267,12 @@ export default function BusinessDetail() {
               style={[styles.followBtn, following && styles.followBtnActive]}
               onPress={handleFollow}
               disabled={saving}
+              accessibilityRole="button"
+              accessibilityState={{ selected: following, disabled: saving }}
+              accessibilityLabel={
+                following ? `Unfollow ${business.name}` : `Follow ${business.name}`
+              }
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
             >
               <Heart
                 size={18}
@@ -275,8 +284,54 @@ export default function BusinessDetail() {
               </Text>
             </TouchableOpacity>
           )}
-          <Text style={styles.followerCount}>{followerCount} follower{followerCount !== 1 ? 's' : ''}</Text>
+          {/* Compact stats row */}
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{followerCount}</Text>
+              <Text style={styles.statLabel}>
+                Follower{followerCount !== 1 ? 's' : ''}
+              </Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>
+                {averageRating.count > 0 ? averageRating.average.toFixed(1) : '—'}
+              </Text>
+              <Text style={styles.statLabel}>Rating</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{events.length}</Text>
+              <Text style={styles.statLabel}>Event{events.length !== 1 ? 's' : ''}</Text>
+            </View>
+          </View>
         </View>
+
+        {/* Upcoming events */}
+        {events.length > 0 ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Upcoming Events</Text>
+            {events.map((event) => (
+              <TouchableOpacity
+                key={event.id}
+                style={styles.eventCard}
+                onPress={() => router.push(`/event/${event.id}` as never)}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel={`${event.title}, ${formatDate(event.start_datetime)}`}
+              >
+                <Calendar size={20} color={Colors.primary} />
+                <View style={styles.eventInfo}>
+                  <Text style={styles.eventTitle} numberOfLines={2}>
+                    {event.title}
+                  </Text>
+                  <Text style={styles.eventDate}>{formatDate(event.start_datetime)}</Text>
+                </View>
+                <Text style={styles.viewEvent}>View</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
 
         {/* About */}
         {business.description ? (
@@ -286,32 +341,13 @@ export default function BusinessDetail() {
           </View>
         ) : null}
 
-        {/* Connect - Instagram / Facebook */}
-        {(socialHandles.instagram || socialHandles.facebook) ? (
-          <View style={styles.socialsSection}>
-            <Text style={styles.socialsLabel}>Connect</Text>
-            <View style={styles.socials}>
-              {socialHandles.instagram ? (
-                <TouchableOpacity
-                  style={styles.socialBtn}
-                  onPress={() => Linking.openURL(buildInstagramUrl(socialHandles.instagram!))}
-                  activeOpacity={0.7}
-                >
-                  <InstagramIcon size={24} />
-                </TouchableOpacity>
-              ) : null}
-              {socialHandles.facebook ? (
-                <TouchableOpacity
-                  style={styles.socialBtn}
-                  onPress={() => Linking.openURL(buildFacebookUrl(socialHandles.facebook!))}
-                  activeOpacity={0.7}
-                >
-                  <FacebookIcon size={24} />
-                </TouchableOpacity>
-              ) : null}
-            </View>
+        {/* Venue photos */}
+        {photos.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Venue Photos</Text>
+            <EventCardCarousel imageUrls={photos} imageHeight={280} />
           </View>
-        ) : null}
+        )}
 
         {/* Location */}
         <View style={styles.section}>
@@ -341,12 +377,6 @@ export default function BusinessDetail() {
               />
             </DeferredMount>
           </View>
-          {photos.length > 0 && (
-            <View style={styles.venueCarouselWrap}>
-              <Text style={styles.venuePhotosLabel}>Venue Photos</Text>
-              <EventCardCarousel imageUrls={photos} imageHeight={280} />
-            </View>
-          )}
         </View>
 
         {/* Contact */}
@@ -356,6 +386,9 @@ export default function BusinessDetail() {
             <TouchableOpacity
               style={styles.linkRow}
               onPress={() => Linking.openURL(`mailto:${business.contact_email}`)}
+              accessibilityRole="button"
+              accessibilityLabel={`Email ${business.contact_email}`}
+              hitSlop={{ top: 4, bottom: 4 }}
             >
               <Mail size={18} color={Colors.primary} />
               <Text style={styles.linkText}>{business.contact_email}</Text>
@@ -373,8 +406,10 @@ export default function BusinessDetail() {
                 key={link.id}
                 style={styles.linkRow}
                 onPress={() => Linking.openURL(link.url)}
+                accessibilityRole="link"
+                accessibilityLabel={link.label || link.url}
+                hitSlop={{ top: 4, bottom: 4 }}
               >
-                <ExternalLink size={18} color={Colors.primary} />
                 <Text style={styles.linkText} numberOfLines={1}>
                   {link.label || link.url}
                 </Text>
@@ -384,12 +419,51 @@ export default function BusinessDetail() {
           </View>
         ) : null}
 
+        {/* Connect - Instagram / Facebook */}
+        {(socialHandles.instagram || socialHandles.facebook) ? (
+          <View style={styles.socialsSection}>
+            <Text style={styles.socialsLabel}>Connect</Text>
+            <View style={styles.socials}>
+              {socialHandles.instagram ? (
+                <TouchableOpacity
+                  style={styles.socialBtn}
+                  onPress={() => Linking.openURL(buildInstagramUrl(socialHandles.instagram!))}
+                  activeOpacity={0.7}
+                  accessibilityRole="link"
+                  accessibilityLabel="Open Instagram"
+                  hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                >
+                  <InstagramIcon size={24} />
+                </TouchableOpacity>
+              ) : null}
+              {socialHandles.facebook ? (
+                <TouchableOpacity
+                  style={styles.socialBtn}
+                  onPress={() => Linking.openURL(buildFacebookUrl(socialHandles.facebook!))}
+                  activeOpacity={0.7}
+                  accessibilityRole="link"
+                  accessibilityLabel="Open Facebook"
+                  hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                >
+                  <FacebookIcon size={24} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
         {/* Reviews */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Reviews</Text>
-          <View style={styles.ratingRow}>
-            <StarRatingDisplay average={averageRating.average} count={averageRating.count} />
-          </View>
+          {averageRating.count === 0 && reviews.length === 0 ? (
+            <Text style={styles.noReviewsText}>
+              No reviews yet — be the first to share your experience.
+            </Text>
+          ) : (
+            <View style={styles.ratingRow}>
+              <StarRatingDisplay average={averageRating.average} count={averageRating.count} />
+            </View>
+          )}
           {reviews.map((review) => (
             <ReviewCard
               key={review.id}
@@ -428,30 +502,6 @@ export default function BusinessDetail() {
             />
           ))}
         </View>
-
-        {/* Upcoming events */}
-        {events.length > 0 ? (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Upcoming Events</Text>
-            {events.map((event) => (
-              <TouchableOpacity
-                key={event.id}
-                style={styles.eventCard}
-                onPress={() => router.push(`/event/${event.id}` as never)}
-                activeOpacity={0.8}
-              >
-                <Calendar size={20} color={Colors.primary} />
-                <View style={styles.eventInfo}>
-                  <Text style={styles.eventTitle} numberOfLines={2}>
-                    {event.title}
-                  </Text>
-                  <Text style={styles.eventDate}>{formatDate(event.start_datetime)}</Text>
-                </View>
-                <Text style={styles.viewEvent}>View</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        ) : null}
       </ScrollView>
     </View>
   );
@@ -461,35 +511,6 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: Colors.background.secondary,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: Colors.background.primary,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border.light,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: Colors.background.secondary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  headerTitle: {
-    flex: 1,
-    fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.text.primary,
-  },
-  headerSpacer: {
-    width: 40,
-    alignItems: 'flex-end',
   },
   reportButton: {
     padding: Spacing.sm,
@@ -501,21 +522,11 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
   },
   scroll: {
     flex: 1,
-  },
-  venueCarouselWrap: {
-    marginTop: Spacing.lg,
-  },
-  venuePhotosLabel: {
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.text.secondary,
-    marginBottom: Spacing.sm,
-    textTransform: 'uppercase',
   },
   hero: {
     alignItems: 'center',
@@ -527,7 +538,7 @@ const styles = StyleSheet.create({
   },
   businessName: {
     fontSize: 24,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginTop: Spacing.md,
@@ -588,15 +599,38 @@ const styles = StyleSheet.create({
   followBtnTextActive: {
     color: Colors.text.inverse,
   },
-  followerCount: {
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamily,
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.lg,
+    marginTop: Spacing.md,
+  },
+  statItem: {
+    alignItems: 'center',
+    minWidth: 64,
+  },
+  statValue: {
+    fontSize: Typography.sizes.lg,
+    fontFamily: Typography.displayFontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: Colors.text.primary,
+  },
+  statLabel: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.labelFontFamilies.medium,
+    fontWeight: Typography.weights.medium,
     color: Colors.text.tertiary,
-    marginTop: Spacing.xs,
+    marginTop: 2,
+  },
+  statDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: Spacing.lg,
+    backgroundColor: Colors.border.light,
   },
   section: {
     padding: Spacing.lg,
-    backgroundColor: Colors.background.primary,
+    backgroundColor: Colors.surface,
     marginTop: Spacing.sm,
   },
   sectionTitle: {
@@ -665,6 +699,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.sm,
     paddingVertical: Spacing.sm,
+    minHeight: 44,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.border.light,
   },
@@ -676,6 +711,11 @@ const styles = StyleSheet.create({
   },
   ratingRow: {
     marginBottom: Spacing.md,
+  },
+  noReviewsText: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
   },
   eventCard: {
     flexDirection: 'row',

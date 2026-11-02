@@ -7,9 +7,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { businessesService } from '@/services/businesses';
 import { notify } from '@/utils/notify';
@@ -22,8 +22,9 @@ import { CategoryIcon } from '@/components/CategoryIcon';
 import { GoogleMapView } from '@/components/GoogleMapView';
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/ui/Button';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
-import { ArrowLeft, Briefcase } from 'lucide-react-native';
+import { Briefcase } from 'lucide-react-native';
 
 const BUSINESS_CATEGORIES = [
   'Restaurant',
@@ -39,6 +40,7 @@ const BUSINESS_CATEGORIES = [
 ];
 
 export default function BusinessOnboarding() {
+  const insets = useSafeAreaInsets();
   const { refreshBusiness, setUserMode, hasBusiness } = useApp();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -165,16 +167,8 @@ export default function BusinessOnboarding() {
   // state instead of a form that can only end in a DB error.
   if (hasBusiness) {
     return (
-      <View style={styles.container}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <ArrowLeft size={24} color={Colors.text.primary} />
-        </TouchableOpacity>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <ScreenHeader title="" safeArea={false} />
         <View style={styles.alreadyContainer}>
           <View style={styles.alreadyIconWrap}>
             <Briefcase size={32} color={Colors.primary} />
@@ -197,20 +191,30 @@ export default function BusinessOnboarding() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { paddingTop: insets.top }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => (step === 1 ? router.back() : setStep(1))}
-      >
-        <ArrowLeft size={24} color={Colors.text.primary} />
-      </TouchableOpacity>
+      <ScreenHeader
+        title=""
+        safeArea={false}
+        onBack={() => (step === 1 ? router.back() : setStep(1))}
+      />
 
       <View style={styles.content}>
         <Text style={styles.title}>Create Business Profile</Text>
+        <View
+          style={styles.progressTrack}
+          accessibilityRole="progressbar"
+          accessibilityLabel={`Step ${step} of 2`}
+          accessibilityValue={{ min: 0, max: 2, now: step }}
+        >
+          <View style={[styles.progressSegment, styles.progressSegmentFilled]} />
+          <View
+            style={[styles.progressSegment, step === 2 && styles.progressSegmentFilled]}
+          />
+        </View>
         <Text style={styles.subtitle}>
-          Step {step} of 2 - {step === 1 ? 'Basic Info' : 'Details'}
+          Step {step} of 2 – {step === 1 ? 'Basic Info' : 'Details'}
         </Text>
 
         {step === 1 && (
@@ -273,12 +277,14 @@ export default function BusinessOnboarding() {
                 <Text style={styles.errorText}>{errors.category}</Text>
               )}
 
-            <TouchableOpacity
-              style={styles.primaryButton}
+            <Button
+              label="Next"
               onPress={handleNext}
-            >
-              <Text style={styles.primaryButtonText}>Next</Text>
-            </TouchableOpacity>
+              size="lg"
+              fullWidth
+              gradient
+              style={styles.submitButton}
+            />
           </View>
             </ScrollView>
         )}
@@ -383,19 +389,15 @@ export default function BusinessOnboarding() {
             )
           ) : null}
 
-          <TouchableOpacity
-            style={styles.primaryButton}
+          <Button
+            label="Create Business Profile"
             onPress={handleSubmit}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color={Colors.text.inverse} />
-            ) : (
-              <Text style={styles.primaryButtonText}>
-                Create Business Profile
-              </Text>
-            )}
-          </TouchableOpacity>
+            loading={loading}
+            size="lg"
+            fullWidth
+            gradient
+            style={styles.submitButton}
+          />
         </ScrollView>
       )}
     </KeyboardAvoidingView>
@@ -423,10 +425,6 @@ const styles = StyleSheet.create({
   step1ScrollContent: {
     paddingBottom: Spacing.xxl,
   },
-  backButton: {
-    padding: Spacing.md,
-    marginTop: Spacing.xl,
-  },
   content: {
     flex: 1,
     paddingHorizontal: Spacing.xl,
@@ -434,13 +432,14 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: Typography.sizes.xxl,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginBottom: Spacing.xs,
   },
   subtitle: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
     marginBottom: Spacing.xl,
   },
@@ -488,6 +487,7 @@ const styles = StyleSheet.create({
   },
   categoryChipText: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.primary,
   },
   categoryChipTextSelected: {
@@ -501,12 +501,14 @@ const styles = StyleSheet.create({
   },
   locationHint: {
     fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
     marginTop: Spacing.xs,
     marginBottom: Spacing.md,
   },
   tapHint: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
     marginBottom: Spacing.sm,
   },
@@ -520,21 +522,26 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 320,
   },
-  primaryButton: {
-    backgroundColor: Colors.primary,
-    paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.lg,
-    alignItems: 'center',
+  submitButton: {
     marginTop: Spacing.lg,
   },
-  primaryButtonText: {
-    color: Colors.text.inverse,
-    fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
+  progressTrack: {
+    flexDirection: 'row',
+    gap: Spacing.xs,
+    marginBottom: Spacing.sm,
+  },
+  progressSegment: {
+    flex: 1,
+    height: Spacing.xs,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.border.light,
+  },
+  progressSegmentFilled: {
+    backgroundColor: Colors.primary,
   },
   errorText: {
     fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamily,
     color: Colors.error,
     marginTop: Spacing.xs,
   },
@@ -555,6 +562,7 @@ const styles = StyleSheet.create({
   },
   alreadySubtitle: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
     textAlign: 'center',
     lineHeight: 22,

@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
   Alert,
   Image,
   Linking,
@@ -15,6 +14,7 @@ import {
   Share,
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
@@ -28,7 +28,7 @@ import {
   type EventChatMessageWithSender,
   type PublicAttendee,
 } from '@/types/database';
-import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { notify, notifyConfirm } from '@/utils/notify';
 import { ImageViewer } from '@/components/ImageViewer';
 import { Button } from '@/components/ui/Button';
@@ -37,12 +37,12 @@ import {
   AttendeesBottomSheet,
   type AttendeesBottomSheetHandle,
 } from '@/components/AttendeesBottomSheet';
-import { CategoryIcon } from '@/components/CategoryIcon';
 import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ReviewCard } from '@/components/ReviewCard';
 import { ReviewForm } from '@/components/ReviewForm';
 import {
   ArrowLeft,
+  ArrowRight,
   ExternalLink,
   Pencil,
   Trash2,
@@ -358,6 +358,20 @@ export default function EventDetail() {
     }
   };
 
+  // Leaving a "going" RSVP also locks the user out of the event chat, so ask
+  // first. The interested-star toggle still removes silently via
+  // handleRemoveRsvp — only the explicit "Leave" button confirms.
+  const handleLeaveEvent = () => {
+    notifyConfirm({
+      title: 'Leave event?',
+      message: "You'll lose access to the event chat for this event.",
+      confirmLabel: 'Leave',
+      cancelLabel: 'Stay',
+      destructive: true,
+      onConfirm: () => void handleRemoveRsvp(),
+    });
+  };
+
   const handleToggleSave = async () => {
     if (!user || !id || !details || togglingSave) return;
     const wasSaved = details.user_saved;
@@ -376,24 +390,6 @@ export default function EventDetail() {
       notify.error(wasSaved ? 'Failed to remove from saved events' : 'Failed to save event');
     } finally {
       setTogglingSave(false);
-    }
-  };
-
-  const handleFollow = async () => {
-    if (!user || !details) return;
-    setSaving(true);
-    try {
-      if (details.user_following_business) {
-        await socialService.unfollowBusiness(details.business.id);
-        setDetails((d) => (d ? { ...d, user_following_business: false } : null));
-      } else {
-        await socialService.followBusiness(details.business.id);
-        setDetails((d) => (d ? { ...d, user_following_business: true } : null));
-      }
-    } catch {
-      notify.error('Failed to update follow');
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -552,9 +548,49 @@ export default function EventDetail() {
   };
 
   if (loading) {
+    // Static skeleton mirroring the hero + content-card layout. The floating
+    // back button stays live so users aren't stuck while details load.
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color={Colors.primary} />
+      <View style={styles.container}>
+        <View style={[styles.heroTopBarWrap, { top: insets.top + 10 }]}>
+          <View style={styles.heroTopBar}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <ArrowLeft size={24} color={Colors.text.primary} />
+            </TouchableOpacity>
+            <Text style={styles.brandTitle}>EventMap</Text>
+            <View style={styles.heroTopActions}>
+              <View style={styles.backButton} />
+            </View>
+          </View>
+        </View>
+        <View
+          accessibilityLabel="Loading event"
+          accessibilityState={{ busy: true }}
+        >
+          <View style={styles.skeletonHero} />
+          <View style={styles.skeletonCard}>
+            <View style={styles.skeletonTitleBar} />
+            <View style={styles.skeletonMetaRow}>
+              <View style={styles.skeletonCircle} />
+              <View style={styles.skeletonBar} />
+            </View>
+            <View style={styles.skeletonMetaRow}>
+              <View style={styles.skeletonCircle} />
+              <View style={[styles.skeletonBar, styles.skeletonBarShort]} />
+            </View>
+            <View style={styles.skeletonParagraph}>
+              <View style={styles.skeletonLine} />
+              <View style={styles.skeletonLine} />
+              <View style={[styles.skeletonLine, styles.skeletonLineShort]} />
+            </View>
+          </View>
+        </View>
       </View>
     );
   }
@@ -562,19 +598,30 @@ export default function EventDetail() {
   if (!details) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <ArrowLeft size={24} color={Colors.text.primary} />
-          </TouchableOpacity>
+        <View style={[styles.heroTopBarWrap, { top: insets.top + 10 }]}>
+          <View style={styles.heroTopBar}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+              accessibilityRole="button"
+              accessibilityLabel="Go back"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <ArrowLeft size={24} color={Colors.text.primary} />
+            </TouchableOpacity>
+            <Text style={styles.brandTitle}>EventMap</Text>
+            <View style={styles.heroTopActions}>
+              <View style={styles.backButton} />
+            </View>
+          </View>
         </View>
         <View style={styles.centerContainer}>
           <Text style={styles.errorText}>Event not found</Text>
+          <Button
+            label="Back to Discover"
+            onPress={() => router.replace('/(tabs)/discover' as never)}
+            style={styles.notFoundButton}
+          />
         </View>
       </View>
     );
@@ -618,7 +665,7 @@ export default function EventDetail() {
           >
             <ArrowLeft size={24} color={Colors.text.primary} />
           </TouchableOpacity>
-          <Text style={styles.brandTitle}>EventMaps</Text>
+          <Text style={styles.brandTitle}>EventMap</Text>
           <View style={styles.heroTopActions}>
             {user ? (
               <TouchableOpacity
@@ -628,6 +675,7 @@ export default function EventDetail() {
                 accessibilityRole="button"
                 accessibilityLabel={details.user_saved ? 'Remove from saved events' : 'Save event'}
                 accessibilityState={{ selected: details.user_saved }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 {details.user_saved ? (
                   <BookmarkCheck size={20} color={Colors.primary} />
@@ -641,6 +689,7 @@ export default function EventDetail() {
               onPress={handleShareEvent}
               accessibilityRole="button"
               accessibilityLabel="Share event"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               <Share2 size={20} color={Colors.text.primary} />
             </TouchableOpacity>
@@ -688,7 +737,11 @@ export default function EventDetail() {
               <EventmapCalendar size={48} color={Colors.text.tertiary} />
             </View>
           )}
-          <View style={styles.heroGradient} />
+          <LinearGradient
+            colors={['transparent', alpha('#000000', 0.7)]}
+            style={styles.heroGradient}
+            pointerEvents="none"
+          />
           <View style={styles.heroTitleWrap}>
             {allPhotoUrls.length > 1 ? (
               <View style={styles.photoDots} pointerEvents="none">
@@ -720,7 +773,7 @@ export default function EventDetail() {
               <View style={styles.metaIconWrap}>
                 <EventmapCalendar size={18} color={Colors.primary} />
               </View>
-              <View>
+              <View style={styles.metaBody}>
                 <Text style={styles.metaLabel}>
                   {event.is_recurring && displayStartIso !== event.start_datetime ? 'Next date' : 'Date'}
                 </Text>
@@ -734,7 +787,7 @@ export default function EventDetail() {
               <View style={styles.metaIconWrap}>
                 <Clock3 size={18} color={Colors.primary} />
               </View>
-              <View>
+              <View style={styles.metaBody}>
                 <Text style={styles.metaLabel}>Time</Text>
                 <Text style={styles.metaValue}>{formatTimeRange(displayStartIso, event.end_datetime, event.start_datetime)}</Text>
               </View>
@@ -744,7 +797,7 @@ export default function EventDetail() {
                 <View style={styles.metaIconWrap}>
                   <EventmapMapPin size={18} color={Colors.primary} />
                 </View>
-                <View>
+                <View style={styles.metaBody}>
                   <Text style={styles.metaLabel}>Location</Text>
                   <Text style={styles.metaValue}>{event.address}</Text>
                 </View>
@@ -783,15 +836,17 @@ export default function EventDetail() {
             </View>
           </View>
 
-          <Text style={styles.promoFootnote}>
-            Listings may be ordered using distance, relevance, and paid promotion from hosts.
-          </Text>
-
           <TouchableOpacity
             style={styles.attendeesSection}
             onPress={() => (details.rsvp_count > 0 ? attendeesSheetRef.current?.present() : null)}
             activeOpacity={details.rsvp_count > 0 ? 0.85 : 1}
             disabled={details.rsvp_count === 0}
+            accessibilityRole="button"
+            accessibilityLabel={
+              details.rsvp_count === 0
+                ? 'Be the first to RSVP'
+                : `${details.rsvp_count} going, see who's coming`
+            }
           >
             <View style={styles.attendeeRow}>
               <View style={styles.attendeeGroup}>
@@ -832,6 +887,10 @@ export default function EventDetail() {
               }}
               activeOpacity={canOpenEventChat ? 0.85 : 1}
               disabled={!canOpenEventChat}
+              accessibilityRole="button"
+              accessibilityLabel={
+                canOpenEventChat ? 'Open event chat' : 'Event chat, unlocks when 2 people are going'
+              }
             >
               <View style={styles.chatIconWrap}>
                 <MessageCircle
@@ -939,7 +998,13 @@ export default function EventDetail() {
             <View style={styles.venueHeader}>
               <Text style={styles.bigSectionTitle}>The Venue</Text>
               {event.address ? (
-                <TouchableOpacity onPress={() => Linking.openURL(`https://www.google.com/maps?q=${encodeURIComponent(event.address || `${event.lat},${event.lng}`)}`)}>
+                <TouchableOpacity
+                  style={styles.directionsBtn}
+                  onPress={() => Linking.openURL(`https://www.google.com/maps?q=${encodeURIComponent(event.address || `${event.lat},${event.lng}`)}`)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Get directions"
+                  hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                >
                   <Text style={styles.directionsText}>Get Directions</Text>
                 </TouchableOpacity>
               ) : null}
@@ -974,12 +1039,15 @@ export default function EventDetail() {
 
           {links.length > 0 && (
             <View style={styles.linksSection}>
-              <Text style={styles.sectionTitle}>Links</Text>
+              <Text style={styles.bigSectionTitle}>Links</Text>
               {links.map((link) => (
                 <TouchableOpacity
                   key={link.id}
                   style={styles.linkRow}
                   onPress={() => Linking.openURL(link.url)}
+                  accessibilityRole="link"
+                  accessibilityLabel={link.label || link.url}
+                  hitSlop={{ top: 6, bottom: 6 }}
                 >
                   <ExternalLink size={18} color={Colors.primary} />
                   <Text style={styles.linkText} numberOfLines={1}>
@@ -1007,6 +1075,8 @@ export default function EventDetail() {
                 style={styles.insightsBanner}
                 onPress={() => router.push(`/business/event-insights/${event.id}` as never)}
                 activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="View reach, saves and RSVP insights"
               >
                 <TrendingUp size={20} color={Colors.primary} />
                 <Text style={styles.insightsBannerText}>Reach, saves & RSVPs</Text>
@@ -1031,20 +1101,23 @@ export default function EventDetail() {
           )}
 
           {user && !isOwner ? (
-            <TouchableOpacity style={styles.reportEventRow} onPress={handleReportEvent} activeOpacity={0.75}>
+            <TouchableOpacity
+              style={styles.reportEventRow}
+              onPress={handleReportEvent}
+              activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel="Report this event"
+              hitSlop={{ top: 6, bottom: 6 }}
+            >
               <Flag size={18} color={Colors.text.secondary} />
               <Text style={styles.reportEventText}>Report this event</Text>
             </TouchableOpacity>
           ) : null}
 
-          <Text style={styles.trustFootnote}>
-            Reports are reviewed within about 48 hours. We may remove content that violates our guidelines.
-          </Text>
-
           <View style={styles.reviewsSection}>
             {/* These are reviews of the hosting BUSINESS (venue), not of this
                 single event — label them as such. */}
-            <Text style={styles.sectionTitle}>
+            <Text style={styles.bigSectionTitle}>
               {business.name ? `Reviews of ${business.name}` : 'Venue reviews'}
             </Text>
             <View style={{ marginBottom: Spacing.md }}>
@@ -1110,6 +1183,14 @@ export default function EventDetail() {
               />
             ))}
           </View>
+
+          {/* Legal footnotes live at the very bottom of the scroll content. */}
+          <Text style={styles.promoFootnote}>
+            Listings may be ordered using distance, relevance, and paid promotion from hosts.
+          </Text>
+          <Text style={styles.trustFootnote}>
+            Reports are reviewed within about 48 hours. We may remove content that violates our guidelines.
+          </Text>
         </View>
       </ScrollView>
       {!isOwner ? (
@@ -1162,9 +1243,11 @@ export default function EventDetail() {
                           ? `Join Event (${details.rsvp_count} / ${maxAttendees})`
                           : 'Join Event'}
               </Text>
-              <Text style={styles.joinArrow}>
-                {eventEnded || eventFull ? '' : hasJoinedEvent ? '✓' : '→'}
-              </Text>
+              {eventEnded || eventFull ? null : hasJoinedEvent ? (
+                <Text style={styles.joinArrow}>✓</Text>
+              ) : (
+                <ArrowRight size={22} color={Colors.white} />
+              )}
             </TouchableOpacity>
 
             {/* One secondary control replaces the old Going / Interested / Remove row:
@@ -1173,7 +1256,7 @@ export default function EventDetail() {
               hasJoinedEvent ? (
                 <TouchableOpacity
                   style={styles.secondaryActionButton}
-                  onPress={handleRemoveRsvp}
+                  onPress={handleLeaveEvent}
                   disabled={saving}
                   activeOpacity={0.8}
                   accessibilityRole="button"
@@ -1261,32 +1344,63 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  header: {
+  /* ── Loading skeleton (mirrors hero + content card) ── */
+  skeletonHero: {
+    height: 480,
+    backgroundColor: Colors.background.tertiary,
+  },
+  skeletonCard: {
+    marginHorizontal: Spacing.md,
+    marginTop: -Spacing.xl,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.xxl,
+    paddingHorizontal: Spacing.md + Spacing.xs,
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.lg,
+    gap: Spacing.md,
+  },
+  skeletonTitleBar: {
+    height: 28,
+    width: '70%',
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.background.tertiary,
+  },
+  skeletonMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Spacing.md,
-    paddingTop: Platform.OS === 'ios' ? Spacing.xxl + 24 : Spacing.lg,
-    paddingBottom: Spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border.light,
+    gap: Spacing.sm,
+  },
+  skeletonCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.background.tertiary,
+  },
+  skeletonBar: {
+    height: 14,
+    width: '55%',
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.background.tertiary,
+  },
+  skeletonBarShort: {
+    width: '40%',
+  },
+  skeletonParagraph: {
+    marginTop: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  skeletonLine: {
+    height: 12,
+    width: '100%',
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.background.tertiary,
+  },
+  skeletonLineShort: {
+    width: '62%',
   },
   backButton: {
     padding: Spacing.sm,
     marginRight: Spacing.sm,
-  },
-  headerTitle: {
-    flex: 1,
-    fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.text.primary,
-  },
-  headerRight: {
-    width: 40,
-    alignItems: 'flex-end',
-  },
-  reportButton: {
-    padding: Spacing.sm,
   },
   scrollView: {
     flex: 1,
@@ -1296,17 +1410,18 @@ const styles = StyleSheet.create({
     height: 480,
     overflow: 'hidden',
   },
-  scrollContent: {
-    paddingBottom: Spacing.xxl,
-  },
   coverImage: {
     width: SCREEN_WIDTH,
     height: 480,
     backgroundColor: Colors.background.secondary,
   },
   heroGradient: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    // Bottom-up scrim so the white title/category stay legible on any photo.
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 240,
   },
   heroTitleWrap: {
     position: 'absolute',
@@ -1325,8 +1440,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   heroCategoryText: {
-    color: '#FFFFFF',
-    fontSize: 10,
+    color: Colors.white,
+    fontSize: Typography.sizes.xxs,
     letterSpacing: 2,
     fontFamily: Typography.labelFontFamilies.semibold,
   },
@@ -1396,6 +1511,10 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     fontFamily: Typography.labelFontFamilies.semibold,
   },
+  metaBody: {
+    flex: 1,
+    minWidth: 0,
+  },
   metaValue: {
     marginTop: 2,
     fontSize: Typography.sizes.md,
@@ -1403,7 +1522,6 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    maxWidth: SCREEN_WIDTH - 128,
   },
   calendarRow: {
     flexDirection: 'row',
@@ -1441,7 +1559,8 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     color: Colors.text.tertiary,
     fontFamily: Typography.fontFamilies.regular,
-    marginBottom: 14,
+    marginTop: Spacing.xl,
+    marginBottom: Spacing.sm,
   },
   attendeesSection: {
     borderTopWidth: 1,
@@ -1584,13 +1703,14 @@ const styles = StyleSheet.create({
   descriptionSection: {
     marginBottom: 18,
   },
+  // Single section-heading style used by every content section on this screen.
   bigSectionTitle: {
     fontSize: Typography.sizes.xl,
     lineHeight: 28,
     color: Colors.text.primary,
     letterSpacing: -0.2,
-    fontFamily: Typography.displayFontFamilies.extrabold,
-    fontWeight: '800',
+    fontFamily: Typography.displayFontFamilies.bold,
+    fontWeight: Typography.weights.bold,
     marginBottom: 8,
   },
   descriptionText: {
@@ -1616,6 +1736,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 12,
   },
+  directionsBtn: {
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.xs,
+  },
   directionsText: {
     color: Colors.primary,
     fontSize: Typography.sizes.sm,
@@ -1634,76 +1758,11 @@ const styles = StyleSheet.create({
     height: '100%',
     width: '100%',
   },
-  content: {
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.xl,
-    paddingBottom: Spacing.xxl,
-  },
-  title: {
-    fontSize: Typography.sizes.xl,
-    fontFamily: Typography.displayFontFamilies.extrabold,
-    fontWeight: '800',
-    color: Colors.text.primary,
-    marginBottom: Spacing.xs,
-    letterSpacing: 0,
-  },
-  categoryBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: Spacing.sm,
-    backgroundColor: Colors.background.secondary,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    borderRadius: BorderRadius.round,
-    marginBottom: Spacing.md,
-  },
-  categoryText: {
-    fontSize: Typography.sizes.sm,
-    color: Colors.text.secondary,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-  },
-  businessRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-  businessName: {
-    flex: 1,
-    fontSize: Typography.sizes.sm,
-    color: Colors.text.secondary,
-  },
-  followButton: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    borderRadius: BorderRadius.round,
-    borderWidth: 1,
-    borderColor: Colors.primary,
-  },
-  followButtonActive: {
-    backgroundColor: Colors.primary,
-  },
-  followButtonText: {
-    fontSize: Typography.sizes.sm,
-    color: Colors.primary,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-  },
-  followButtonTextActive: {
-    color: Colors.text.inverse,
-  },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: Spacing.sm,
     marginBottom: Spacing.sm,
-  },
-  metaText: {
-    flex: 1,
-    fontSize: Typography.sizes.sm,
-    color: Colors.text.primary,
   },
   recurrenceSection: {
     marginBottom: Spacing.lg,
@@ -1732,27 +1791,8 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xs,
     marginLeft: 26,
   },
-  description: {
-    fontSize: Typography.sizes.sm,
-    color: Colors.text.primary,
-    lineHeight: 22,
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
   linksSection: {
     marginBottom: Spacing.lg,
-    backgroundColor: Colors.background.secondary,
-    borderRadius: BorderRadius.xl,
-    padding: Spacing.lg,
-    ...Shadows.md,
-  },
-  sectionTitle: {
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.text.secondary,
-    textTransform: 'uppercase',
-    marginBottom: Spacing.sm,
   },
   linkRow: {
     flexDirection: 'row',
@@ -1766,61 +1806,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: Typography.sizes.sm,
     color: Colors.primary,
-  },
-  actionsSection: {
-    marginBottom: Spacing.lg,
-    backgroundColor: Colors.background.secondary,
-    borderRadius: BorderRadius.xl,
-    padding: Spacing.lg,
-    ...Shadows.md,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.md,
-    marginBottom: Spacing.md,
-  },
-  actionButton: {
-    flex: 1,
-    minWidth: 140,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 2,
-    borderColor: Colors.primary,
-    backgroundColor: Colors.background.primary,
-    ...Shadows.md,
-  },
-  actionButtonActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  actionButtonText: {
-    fontSize: Typography.sizes.sm,
-    color: Colors.primary,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-  },
-  actionButtonTextActive: {
-    color: Colors.text.inverse,
-  },
-  actionButtonRemove: {
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    borderColor: Colors.border.medium,
-    alignSelf: 'center',
-  },
-  actionButtonRemoveText: {
-    fontSize: Typography.sizes.xs,
-    color: Colors.text.secondary,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
   },
   insightsBanner: {
     flexDirection: 'row',
@@ -1866,14 +1851,9 @@ const styles = StyleSheet.create({
     lineHeight: 15,
     color: Colors.text.tertiary,
     fontFamily: Typography.fontFamilies.regular,
-    marginBottom: Spacing.lg,
   },
   reviewsSection: {
     marginTop: Spacing.xl,
-    backgroundColor: Colors.background.secondary,
-    borderRadius: BorderRadius.xl,
-    padding: Spacing.lg,
-    ...Shadows.md,
   },
   reviewFormTitle: {
     fontSize: Typography.sizes.sm,
@@ -1890,7 +1870,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
     marginBottom: Spacing.md,
     borderRadius: 8,
-    backgroundColor: Colors.background.secondary,
+    backgroundColor: Colors.primarySoft,
   },
   writeReviewBtnText: {
     fontSize: Typography.sizes.xs,
@@ -1901,6 +1881,9 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: Typography.sizes.sm,
     color: Colors.error,
+  },
+  notFoundButton: {
+    marginTop: Spacing.lg,
   },
   bottomActionBar: {
     position: 'absolute',
@@ -1959,7 +1942,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   joinButtonJoined: {
-    backgroundColor: Colors.success,
+    backgroundColor: Colors.successText,
   },
   joinButtonEnded: {
     backgroundColor: Colors.text.tertiary,
@@ -1981,13 +1964,13 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.medium,
   },
   joinButtonText: {
-    color: '#FFFFFF',
-    fontSize: Typography.sizes.sm,
+    color: Colors.white,
+    fontSize: Typography.sizes.md,
     fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
   },
   joinArrow: {
-    color: '#FFFFFF',
+    color: Colors.white,
     fontSize: 26,
     lineHeight: 26,
   },

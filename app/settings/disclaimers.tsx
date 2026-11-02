@@ -22,7 +22,7 @@ export default function DisclaimersScreen() {
         icon: <AlertTriangle size={18} color={Colors.text.primary} />,
         title: 'Community-posted content',
         body:
-          'Event Maps is community-driven. We do not guarantee that event details (time, location, price, age limits, capacity, etc.) are accurate or up to date. Always verify details with the organizer before attending.',
+          'EventMap is community-driven. We do not guarantee that event details (time, location, price, age limits, capacity, etc.) are accurate or up to date. Always verify details with the organizer before attending.',
       },
       {
         id: 'safety',
@@ -50,7 +50,7 @@ export default function DisclaimersScreen() {
         icon: <FileText size={18} color={Colors.text.primary} />,
         title: 'Organizer compliance',
         body:
-          'Event organizers are solely responsible for complying with applicable laws, venue rules, licensing requirements, and local regulations. Event Maps is not responsible for organizer conduct or compliance.',
+          'Event organizers are solely responsible for complying with applicable laws, venue rules, licensing requirements, and local regulations. EventMap is not responsible for organizer conduct or compliance.',
       },
     ],
     []

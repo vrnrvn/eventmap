@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, LayoutAnimation, Linking, Platform, UIManager } from 'react-native';
 import { ChevronDown, Mail } from 'lucide-react-native';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Colors, Typography } from '@/constants/theme';
@@ -33,21 +33,21 @@ export default function FAQScreen() {
         items: [
           {
             id: 'what-is-eventmaps',
-            question: 'What is Event Maps?',
+            question: 'What is EventMap?',
             answer:
-              'Event Maps helps you discover events on a map and share your own events with people nearby. You can browse, save, and get notified about updates depending on your settings.',
+              'EventMap helps you discover events on a map and share your own events with people nearby. You can browse, save, and get notified about updates depending on your settings.',
           },
           {
             id: 'create-event',
             question: 'How do I create an event?',
             answer:
-              'From the main map, tap the “+” button, add the event details, choose a location, and publish. Your account limits (free vs. premium) are applied automatically when you submit.',
+              'Go to the Create tab, add the event details, choose a location, and publish. Your account limits (free vs. premium) are applied automatically when you submit.',
           },
           {
             id: 'edit-or-delete',
             question: 'Can I edit or delete an event after posting?',
             answer:
-              'Yes. Go to your Profile → Your Events, select the event, then edit or delete it. If you can’t see an event you posted, make sure you’re signed into the correct account.',
+              'Yes. Go to the Profile tab and open “Created” to see events you posted, then select the event to edit or delete it. If you can’t see an event you posted, make sure you’re signed into the correct account.',
           },
         ],
       },
@@ -65,7 +65,7 @@ export default function FAQScreen() {
             id: 'upgrade',
             question: 'How do I upgrade to premium?',
             answer:
-              'Open your Profile → Premium to see available options. If your account was upgraded by an admin (e.g., business onboarding), you’ll see premium status there as well.',
+              'Open the Profile tab — business accounts see an “Upgrade to Premium” card there with the available plans. If your account was upgraded by an admin (e.g., business onboarding), you’ll see premium status there as well.',
           },
           {
             id: 'billing',
@@ -89,7 +89,7 @@ export default function FAQScreen() {
             id: 'wrong-location',
             question: 'My location looks wrong on the map—how do I fix it?',
             answer:
-              'Check that Location Services are enabled for your device and that Event Maps has permission. If you’re using a VPN or mock location, it can also affect accuracy.',
+              'Check that Location Services are enabled for your device and that EventMap has permission. If you’re using a VPN or mock location, it can also affect accuracy.',
           },
         ],
       },
@@ -101,13 +101,13 @@ export default function FAQScreen() {
             id: 'enable-notifs',
             question: 'How do I turn notifications on or off?',
             answer:
-              'Use your device settings to control notification permissions. In-app notification preferences (when available) let you choose which types of updates you want to receive.',
+              'Use your device settings to control notification permissions. In the app, open Profile → Settings → Notifications to choose which types of updates you want to receive.',
           },
           {
             id: 'not-receiving',
             question: 'I’m not receiving notifications. What should I check?',
             answer:
-              'Make sure notifications are enabled for Event Maps in your device settings, Low Power Mode is off (iOS), and you have a stable connection. If the issue continues, contact support.',
+              'Make sure notifications are enabled for EventMap in your device settings, Low Power Mode is off (iOS), and you have a stable connection. If the issue continues, contact support.',
           },
         ],
       },
@@ -119,7 +119,7 @@ export default function FAQScreen() {
             id: 'safety',
             question: 'Any safety tips for attending events?',
             answer:
-              'Meet in public places when possible, trust your instincts, and verify details with the organizer. Event Maps is a discovery tool—always use good judgment and confirm event information.',
+              'Meet in public places when possible, trust your instincts, and verify details with the organizer. EventMap is a discovery tool—always use good judgment and confirm event information.',
           },
           {
             id: 'data',
@@ -154,9 +154,17 @@ export default function FAQScreen() {
             <Text style={styles.supportTitle}>Support</Text>
           </View>
           <Text style={styles.supportText}>
-            Email us at support@eventmaps.app with your account email and a short description of the issue.
+            Email us at{' '}
+            <Text
+              style={styles.supportLink}
+              onPress={() => Linking.openURL('mailto:support@eventmap.com')}
+              accessibilityRole="link"
+              accessibilityLabel="Email support at support@eventmap.com"
+            >
+              support@eventmap.com
+            </Text>{' '}
+            with your account email and a short description of the issue.
           </Text>
-          {/* Optional: wire up to a mailto link later */}
         </View>
 
         {sections.map((section) => (
@@ -194,7 +202,7 @@ export default function FAQScreen() {
         ))}
 
         <Text style={styles.footerNote}>
-          Last updated: Mar 2, 2026
+          Last updated: November 1, 2026
         </Text>
       </ScrollView>
     </View>
@@ -235,6 +243,12 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.regular ?? Typography.fontFamily,
     color: Colors.text.secondary,
     lineHeight: 20,
+  },
+  supportLink: {
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    textDecorationLine: 'underline',
   },
   section: { marginTop: 18 },
   sectionTitle: {

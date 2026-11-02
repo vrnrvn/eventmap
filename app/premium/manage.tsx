@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -12,7 +13,6 @@ import {
   Crown,
   CreditCard,
   Check,
-  X,
 } from 'lucide-react-native';
 import { usePremium } from '@/contexts/PremiumContext';
 import { notify, notifyConfirm } from '@/utils/notify';
@@ -27,18 +27,16 @@ const STRIPE_PORTAL_URL = process.env.EXPO_PUBLIC_STRIPE_CUSTOMER_PORTAL_URL?.tr
 
 const Palette = {
   gradientStart: Colors.primary,
-  gradientEnd: Colors.accent,
-  cardBg: Colors.background.primary,
-  surfaceMuted: Colors.background.primary,
+  cardBg: Colors.surface,
+  surfaceMuted: Colors.background.secondary,
   accentSoft: Colors.primarySoft,
   separator: Colors.border.light,
-  premiumGold: Colors.accent,
+  premium: Colors.premium,
+  premiumSoft: Colors.premiumSoft,
   success: Colors.success,
   successSoft: Colors.successSoft,
   error: Colors.error,
   errorSoft: Colors.errorSoft,
-  warn: Colors.warning,
-  warnSoft: Colors.warningSoft,
 };
 
 export default function ManageSubscriptionScreen() {
@@ -112,7 +110,7 @@ export default function ManageSubscriptionScreen() {
         >
           <View style={styles.emptyState}>
             <View style={styles.emptyIconWrap}>
-              <Crown size={48} color={Palette.premiumGold} />
+              <Crown size={48} color={Palette.premium} />
             </View>
             <Text style={styles.emptyTitle}>No Active Subscription</Text>
             <Text style={styles.emptySubtitle}>
@@ -144,7 +142,7 @@ export default function ManageSubscriptionScreen() {
         <View style={styles.planCard}>
           <View style={styles.planCardHeader}>
             <View style={styles.planIconWrap}>
-              <Crown size={24} color={Palette.premiumGold} />
+              <Crown size={24} color={Palette.premium} />
             </View>
             <View style={styles.planInfo}>
               <Text style={styles.planName}>{currentPlan?.name ?? 'Free'}</Text>
@@ -203,24 +201,31 @@ export default function ManageSubscriptionScreen() {
           </View>
         )}
 
-        {/* Actions */}
+        {/* Actions — Change Plan is the primary action; cancel is a quiet
+            destructive outline below it. */}
         <View style={styles.actionsCard}>
-          <Button
-            label="Cancel Subscription"
-            onPress={handleCancel}
-            loading={canceling}
-            variant="destructive"
-            fullWidth
-            icon={<X size={18} color="#FFFFFF" />}
-          />
-
           <Button
             label="Change Plan"
             onPress={handleUpgrade}
-            variant="ghost"
+            variant="primary"
             fullWidth
-            style={styles.changePlanButton}
           />
+
+          <TouchableOpacity
+            style={styles.cancelButton}
+            onPress={handleCancel}
+            disabled={canceling}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel Subscription"
+            accessibilityState={{ disabled: canceling, busy: canceling }}
+          >
+            {canceling ? (
+              <ActivityIndicator color={Palette.error} />
+            ) : (
+              <Text style={styles.cancelButtonText}>Cancel Subscription</Text>
+            )}
+          </TouchableOpacity>
         </View>
 
         {/* Payment method */}
@@ -285,14 +290,14 @@ const styles = StyleSheet.create({
     width: 96,
     height: 96,
     borderRadius: 24,
-    backgroundColor: Palette.warnSoft,
+    backgroundColor: Palette.premiumSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.lg,
   },
   emptyTitle: {
     fontSize: Typography.sizes.xl,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginBottom: Spacing.sm,
@@ -321,7 +326,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 16,
-    backgroundColor: Palette.warnSoft,
+    backgroundColor: Palette.premiumSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: Spacing.md,
@@ -331,7 +336,7 @@ const styles = StyleSheet.create({
   },
   planName: {
     fontSize: Typography.sizes.xl,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginBottom: 4,
@@ -409,8 +414,20 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     ...Shadows.md,
   },
-  changePlanButton: {
-    backgroundColor: Palette.accentSoft,
+  cancelButton: {
+    minHeight: 48,
+    borderRadius: BorderRadius.round,
+    borderWidth: 1.5,
+    borderColor: Palette.error,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.lg,
+  },
+  cancelButtonText: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+    color: Palette.error,
   },
   paymentCard: {
     backgroundColor: Palette.cardBg,

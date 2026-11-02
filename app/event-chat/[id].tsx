@@ -1233,12 +1233,24 @@ export default function EventChatScreen() {
     }
 
     if (!canChat) {
+      // The viewer is still going, so the room relocked because attendance
+      // dropped below 2 — explain why earlier messages disappeared instead of
+      // asking them to RSVP again.
+      const relocked = details.user_rsvp === 'going';
       return (
         <View style={styles.centerState}>
-          <Users size={44} color={Colors.text.tertiary} />
-          <Text style={styles.centerTitle}>Chat unlocks with 2 attendees</Text>
+          {relocked ? (
+            <Lock size={44} color={Colors.text.tertiary} />
+          ) : (
+            <Users size={44} color={Colors.text.tertiary} />
+          )}
+          <Text style={styles.centerTitle}>
+            {relocked ? 'Chat is locked' : 'Chat unlocks with 2 attendees'}
+          </Text>
           <Text style={styles.centerText}>
-            RSVP as going, then this room opens once at least two people are going.
+            {relocked
+              ? 'It unlocks when at least 2 people are going. Messages are hidden until then.'
+              : 'RSVP as going, then this room opens once at least two people are going.'}
           </Text>
           <TouchableOpacity
             style={styles.primaryButton}

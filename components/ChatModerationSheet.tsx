@@ -154,7 +154,7 @@ export function ChatModerationSheet({
   if (!visible) return null;
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close moderation tools">
         <Pressable
           style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, Spacing.md) }]}
@@ -249,7 +249,7 @@ export function ChatModerationSheet({
             ) : (
               reported.map((item) => (
                 <View key={item.message_id} style={styles.reportCard}>
-                  <Text style={styles.reportMeta} numberOfLines={1}>
+                  <Text style={styles.reportMeta} numberOfLines={2}>
                     <Text style={styles.logActor}>{item.sender_name}</Text>
                     {` · ${when(item.created_at)} · ${item.report_count} ${item.report_count === 1 ? 'report' : 'reports'}`}
                     {item.reasons.length > 0 ? ` · ${item.reasons.join(', ')}` : ''}
@@ -263,6 +263,9 @@ export function ChatModerationSheet({
                       disabled={busyMessage === item.message_id}
                       style={({ pressed }) => [styles.reportButton, pressed && styles.pressed]}
                       accessibilityRole="button"
+                      accessibilityLabel={
+                        item.sender_name ? `Keep message from ${item.sender_name}` : 'Keep message'
+                      }
                     >
                       <Text style={styles.reportButtonText}>Keep</Text>
                     </Pressable>
@@ -272,9 +275,12 @@ export function ChatModerationSheet({
                         disabled={busyMessage === item.message_id}
                         style={({ pressed }) => [styles.reportButton, styles.reportButtonDanger, pressed && styles.pressed]}
                         accessibilityRole="button"
+                        accessibilityLabel={
+                          item.sender_name ? `Remove message from ${item.sender_name}` : 'Remove message'
+                        }
                       >
                         {busyMessage === item.message_id ? (
-                          <ActivityIndicator size="small" color="#FFFFFF" />
+                          <ActivityIndicator size="small" color={Colors.white} />
                         ) : (
                           <Text style={styles.reportButtonDangerText}>Remove</Text>
                         )}

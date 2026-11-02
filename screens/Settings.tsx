@@ -9,7 +9,9 @@ import {
   KeyboardAvoidingView,
   Platform,
   Switch,
+  ActivityIndicator,
 } from 'react-native';
+import Constants from 'expo-constants';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -39,7 +41,6 @@ import {
   Heart,
   MapPin,
   Tag,
-  AtSign,
   Navigation,
   Check,
   Image as ImageIcon,
@@ -50,14 +51,28 @@ import {
   ChevronRight,
   MessageCircle,
   KeyRound,
+  LogOut,
+  Info,
   Trash2,
+  Instagram,
+  Facebook,
+  Star,
+  Eye,
+  Users,
+  CalendarDays,
+  CalendarPlus,
+  CalendarClock,
+  CalendarCheck,
+  UserPlus,
+  Sparkles,
+  Clock,
 } from 'lucide-react-native';
 
 const Palette = {
   gradientStart: Colors.primary,
   gradientEnd: Colors.accent,
-  cardBg: Colors.background.primary,
-  surfaceMuted: Colors.background.primary,
+  cardBg: Colors.surface,
+  surfaceMuted: Colors.background.secondary,
   accentSoft: Colors.primarySoft,
   textOnGradient: Colors.text.inverse,
   textOnGradientMuted: alpha(Colors.surface, 0.75),
@@ -91,7 +106,7 @@ const BUSINESS_CATEGORIES = [
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { user, profile, refreshProfile } = useAuth();
+  const { user, profile, refreshProfile, signOut } = useAuth();
   const { userBusiness, refreshBusiness, userMode, hasBusiness } = useApp();
   const { isPremium } = usePremium();
   const [saving, setSaving] = useState<'user' | 'business' | null>(null);
@@ -139,6 +154,7 @@ export default function SettingsScreen() {
 
   const [businessForm, setBusinessForm] = useState({
     name: '',
+    description: '',
     category: '',
     contactEmail: '',
     address: '',
@@ -238,6 +254,7 @@ export default function SettingsScreen() {
         const handles = (userBusiness.social_handles as { instagram?: string; facebook?: string } | null) ?? {};
         setBusinessForm({
           name: userBusiness.name ?? '',
+          description: userBusiness.description ?? '',
           category: userBusiness.category ?? '',
           contactEmail: userBusiness.contact_email ?? '',
           address: userBusiness.address ?? '',
@@ -273,6 +290,8 @@ export default function SettingsScreen() {
     // Rebuild from scratch so resolved errors clear on re-validation.
     const next: Record<string, string> = {};
     if (!businessForm.name.trim()) next.businessName = 'Business name is required';
+    // Description stays optional on update: businesses created before the field
+    // was required must not be blocked from saving unrelated edits.
     if (!businessForm.category) next.category = 'Category is required';
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -309,6 +328,7 @@ export default function SettingsScreen() {
     try {
       await businessesService.updateBusiness(userBusiness.id, {
         name: businessForm.name.trim(),
+        description: businessForm.description.trim(),
         category: businessForm.category,
         contact_email: businessForm.contactEmail.trim() || null,
         address: businessForm.address.trim(),
@@ -468,6 +488,7 @@ export default function SettingsScreen() {
       originalIds.some((id) => !currentPhotoIds.includes(id));
     return (
       (businessForm.name ?? '') !== (userBusiness.name ?? '') ||
+      (businessForm.description ?? '') !== (userBusiness.description ?? '') ||
       (businessForm.category ?? '') !== (userBusiness.category ?? '') ||
       (businessForm.contactEmail ?? '') !== (userBusiness.contact_email ?? '') ||
       (businessForm.address ?? '') !== (userBusiness.address ?? '') ||
@@ -546,6 +567,18 @@ export default function SettingsScreen() {
     });
   };
 
+  const handleSignOut = async () => {
+    const ok = await confirmAction({
+      title: 'Sign Out',
+      message: 'Are you sure you want to sign out?',
+      confirmLabel: 'Sign Out',
+      destructive: true,
+    });
+    if (!ok) return;
+    await signOut();
+    router.replace('/');
+  };
+
   const performDeleteAccount = async () => {
     if (deletingAccount) return;
     setDeletingAccount(true);
@@ -610,17 +643,22 @@ export default function SettingsScreen() {
               style={styles.headerSaveWrap}
               accessibilityRole="button"
               accessibilityLabel="Save business settings"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Text
-                style={[
-                  styles.headerSaveText,
-                  {
-                    color: businessFormDirty && saving === null ? accentColor : Colors.text.tertiary,
-                  },
-                ]}
-              >
-                {saving === 'business' ? '...' : 'Save'}
-              </Text>
+              {saving === 'business' ? (
+                <ActivityIndicator size="small" color={accentColor} />
+              ) : (
+                <Text
+                  style={[
+                    styles.headerSaveText,
+                    {
+                      color: businessFormDirty ? accentColor : Colors.text.tertiary,
+                    },
+                  ]}
+                >
+                  Save
+                </Text>
+              )}
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
@@ -630,17 +668,22 @@ export default function SettingsScreen() {
               style={styles.headerSaveWrap}
               accessibilityRole="button"
               accessibilityLabel="Save settings"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Text
-                style={[
-                  styles.headerSaveText,
-                  {
-                    color: userFormDirty && saving === null ? accentColor : Colors.text.tertiary,
-                  },
-                ]}
-              >
-                {saving === 'user' ? '...' : 'Save'}
-              </Text>
+              {saving === 'user' ? (
+                <ActivityIndicator size="small" color={accentColor} />
+              ) : (
+                <Text
+                  style={[
+                    styles.headerSaveText,
+                    {
+                      color: userFormDirty ? accentColor : Colors.text.tertiary,
+                    },
+                  ]}
+                >
+                  Save
+                </Text>
+              )}
             </TouchableOpacity>
           )
         }
@@ -694,6 +737,29 @@ export default function SettingsScreen() {
 
                 <View style={styles.fieldSeparator} />
 
+                {/* Description */}
+                <View style={styles.fieldRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <FileText size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.fieldContent}>
+                    <Input
+                      label="Description"
+                      value={businessForm.description}
+                      onChangeText={(t) =>
+                        setBusinessForm((p) => ({ ...p, description: t }))
+                      }
+                      placeholder="Tell people about your business"
+                      maxLength={500}
+                      multiline
+                      numberOfLines={4}
+                      error={errors.businessDescription}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.fieldSeparator} />
+
                 {/* Category */}
                 <View style={styles.fieldRowNoPad}>
                   <View style={[styles.fieldIcon, { marginTop: 14, backgroundColor: accentSoft }]}>
@@ -719,6 +785,10 @@ export default function SettingsScreen() {
                               setBusinessForm((p) => ({ ...p, category: cat }))
                             }
                             activeOpacity={0.7}
+                            accessibilityRole="button"
+                            accessibilityLabel={cat}
+                            accessibilityState={{ selected }}
+                            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                           >
                             <CategoryIcon category={cat} size="sm" variant="pill" />
                             <Text
@@ -744,7 +814,7 @@ export default function SettingsScreen() {
                 {/* Contact Email */}
                 <View style={styles.fieldRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <AtSign size={16} color={accentColor} />
+                    <Mail size={16} color={accentColor} />
                   </View>
                   <View style={styles.fieldContent}>
                     <Input
@@ -765,7 +835,7 @@ export default function SettingsScreen() {
                 {/* Google Reviews URL */}
                 <View style={styles.fieldRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <FileText size={16} color={accentColor} />
+                    <Star size={16} color={accentColor} />
                   </View>
                   <View style={styles.fieldContent}>
                     <Input
@@ -786,7 +856,7 @@ export default function SettingsScreen() {
                 {/* Instagram */}
                 <View style={styles.fieldRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <AtSign size={16} color={accentColor} />
+                    <Instagram size={16} color={accentColor} />
                   </View>
                   <View style={styles.fieldContent}>
                     <Input
@@ -808,7 +878,7 @@ export default function SettingsScreen() {
                 {/* Facebook */}
                 <View style={styles.fieldRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <AtSign size={16} color={accentColor} />
+                    <Facebook size={16} color={accentColor} />
                   </View>
                   <View style={styles.fieldContent}>
                     <Input
@@ -847,6 +917,12 @@ export default function SettingsScreen() {
                         })
                       }
                       activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        businessForm.address
+                          ? `Business location, ${businessForm.address}`
+                          : 'Set business location on map'
+                      }
                     >
                       <View style={styles.addressTouchableRow}>
                         <MapPin size={18} color={Colors.text.tertiary} />
@@ -910,6 +986,8 @@ export default function SettingsScreen() {
                   <Switch
                     value={businessNotificationForm.notificationsEnabled}
                     onValueChange={handleBusinessNotificationToggle}
+                    accessibilityLabel="Receive notifications"
+                    accessibilityHint="RSVPs and new followers"
                     trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       businessNotificationForm.notificationsEnabled
@@ -926,6 +1004,9 @@ export default function SettingsScreen() {
                   style={styles.unsubscribeWrap}
                   onPress={handleManageSubscription}
                   activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Manage subscription"
+                  hitSlop={{ top: 4, bottom: 4, left: 12, right: 12 }}
                 >
                   <Text style={styles.unsubscribeText}>Manage subscription</Text>
                 </TouchableOpacity>
@@ -1008,7 +1089,7 @@ export default function SettingsScreen() {
                 {/* Instagram */}
                 <View style={styles.fieldRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <AtSign size={16} color={accentColor} />
+                    <Instagram size={16} color={accentColor} />
                   </View>
                   <View style={styles.fieldContent}>
                     <Input
@@ -1028,7 +1109,7 @@ export default function SettingsScreen() {
                 {/* Facebook */}
                 <View style={styles.fieldRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <AtSign size={16} color={accentColor} />
+                    <Facebook size={16} color={accentColor} />
                   </View>
                   <View style={styles.fieldContent}>
                     <Input
@@ -1089,6 +1170,10 @@ export default function SettingsScreen() {
                         })
                       }
                       activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        userForm.city ? `Location, ${userForm.city}` : 'Set location on map'
+                      }
                     >
                       <View style={styles.addressTouchableRow}>
                         <MapPin size={18} color={Colors.text.tertiary} />
@@ -1122,7 +1207,7 @@ export default function SettingsScreen() {
               <View style={styles.card}>
                 <View style={styles.privacyRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <Shield size={16} color={accentColor} />
+                    <Eye size={16} color={accentColor} />
                   </View>
                   <View style={styles.privacyContent}>
                     <Text style={styles.privacyTitle}>Show my profile to others</Text>
@@ -1133,6 +1218,8 @@ export default function SettingsScreen() {
                   <Switch
                     value={privacyForm.showProfileToOthers}
                     onValueChange={(v) => handlePrivacyToggle('showProfileToOthers', v)}
+                    accessibilityLabel="Show my profile to others"
+                    accessibilityHint="Let others view your profile, bio, and social links"
                     trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       privacyForm.showProfileToOthers ? Colors.primary : Colors.background.secondary
@@ -1142,10 +1229,10 @@ export default function SettingsScreen() {
                 <View style={styles.fieldSeparator} />
                 <View style={styles.privacyRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <Shield size={16} color={accentColor} />
+                    <Users size={16} color={accentColor} />
                   </View>
                   <View style={styles.privacyContent}>
-                    <Text style={styles.privacyTitle}>Allow others to see which events I attend?</Text>
+                    <Text style={styles.privacyTitle}>Show my event attendance</Text>
                     <Text style={styles.privacyDesc}>
                       Show your name in the &quot;Who&apos;s Going&quot; list when you RSVP
                     </Text>
@@ -1153,6 +1240,8 @@ export default function SettingsScreen() {
                   <Switch
                     value={privacyForm.showAttendancePublicly}
                     onValueChange={(v) => handlePrivacyToggle('showAttendancePublicly', v)}
+                    accessibilityLabel="Show my event attendance"
+                    accessibilityHint="Show your name in the Who's Going list when you RSVP"
                     trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       privacyForm.showAttendancePublicly
@@ -1164,10 +1253,10 @@ export default function SettingsScreen() {
                 <View style={styles.fieldSeparator} />
                 <View style={styles.privacyRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <Shield size={16} color={accentColor} />
+                    <CalendarDays size={16} color={accentColor} />
                   </View>
                   <View style={styles.privacyContent}>
-                    <Text style={styles.privacyTitle}>Show my upcoming events on my profile?</Text>
+                    <Text style={styles.privacyTitle}>Show my future events</Text>
                     <Text style={styles.privacyDesc}>
                       Display events you&apos;re planning to attend on your public profile
                     </Text>
@@ -1175,6 +1264,8 @@ export default function SettingsScreen() {
                   <Switch
                     value={privacyForm.showFutureEvents}
                     onValueChange={(v) => handlePrivacyToggle('showFutureEvents', v)}
+                    accessibilityLabel="Show my future events"
+                    accessibilityHint="Display events you're planning to attend on your public profile"
                     trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       privacyForm.showFutureEvents ? Colors.primary : Colors.background.secondary
@@ -1190,15 +1281,17 @@ export default function SettingsScreen() {
               <View style={styles.card}>
                 <View style={styles.privacyRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <Bell size={16} color={accentColor} />
+                    <UserPlus size={16} color={accentColor} />
                   </View>
                   <View style={styles.privacyContent}>
                     <Text style={styles.privacyTitle}>New followers</Text>
-                    <Text style={styles.privacyDesc}>When someone follows your business</Text>
+                    <Text style={styles.privacyDesc}>When someone follows you</Text>
                   </View>
                   <Switch
                     value={notificationForm.newFollower}
                     onValueChange={(v) => handleNotificationToggle('newFollower', v)}
+                    accessibilityLabel="New followers"
+                    accessibilityHint="When someone follows you"
                     trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       notificationForm.newFollower ? Colors.primary : Colors.background.secondary
@@ -1208,7 +1301,7 @@ export default function SettingsScreen() {
                 <View style={styles.fieldSeparator} />
                 <View style={styles.privacyRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <Bell size={16} color={accentColor} />
+                    <CalendarPlus size={16} color={accentColor} />
                   </View>
                   <View style={styles.privacyContent}>
                     <Text style={styles.privacyTitle}>New events from followed businesses</Text>
@@ -1217,6 +1310,8 @@ export default function SettingsScreen() {
                   <Switch
                     value={notificationForm.newEventFromFollowed}
                     onValueChange={(v) => handleNotificationToggle('newEventFromFollowed', v)}
+                    accessibilityLabel="New events from followed businesses"
+                    accessibilityHint="When a business you follow posts an event"
                     trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       notificationForm.newEventFromFollowed
@@ -1228,7 +1323,7 @@ export default function SettingsScreen() {
                 <View style={styles.fieldSeparator} />
                 <View style={styles.privacyRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <Bell size={16} color={accentColor} />
+                    <CalendarClock size={16} color={accentColor} />
                   </View>
                   <View style={styles.privacyContent}>
                     <Text style={styles.privacyTitle}>Event updates</Text>
@@ -1237,34 +1332,43 @@ export default function SettingsScreen() {
                   <Switch
                     value={notificationForm.eventUpdate}
                     onValueChange={(v) => handleNotificationToggle('eventUpdate', v)}
+                    accessibilityLabel="Event updates"
+                    accessibilityHint="When an event you RSVP'd to changes"
                     trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       notificationForm.eventUpdate ? Colors.primary : Colors.background.secondary
                     }
                   />
                 </View>
+                {/* RSVPs only make sense for accounts that host events */}
+                {hasBusiness && (
+                  <>
+                    <View style={styles.fieldSeparator} />
+                    <View style={styles.privacyRow}>
+                      <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                        <CalendarCheck size={16} color={accentColor} />
+                      </View>
+                      <View style={styles.privacyContent}>
+                        <Text style={styles.privacyTitle}>RSVPs</Text>
+                        <Text style={styles.privacyDesc}>When someone RSVPs to your event</Text>
+                      </View>
+                      <Switch
+                        value={notificationForm.rsvp}
+                        onValueChange={(v) => handleNotificationToggle('rsvp', v)}
+                        accessibilityLabel="RSVPs"
+                        accessibilityHint="When someone RSVPs to your event"
+                        trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
+                        thumbColor={
+                          notificationForm.rsvp ? Colors.primary : Colors.background.secondary
+                        }
+                      />
+                    </View>
+                  </>
+                )}
                 <View style={styles.fieldSeparator} />
                 <View style={styles.privacyRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <Bell size={16} color={accentColor} />
-                  </View>
-                  <View style={styles.privacyContent}>
-                    <Text style={styles.privacyTitle}>RSVPs</Text>
-                    <Text style={styles.privacyDesc}>When someone RSVPs to your event</Text>
-                  </View>
-                  <Switch
-                    value={notificationForm.rsvp}
-                    onValueChange={(v) => handleNotificationToggle('rsvp', v)}
-                    trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
-                    thumbColor={
-                      notificationForm.rsvp ? Colors.primary : Colors.background.secondary
-                    }
-                  />
-                </View>
-                <View style={styles.fieldSeparator} />
-                <View style={styles.privacyRow}>
-                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <Bell size={16} color={accentColor} />
+                    <MapPin size={16} color={accentColor} />
                   </View>
                   <View style={styles.privacyContent}>
                     <Text style={styles.privacyTitle}>Nearby events</Text>
@@ -1273,6 +1377,8 @@ export default function SettingsScreen() {
                   <Switch
                     value={notificationForm.nearbyEvent}
                     onValueChange={(v) => handleNotificationToggle('nearbyEvent', v)}
+                    accessibilityLabel="Nearby events"
+                    accessibilityHint="Events starting soon near you"
                     trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       notificationForm.nearbyEvent ? Colors.primary : Colors.background.secondary
@@ -1291,6 +1397,8 @@ export default function SettingsScreen() {
                   <Switch
                     value={notificationForm.chatMessage}
                     onValueChange={(v) => handleNotificationToggle('chatMessage', v)}
+                    accessibilityLabel="Event chat messages"
+                    accessibilityHint="New messages in chats for events you're going to"
                     trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       notificationForm.chatMessage ? Colors.primary : Colors.background.secondary
@@ -1300,7 +1408,7 @@ export default function SettingsScreen() {
                 <View style={styles.fieldSeparator} />
                 <View style={styles.privacyRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <Bell size={16} color={accentColor} />
+                    <Sparkles size={16} color={accentColor} />
                   </View>
                   <View style={styles.privacyContent}>
                     <Text style={styles.privacyTitle}>Interested nudge</Text>
@@ -1311,6 +1419,8 @@ export default function SettingsScreen() {
                   <Switch
                     value={notificationForm.interestedReminder}
                     onValueChange={(v) => handleNotificationToggle('interestedReminder', v)}
+                    accessibilityLabel="Interested nudge"
+                    accessibilityHint="A still interested note the day before events you marked"
                     trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       notificationForm.interestedReminder ? Colors.primary : Colors.background.secondary
@@ -1320,7 +1430,7 @@ export default function SettingsScreen() {
                 <View style={styles.fieldSeparator} />
                 <View style={styles.privacyRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
-                    <Bell size={16} color={accentColor} />
+                    <Clock size={16} color={accentColor} />
                   </View>
                   <View style={styles.privacyContent}>
                     <Text style={styles.privacyTitle}>Event reminder</Text>
@@ -1330,6 +1440,8 @@ export default function SettingsScreen() {
                   </View>
                   <Switch
                     value={notificationForm.eventReminderMinutes != null}
+                    accessibilityLabel="Event reminder"
+                    accessibilityHint="Remind me before events I'm attending"
                     onValueChange={(v) =>
                       handleNotificationToggle(
                         'eventReminderMinutes',
@@ -1349,7 +1461,7 @@ export default function SettingsScreen() {
                     <View style={styles.fieldSeparator} />
                     <View style={styles.fieldRowNoPad}>
                       <View style={[styles.fieldIcon, { marginTop: 14, backgroundColor: accentSoft }]}>
-                        <Bell size={16} color={accentColor} />
+                        <Clock size={16} color={accentColor} />
                       </View>
                       <View style={styles.fieldContent}>
                         <Text style={styles.catLabel}>Remind me</Text>
@@ -1375,6 +1487,10 @@ export default function SettingsScreen() {
                                   handleNotificationToggle('eventReminderMinutes', opt.value)
                                 }
                                 activeOpacity={0.7}
+                                accessibilityRole="button"
+                                accessibilityLabel={opt.label}
+                                accessibilityState={{ selected }}
+                                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                               >
                                 <Text
                                   style={[
@@ -1403,6 +1519,8 @@ export default function SettingsScreen() {
                   style={styles.aboutRow}
                   onPress={() => router.push('/settings/faq')}
                   activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="FAQ"
                 >
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
                     <FileText size={16} color={accentColor} />
@@ -1420,6 +1538,8 @@ export default function SettingsScreen() {
                   style={styles.aboutRow}
                   onPress={() => router.push('/settings/disclaimers')}
                   activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Disclaimers"
                 >
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
                     <Shield size={16} color={accentColor} />
@@ -1430,6 +1550,20 @@ export default function SettingsScreen() {
                   </View>
                   <ChevronRight size={18} color={Colors.text.tertiary} />
                 </TouchableOpacity>
+
+                <View style={styles.fieldSeparator} />
+
+                <View style={styles.aboutRow}>
+                  <View style={[styles.fieldIcon, styles.fieldIconMuted]}>
+                    <Info size={16} color={Colors.text.tertiary} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>App version</Text>
+                    <Text style={styles.privacyDesc}>
+                      {Constants.expoConfig?.version ?? 'Unknown'}
+                    </Text>
+                  </View>
+                </View>
               </View>
 
               {/* ── Account Section ── */}
@@ -1515,6 +1649,7 @@ export default function SettingsScreen() {
                         activeOpacity={0.8}
                         accessibilityRole="button"
                         accessibilityLabel="Send confirmation email"
+                        hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                       >
                         <Text style={styles.emailSaveBtnText}>
                           {emailForm.saving ? 'Sending…' : 'Send confirmation email'}
@@ -1526,6 +1661,28 @@ export default function SettingsScreen() {
 
                 <View style={styles.fieldSeparator} />
 
+                <TouchableOpacity
+                  style={styles.aboutRow}
+                  onPress={handleSignOut}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Sign out"
+                >
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <LogOut size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Sign out</Text>
+                    <Text style={styles.privacyDesc}>Sign out of your account on this device</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+
+              {/* ── Danger Zone ── */}
+              <View style={[styles.sectionLabelRow, { marginTop: 32 }]}>
+                <Text style={styles.sectionLabel}>Danger Zone</Text>
+              </View>
+              <View style={styles.card}>
                 <TouchableOpacity
                   style={styles.aboutRow}
                   onPress={handleDeleteAccount}
@@ -1545,7 +1702,6 @@ export default function SettingsScreen() {
                       Permanently erase your profile, events, and all data
                     </Text>
                   </View>
-                  <ChevronRight size={18} color={Colors.text.tertiary} />
                 </TouchableOpacity>
               </View>
             </>
@@ -1629,15 +1785,7 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.cardBg,
     borderRadius: 20,
     overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 10,
-      },
-      android: { elevation: 3 },
-    }),
+    ...Shadows.card,
   },
 
   /* ── Field rows ── */

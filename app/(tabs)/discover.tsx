@@ -13,7 +13,7 @@ import {
   Modal,
   Linking,
 } from 'react-native';
-import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { router, useFocusEffect } from 'expo-router';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,18 +27,24 @@ import { RankedEvent, Category } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { getCategoryIconColor } from '@/constants/categoryIcons';
 import { CategoryIcon } from '@/components/CategoryIcon';
-import { Users, List, Repeat, X, Search, SlidersHorizontal, Plus, MapPin, BookmarkCheck } from 'lucide-react-native';
+import { X, Search, SlidersHorizontal, Plus, MapPin, BookmarkCheck, Flame } from 'lucide-react-native';
 import { EventmapFilter, EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView';
 import { EventCardCarousel } from '@/components/EventCardCarousel';
 import { Avatar } from '@/components/Avatar';
 import { SearchOverlay } from '@/components/SearchOverlay';
-import { filterEventsByDateRange } from '@/utils/recurrence';
+import { filterEventsByDateRange, getNextOccurrences } from '@/utils/recurrence';
 import { isInBounds, radiusKmFromBounds } from '@/utils/geoBounds';
 import { bannersService, type AppBanner } from '@/services/banners';
 import { AppBannerCarousel } from '@/components/AppBannerCarousel';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { notify } from '@/utils/notify';
+import { Button } from '@/components/ui/Button';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+/** Matches listContent/sheetHeader paddingHorizontal (24pt per side). */
+const LIST_HORIZONTAL_PADDING = 24;
+const EVENT_CARD_WIDTH = SCREEN_WIDTH - LIST_HORIZONTAL_PADDING * 2;
 const DEFAULT_CENTER = { lat: 37.7749, lng: -122.4194 };
 const REGION_DEBOUNCE_MS = 500;
 const HEADER_HEIGHT_PX = 170;
@@ -83,6 +89,7 @@ export default function DiscoverScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMoreEvents, setHasMoreEvents] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const bottomSheetRef = useRef<BottomSheet>(null);
   const mapRef = useRef<GoogleMapHandle>(null);
@@ -239,8 +246,15 @@ export default function DiscoverScreen() {
       fetchOffsetRef.current = items.length;
       setHasMoreEvents(hasMore);
       setEvents(applyDateFilter(items));
+      setLoadError(false);
     } catch (err) {
       console.error('Failed to load events:', err);
+      if (requestId === loadRequestIdRef.current) {
+        setLoadError(true);
+        // With stale events still on screen the ErrorState (empty-list only)
+        // never shows, so surface the failure explicitly.
+        if (eventsRef.current.length > 0) notify.error("Couldn't refresh events");
+      }
     } finally {
       if (requestId === loadRequestIdRef.current) setLoading(false);
     }
@@ -449,6 +463,20 @@ export default function DiscoverScreen() {
     itemVisiblePercentThreshold: 50,
   }).current;
 
+  // Next upcoming occurrence per recurring event, so cards date-badge the next
+  // date in the series instead of the original (possibly long-past) start.
+  // Display-only: filtering/sorting still uses the raw start_datetime.
+  // Memoized per events array so the FlatList re-renders don't re-walk days.
+  const nextOccurrenceById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const event of events) {
+      if (!event.is_recurring || !event.recurrence_pattern) continue;
+      const [next] = getNextOccurrences(event, 1);
+      if (next) map.set(event.id, next.toISOString());
+    }
+    return map;
+  }, [events]);
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-US', {
@@ -459,6 +487,18 @@ export default function DiscoverScreen() {
     });
   };
 
+  /** Short badge date: "TODAY" or "SAT, NOV 8". */
+  const formatBadgeDate = (dateString: string) => {
+    const date = new Date(dateString);
+    if (date.toDateString() === new Date().toDateString()) return 'TODAY';
+    return date
+      .toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+      .toUpperCase();
+  };
+
+  const activeFilterCount =
+    selectedCategories.length + (searchQuery.length > 0 ? 1 : 0) + (dateRange != null ? 1 : 0);
+
   const headerHeight = useMemo(
     () => HEADER_HEIGHT_PX,
     []
@@ -466,7 +506,8 @@ export default function DiscoverScreen() {
 
   const snapPoints = useMemo(
     () => [
-      SCREEN_HEIGHT * 0.07,
+      // Tall enough at rest for the sheet title/count to peek above the tab bar.
+      SCREEN_HEIGHT * 0.13,
       SCREEN_HEIGHT - headerHeight,
     ],
     [headerHeight]
@@ -492,7 +533,10 @@ export default function DiscoverScreen() {
     [events]
   );
 
-  const renderEventCard = ({ item, index }: { item: RankedEvent; index: number }) => (
+  const renderEventCard = ({ item, index }: { item: RankedEvent; index: number }) => {
+    // Recurring events show their next upcoming occurrence, not the raw start.
+    const displayDate = nextOccurrenceById.get(item.id) ?? item.start_datetime;
+    return (
     <Animated.View
       entering={FadeInDown.delay(index * 60).springify().damping(18)}
       style={styles.eventCardWrapper}
@@ -501,8 +545,13 @@ export default function DiscoverScreen() {
         style={styles.eventCard}
         onPress={() => router.push(`/event/${item.id}` as never)}
         activeOpacity={0.92}
+        accessibilityRole="button"
+        accessibilityLabel={`${item.title}, ${formatDate(displayDate)}`}
       >
-        <EventCardCarousel imageUrls={item.cover_image_url ? [item.cover_image_url] : []} />
+        <EventCardCarousel
+          imageUrls={item.cover_image_url ? [item.cover_image_url] : []}
+          width={EVENT_CARD_WIDTH}
+        />
         <View style={styles.eventContent}>
           <View style={styles.eventHeader}>
             <Text style={styles.eventTitle} numberOfLines={1}>
@@ -515,14 +564,14 @@ export default function DiscoverScreen() {
               <Text style={styles.metaText}>{(item.distance_km * 0.621371).toFixed(1)} mi</Text>
               <Text style={styles.metaDot}>•</Text>
               <Text style={styles.metaText} numberOfLines={1}>
-                {item.business_name}
+                {formatDate(displayDate)}
               </Text>
             </View>
           </View>
           <View style={styles.eventBadgeRow}>
             <View style={styles.eventBadgeLight}>
               <Text style={styles.eventBadgeLightText}>
-                {new Date(item.start_datetime).toDateString() === new Date().toDateString() ? 'TODAY' : 'UPCOMING'}
+                {formatBadgeDate(displayDate)}
               </Text>
             </View>
             <View style={styles.eventBadgeDark}>
@@ -546,13 +595,14 @@ export default function DiscoverScreen() {
           <TouchableOpacity style={styles.businessRow} onPress={() => router.push(`/business/${item.business_id}` as never)} activeOpacity={0.7}>
             <Avatar imageUrl={item.business_logo_url} name={item.business_name} size={24} />
             <Text style={styles.businessName} numberOfLines={1}>
-              {formatDate(item.start_datetime)}
+              {item.business_name}
             </Text>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
     </Animated.View>
-  );
+    );
+  };
 
   const eventCountLabel = loading
     ? 'Finding events near you...'
@@ -562,7 +612,6 @@ export default function DiscoverScreen() {
 
   const renderListHeader = () => (
     <View style={styles.sheetHeader}>
-      <View style={styles.sheetHandle} />
       <View style={styles.sheetHeaderRow}>
         <View>
           <Text style={styles.sheetEyebrow}>Happening Nearby</Text>
@@ -615,7 +664,7 @@ export default function DiscoverScreen() {
             <TouchableOpacity
               style={styles.floatingCard}
               onPress={() => router.push(`/event/${activeEvent.id}` as never)}
-              activeOpacity={1}
+              activeOpacity={0.9}
             >
               <View style={styles.floatingCardImageSection}>
                 {activeEvent.cover_image_url ? (
@@ -635,8 +684,9 @@ export default function DiscoverScreen() {
                 )}
                 <View style={styles.floatingCardActionsOverlay}>
                   <View style={styles.floatingCardBadge}>
+                    <Flame size={14} color={Colors.primary} />
                     <Text style={styles.floatingCardBadgeText}>
-                      🔥 {activeEvent.rsvp_count} Going
+                      {activeEvent.rsvp_count} Going
                     </Text>
                   </View>
                   <TouchableOpacity
@@ -673,26 +723,40 @@ export default function DiscoverScreen() {
       {/* Top app bar */}
       <View style={[styles.fixedHeader, { height: headerHeight, paddingTop: insets.top }]}>
         <View style={styles.topBar}>
+          <View style={styles.topBarLeft}>
+            <Image source={require('@/assets/images/EMlogo.png')} style={styles.topBarLogo} />
+            <Text style={styles.brandText}>EventMap</Text>
+          </View>
           <TouchableOpacity
-            style={styles.topBarLeft}
+            style={styles.searchPill}
             onPress={() => setShowSearchOverlay(true)}
             activeOpacity={0.8}
-            accessibilityRole="button"
-            accessibilityLabel="Open search"
+            accessibilityRole="search"
+            accessibilityLabel="Search events"
           >
-            <Search size={21} color={Colors.primary} />
-            <Image source={require('@/assets/images/EMlogo.png')} style={styles.topBarLogo} />
-            <Text style={styles.brandText}>EventMaps</Text>
+            <Search size={16} color={Colors.text.tertiary} />
+            <Text style={styles.searchPillText} numberOfLines={1}>
+              Search events
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.filterIconButton}
             onPress={() => setShowFilters(!showFilters)}
             activeOpacity={0.8}
             accessibilityRole="button"
-            accessibilityLabel="Open filters"
+            accessibilityLabel={
+              activeFilterCount > 0
+                ? `Open filters, ${activeFilterCount} active`
+                : 'Open filters'
+            }
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <SlidersHorizontal size={20} color={Colors.text.secondary} />
+            {activeFilterCount > 0 && (
+              <View style={styles.filterButtonBadge}>
+                <Text style={styles.filterButtonBadgeText}>{activeFilterCount}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -750,12 +814,13 @@ export default function DiscoverScreen() {
             activeOpacity={0.85}
             accessibilityRole="button"
             accessibilityLabel="Enable location in settings"
+            hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
           >
             <Text style={styles.locationBannerButtonText}>Enable</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => setLocationBannerDismissed(true)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
             accessibilityRole="button"
             accessibilityLabel="Dismiss location banner"
           >
@@ -782,8 +847,13 @@ export default function DiscoverScreen() {
               <X size={24} color={Colors.text.primary} />
             </TouchableOpacity>
             <Text style={styles.filtersPageTitle}>Filters</Text>
-            {selectedCategories.length > 0 ? (
-              <TouchableOpacity onPress={clearFilters}>
+            {activeFilterCount > 0 ? (
+              <TouchableOpacity
+                onPress={clearFilters}
+                accessibilityRole="button"
+                accessibilityLabel="Clear all filters"
+                hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+              >
                 <Text style={styles.clearText}>Clear all</Text>
               </TouchableOpacity>
             ) : (
@@ -811,6 +881,10 @@ export default function DiscoverScreen() {
                       },
                     ]}
                     onPress={() => toggleCategory(category.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${category.label} category`}
+                    accessibilityState={{ selected: isSelected }}
+                    hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                   >
                     <CategoryIcon category={category.slug} size="sm" />
                     <Text
@@ -826,6 +900,14 @@ export default function DiscoverScreen() {
               })}
             </View>
           </ScrollView>
+          <View style={styles.filtersPageFooter}>
+            <Button
+              label="Show results"
+              onPress={() => setShowFilters(false)}
+              fullWidth
+              accessibilityLabel="Apply filters and show results"
+            />
+          </View>
         </View>
       </Modal>
 
@@ -849,11 +931,21 @@ export default function DiscoverScreen() {
       )}
 
       {!appLoading && hasBusiness && (
-        <View style={[styles.fabWrap, { bottom: insets.bottom + 104 }]}>
+        <View
+          style={[
+            styles.fabWrap,
+            // Sit a step above the sheet's collapsed peek (same 0.13 snap as
+            // snapPoints) so the FAB never brushes the peeked header on tall
+            // screens, while staying clear of the map attribution.
+            { bottom: Math.max(SCREEN_HEIGHT * 0.13 + Spacing.md, insets.bottom + 104) },
+          ]}
+        >
           <TouchableOpacity
             style={styles.fab}
             activeOpacity={0.88}
             onPress={() => router.push('/(tabs)/create')}
+            accessibilityRole="button"
+            accessibilityLabel="Create event"
           >
             <Plus size={30} color="#FFFFFF" />
           </TouchableOpacity>
@@ -886,6 +978,11 @@ export default function DiscoverScreen() {
                 <ActivityIndicator size="large" color={Colors.primary} />
                 <Text style={styles.loadingText}>Loading events...</Text>
               </View>
+            ) : loadError ? (
+              <ErrorState
+                title="Couldn't load events"
+                onRetry={() => loadEventsWithCenter(center.lat, center.lng)}
+              />
             ) : (
               <View style={styles.emptyState}>
                 <View style={styles.emptyLogoWrap}>
@@ -988,16 +1085,34 @@ const styles = StyleSheet.create({
   topBarLogo: {
     width: 30,
     height: 30,
-    borderRadius: 8,
+    borderRadius: BorderRadius.sm,
     tintColor: Colors.primary,
   },
   brandText: {
     color: Colors.primary,
-    fontSize: 24,
-    lineHeight: 28,
+    // Slightly tighter than before so the search pill fits alongside.
+    fontSize: 20,
+    lineHeight: 24,
     letterSpacing: -0.2,
     fontFamily: Typography.displayFontFamilies.extrabold,
-    fontWeight: '800',
+    fontWeight: Typography.weights.extrabold,
+  },
+  searchPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    height: 36,
+    marginHorizontal: Spacing.sm,
+    paddingHorizontal: Spacing.sm + Spacing.xs,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.neutralSoft,
+  },
+  searchPillText: {
+    flex: 1,
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.medium,
+    color: Colors.text.tertiary,
   },
   chipsScroll: {
     marginTop: Spacing.sm,
@@ -1045,15 +1160,18 @@ const styles = StyleSheet.create({
   },
   filterButtonBadge: {
     position: 'absolute',
-    top: 4,
-    right: 4,
+    // Sits on the button's edge so it doesn't cover the icon.
+    top: -4,
+    right: -4,
     minWidth: 18,
     height: 18,
     borderRadius: 9,
     backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 4,
+    paddingHorizontal: Spacing.xs,
+    borderWidth: 2,
+    borderColor: Colors.white,
   },
   filterButtonBadgeText: {
     fontSize: 10,
@@ -1091,6 +1209,14 @@ const styles = StyleSheet.create({
   filtersPageContentInner: {
     padding: Spacing.lg,
     paddingBottom: Spacing.xxl,
+  },
+  filtersPageFooter: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border.light,
+    backgroundColor: Colors.surface,
   },
   filtersSectionTitle: {
     fontSize: Typography.sizes.sm,
@@ -1140,7 +1266,9 @@ const styles = StyleSheet.create({
   },
   mapSearchingOverlay: {
     position: 'absolute',
-    top: Spacing.lg,
+    // Sit below the fixed header (which is HEADER_HEIGHT_PX tall, zIndex 30).
+    top: HEADER_HEIGHT_PX + Spacing.sm,
+    zIndex: 40,
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
@@ -1235,6 +1363,9 @@ const styles = StyleSheet.create({
     padding: Spacing.md,
   },
   floatingCardBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
     backgroundColor: 'rgba(255,255,255,0.95)',
     paddingVertical: Spacing.xs,
     paddingHorizontal: Spacing.sm,
@@ -1286,14 +1417,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 14,
   },
-  sheetHandle: {
-    width: 62,
-    height: 6,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Colors.border.light,
-    alignSelf: 'center',
-    marginBottom: 22,
-  },
   sheetHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1304,7 +1427,7 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     textTransform: 'uppercase',
     letterSpacing: 3,
-    fontSize: 10,
+    fontSize: Typography.sizes.xxs,
     fontFamily: Typography.labelFontFamilies.semibold,
     marginBottom: 4,
   },
@@ -1314,7 +1437,7 @@ const styles = StyleSheet.create({
     lineHeight: 38,
     letterSpacing: -0.5,
     fontFamily: Typography.displayFontFamilies.extrabold,
-    fontWeight: '800',
+    fontWeight: Typography.weights.extrabold,
   },
   seeAllText: {
     color: Colors.primary,
@@ -1335,31 +1458,6 @@ const styles = StyleSheet.create({
   },
   eventCardWrapper: {
     marginBottom: 18,
-  },
-  searchInput: {
-    flex: 1,
-    marginLeft: Spacing.sm,
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.primary,
-  },
-  filtersContainer: {
-    marginTop: Spacing.sm,
-    paddingTop: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border.light,
-  },
-  filtersHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.sm,
-  },
-  filtersTitle: {
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.displayFontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.text.primary,
   },
   clearText: {
     fontSize: Typography.sizes.sm,
@@ -1382,10 +1480,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border.light,
   },
-  categoryChipSelected: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
   categoryChipText: {
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamily,
@@ -1402,16 +1496,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 0,
     ...Shadows.sm,
-  },
-  eventImage: {
-    height: 150,
-    backgroundColor: Colors.background.tertiary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  imagePlaceholder: {
-    fontSize: 48,
-    fontFamily: Typography.fontFamily,
   },
   eventContent: {
     padding: 10,
@@ -1430,18 +1514,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: Colors.text.primary,
     letterSpacing: -0.2,
-  },
-  premiumBadge: {
-    backgroundColor: Colors.accent,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-    borderRadius: BorderRadius.sm,
-    marginLeft: Spacing.sm,
-  },
-  premiumText: {
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.primary,
   },
   eventMeta: {
     gap: Spacing.xs,
@@ -1474,7 +1546,7 @@ const styles = StyleSheet.create({
   },
   eventBadgeLightText: {
     color: Colors.primary,
-    fontSize: 10,
+    fontSize: Typography.sizes.xxs,
     letterSpacing: 2,
     fontFamily: Typography.labelFontFamilies.semibold,
   },
@@ -1486,7 +1558,7 @@ const styles = StyleSheet.create({
   },
   eventBadgeDarkText: {
     color: '#FFFFFF',
-    fontSize: 10,
+    fontSize: Typography.sizes.xxs,
     letterSpacing: 2,
     fontFamily: Typography.labelFontFamilies.semibold,
   },
@@ -1498,7 +1570,7 @@ const styles = StyleSheet.create({
   },
   eventBadgeGoingText: {
     color: Colors.success,
-    fontSize: 10,
+    fontSize: Typography.sizes.xxs,
     letterSpacing: 2,
     fontFamily: Typography.labelFontFamilies.semibold,
   },
@@ -1506,22 +1578,6 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginLeft: 'auto',
     paddingHorizontal: Spacing.xs,
-  },
-  categoryBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-    alignSelf: 'flex-start',
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: Spacing.xs,
-    borderRadius: BorderRadius.sm,
-    marginBottom: Spacing.xs,
-  },
-  categoryText: {
-    fontSize: Typography.sizes.xs,
-    color: Colors.secondary,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
   },
   businessRow: {
     flexDirection: 'row',
@@ -1567,13 +1623,13 @@ const styles = StyleSheet.create({
     fontFamily: Typography.displayFontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
-    marginTop: Spacing.md,
   },
   emptySubtitle: {
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
     marginTop: Spacing.xs,
+    maxWidth: 300,
     textAlign: 'center',
   },
   clearFiltersButton: {

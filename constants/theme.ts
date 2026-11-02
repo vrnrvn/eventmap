@@ -34,13 +34,17 @@ export const Colors = {
   accentLight: '#FFEFF0',
 
   success: '#2D8A6E',
+  /** Text-safe success — use for success-colored text/icons on light backgrounds (AA ≥ 4.5:1) */
+  successText: '#1F7058',
   warning: '#D4A017',
+  /** Text-safe warning — use for warning-colored text/icons on light backgrounds (AA ≥ 4.5:1) */
+  warningText: '#8A6A00',
   error: '#B41340',
 
   text: {
     primary: '#2D2F2F',
     secondary: '#5A5C5C',
-    tertiary: '#767777',
+    tertiary: '#6B6C6C',
     disabled: '#9C9D9D',
     inverse: '#FFEFEE',
   },
@@ -58,7 +62,7 @@ export const Colors = {
 
   border: {
     light: '#DBDDDD',
-    medium: '#ACADAD',
+    medium: '#8E8F8F',
     dark: '#767777',
   },
 
@@ -72,6 +76,8 @@ export const Colors = {
   /** Soft premium tint for badges and highlighted rows */
   premiumSoft: 'rgba(180, 9, 83, 0.10)',
 
+  /** Pure white — text/icons on filled brand surfaces */
+  white: '#FFFFFF',
   /** Card / elevated surface color */
   surface: '#FFFFFF',
   /** Neutral soft tint for muted chips and icon wells */
@@ -137,6 +143,8 @@ export const Typography = {
   labelFont: InterFont.medium,
   labelFontFamilies: InterFont,
   sizes: {
+    /** Smallest legible label size — tiny badges and pills only */
+    xxs: 11,
     xs: 12,
     sm: 14,
     md: 16,
@@ -150,6 +158,7 @@ export const Typography = {
     medium: '500' as const,
     semibold: '600' as const,
     bold: '700' as const,
+    extrabold: '800' as const,
   },
   lineHeights: {
     tight: 1.2,

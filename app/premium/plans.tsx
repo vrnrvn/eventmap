@@ -6,13 +6,13 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import {
   Crown,
   Check,
-  Sparkles,
 } from 'lucide-react-native';
 import { usePremium } from '@/contexts/PremiumContext';
 import { notify } from '@/utils/notify';
@@ -24,13 +24,12 @@ import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/
 
 const Palette = {
   gradientStart: Colors.primary,
-  gradientEnd: Colors.accent,
   cardBg: Colors.surface,
   surface: Colors.background.primary,
   accentSoft: Colors.primarySoft,
   separator: Colors.border.light,
-  premiumGold: Colors.accent,
-  premiumGoldSoft: Colors.warningSoft,
+  premium: Colors.premium,
+  premiumSoft: Colors.premiumSoft,
   success: Colors.success,
   successSoft: Colors.successSoft,
 };
@@ -97,6 +96,7 @@ export default function PremiumPlansScreen() {
   if (contextLoading) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
+        <ScreenHeader title="Premium" safeArea={false} />
         <View style={styles.center}>
           <ActivityIndicator size="large" color={Palette.gradientStart} />
         </View>
@@ -116,7 +116,7 @@ export default function PremiumPlansScreen() {
         {/* ── Hero ── */}
         <View style={styles.hero}>
           <View style={styles.iconWrap}>
-            <Crown size={26} color={Palette.premiumGold} />
+            <Crown size={26} color={Palette.premium} />
           </View>
           <Text style={styles.heroTitle}>Go Pro</Text>
           <Text style={styles.heroSub}>
@@ -177,23 +177,18 @@ export default function PremiumPlansScreen() {
         {/* ── Pro card ── */}
         {proPlan && (
           <View style={styles.proCard}>
-            <View style={styles.proBadge}>
-              <Sparkles size={11} color="#FFF" />
-              <Text style={styles.proBadgeText}>Recommended</Text>
-            </View>
-
             <Text style={styles.proName}>Pro</Text>
 
             <View style={styles.proPriceRow}>
-              <Text style={styles.proPrice}>{fmt(price)}</Text>
-              <Text style={styles.proPeriod}>
-                /{billingCycle === 'monthly' ? 'mo' : 'yr'}
+              <Text style={styles.proPrice}>
+                {billingCycle === 'monthly' ? fmt(price) : `$${monthlyEquivalent}`}
               </Text>
+              <Text style={styles.proPeriod}>/mo</Text>
             </View>
 
             {billingCycle === 'yearly' && (
               <Text style={styles.proSavingsNote}>
-                ${monthlyEquivalent}/mo · Save {savingsPercent}%
+                Billed {fmt(proYearly)}/yr · Save {savingsPercent}%
               </Text>
             )}
 
@@ -262,7 +257,15 @@ export default function PremiumPlansScreen() {
             Manage Subscription.
           </Text>
           <Text style={styles.footerText}>
-            Questions? support@eventmap.com
+            Questions?{' '}
+            <Text
+              style={styles.footerLink}
+              onPress={() => Linking.openURL('mailto:support@eventmap.com')}
+              accessibilityRole="link"
+              accessibilityLabel="Email support at support@eventmap.com"
+            >
+              support@eventmap.com
+            </Text>
           </Text>
         </View>
       </ScrollView>
@@ -296,15 +299,15 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 14,
-    backgroundColor: Palette.premiumGoldSoft,
+    backgroundColor: Palette.premiumSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.md,
   },
   heroTitle: {
     fontSize: Typography.sizes.xl,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
+    fontFamily: Typography.displayFontFamilies.extrabold,
+    fontWeight: Typography.weights.extrabold,
     color: Colors.text.primary,
     marginBottom: 6,
   },
@@ -389,7 +392,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.round,
   },
   savePillText: {
-    fontSize: 10,
+    fontSize: Typography.sizes.xxs,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: '#FFF',
@@ -406,23 +409,6 @@ const styles = StyleSheet.create({
     borderColor: Palette.gradientStart,
     ...Shadows.sm,
   },
-  proBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: 4,
-    backgroundColor: Palette.gradientStart,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.round,
-    marginBottom: Spacing.md,
-  },
-  proBadgeText: {
-    fontSize: Typography.sizes.xs,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: '#FFF',
-  },
   proName: {
     fontSize: Typography.sizes.lg,
     fontFamily: Typography.fontFamilies.bold,
@@ -433,8 +419,8 @@ const styles = StyleSheet.create({
   proPriceRow: { flexDirection: 'row', alignItems: 'baseline' },
   proPrice: {
     fontSize: 34,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
+    fontFamily: Typography.displayFontFamilies.extrabold,
+    fontWeight: Typography.weights.extrabold,
     color: Colors.text.primary,
   },
   proPeriod: {
@@ -554,5 +540,11 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
     textAlign: 'center',
+  },
+  footerLink: {
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    textDecorationLine: 'underline',
   },
 });

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, router } from 'expo-router';
 import {
   View,
   Text,
@@ -18,22 +18,12 @@ import DateTimePicker, {
 import {
   ChevronRight,
   ChevronDown,
-  Type,
-  AlignLeft,
-  Tag,
-  Clock,
-  CalendarDays,
-  Repeat,
   MapPin,
   Sparkles,
-  Navigation,
-  ImageIcon,
-  Users,
 } from 'lucide-react-native';
 import { useApp } from '@/contexts/AppContext';
 import { usePremium } from '@/contexts/PremiumContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { router } from 'expo-router';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/ui/Button';
 import { CategoryIcon } from '@/components/CategoryIcon';
@@ -47,19 +37,23 @@ import { eventsService } from '@/services/events';
 import { categoriesService } from '@/services/categories';
 import { businessesService } from '@/services/businesses';
 import { Category } from '@/types/database';
-import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { Colors, Shadows, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { eventLocationStore } from '@/stores/eventLocationStore';
 import type { RecurrenceOption } from '@/utils/recurrence';
 import { notify, notifyConfirm } from '@/utils/notify';
+import { withShiftedEnd } from '@/utils/eventDatetime';
 
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
 const MAX_EVENT_DATE = new Date();
 MAX_EVENT_DATE.setFullYear(MAX_EVENT_DATE.getFullYear() + 10);
 
+const TITLE_MAX = 100;
+const DESCRIPTION_MAX = 2000;
+
 const Palette = {
   gradientStart: Colors.primary,
   gradientEnd: Colors.accent,
-  cardBg: Colors.background.primary,
+  cardBg: Colors.surface,
   surfaceMuted: Colors.background.primary,
   accentSoft: Colors.primarySoft,
   separator: Colors.border.light,
@@ -92,6 +86,7 @@ export default function CreateScreen() {
     maxAttendees: '',
   });
   const recurrencePickerRef = useRef<RecurrencePickerHandle>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     if (businessLocation) {
@@ -117,7 +112,7 @@ export default function CreateScreen() {
       const updateField = (d: Date) =>
         setFormData((f) =>
           field === 'start'
-            ? { ...f, startDatetime: d }
+            ? withShiftedEnd(f, d)
             : { ...f, endDatetime: d }
         );
 
@@ -126,16 +121,32 @@ export default function CreateScreen() {
         mode: 'date',
         minimumDate: new Date(),
         maximumDate: MAX_EVENT_DATE,
-        onChange: (_, dateResult) => {
-          if (dateResult) {
-            DateTimePickerAndroid.open({
-              value: dateResult,
-              mode: 'time',
-              onChange: (_, timeResult) => {
-                if (timeResult) updateField(timeResult);
-              },
-            });
-          }
+        onChange: (dateEvent, dateResult) => {
+          if (dateEvent.type !== 'set' || !dateResult) return;
+          // Commit the chosen date immediately (keeping the previous time) so
+          // cancelling the time step doesn't discard the date.
+          const withNewDate = new Date(currentDate);
+          withNewDate.setFullYear(
+            dateResult.getFullYear(),
+            dateResult.getMonth(),
+            dateResult.getDate()
+          );
+          updateField(withNewDate);
+          DateTimePickerAndroid.open({
+            value: withNewDate,
+            mode: 'time',
+            onChange: (timeEvent, timeResult) => {
+              if (timeEvent.type !== 'set' || !timeResult) return;
+              const combined = new Date(withNewDate);
+              combined.setHours(
+                timeResult.getHours(),
+                timeResult.getMinutes(),
+                0,
+                0
+              );
+              updateField(combined);
+            },
+          });
         },
       });
     },
@@ -188,7 +199,12 @@ export default function CreateScreen() {
   };
 
   const handleSubmit = async () => {
-    if (!validate() || !userBusiness) return;
+    if (!validate()) {
+      // The first errors (basic info) live at the top of the form.
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+      return;
+    }
+    if (!userBusiness) return;
     if (isBanned) {
       notify.error('Your account has been suspended. Please contact support.');
       return;
@@ -354,11 +370,11 @@ export default function CreateScreen() {
         </Text>
         <TouchableOpacity
           style={styles.noBizCta}
-          onPress={() => router.push('/(tabs)/profile')}
+          onPress={() => router.push('/business/onboarding' as never)}
           activeOpacity={0.85}
         >
           <LinearGradient
-            colors={[Colors.primary, Palette.gradientEnd]}
+            colors={[Colors.primary, Colors.secondary]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={styles.noBizCtaGradient}
@@ -378,6 +394,7 @@ export default function CreateScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
+        ref={scrollViewRef}
         style={styles.scroll}
         contentContainerStyle={[
           styles.scrollContent,
@@ -405,15 +422,13 @@ export default function CreateScreen() {
         <Text style={styles.sectionLabel}>Basic Information</Text>
         <View style={styles.card}>
           <View style={styles.fieldRow}>
-            <View style={styles.fieldIcon}>
-              <Type size={16} color={Colors.primary} />
-            </View>
             <View style={styles.fieldContent}>
               <Input
                 label="Title"
                 value={formData.title}
                 onChangeText={(t) => setFormData((f) => ({ ...f, title: t }))}
                 placeholder="Event name"
+                maxLength={TITLE_MAX}
                 error={errors.title}
               />
             </View>
@@ -422,9 +437,6 @@ export default function CreateScreen() {
           <View style={styles.fieldSeparator} />
 
           <View style={styles.fieldRow}>
-            <View style={styles.fieldIcon}>
-              <AlignLeft size={16} color={Colors.primary} />
-            </View>
             <View style={styles.fieldContent}>
               <Input
                 label="Description"
@@ -435,8 +447,14 @@ export default function CreateScreen() {
                 placeholder="What's this event about?"
                 multiline
                 numberOfLines={4}
+                maxLength={DESCRIPTION_MAX}
                 style={styles.textArea}
                 error={errors.description}
+                rightAdornment={
+                  <Text style={styles.charCounter}>
+                    {formData.description.length}/{DESCRIPTION_MAX}
+                  </Text>
+                }
               />
             </View>
           </View>
@@ -446,9 +464,6 @@ export default function CreateScreen() {
         <Text style={styles.sectionLabel}>Category</Text>
         <View style={styles.card}>
           <View style={styles.fieldRowNoPad}>
-            <View style={[styles.fieldIcon, { marginTop: 14 }]}>
-              <Tag size={16} color={Colors.primary} />
-            </View>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -503,9 +518,6 @@ export default function CreateScreen() {
               }
             }}
           >
-            <View style={styles.fieldIcon}>
-              <Clock size={16} color={Colors.primary} />
-            </View>
             <View style={styles.dateTextBlock}>
               <Text style={styles.dateLabel}>Starts</Text>
               <Text style={styles.dateValue}>
@@ -524,142 +536,129 @@ export default function CreateScreen() {
               <Text style={styles.errorText}>{errors.startDatetime}</Text>
             </View>
           )}
-        </View>
 
-        {/* Start picker rendered OUTSIDE the card */}
-        {Platform.OS !== 'android' && showStartPicker && (
-          <View style={styles.pickerContainer}>
-            <DateTimePicker
-              value={formData.startDatetime}
-              mode="datetime"
-              display="spinner"
-              minimumDate={new Date()}
-              maximumDate={MAX_EVENT_DATE}
-              textColor={Colors.text.primary}
-              themeVariant="light"
-              onChange={(_, d) => {
-                if (d) setFormData((f) => ({ ...f, startDatetime: d }));
-              }}
-              style={styles.picker}
-            />
-            <TouchableOpacity
-              style={styles.pickerDoneButton}
-              onPress={() => setShowStartPicker(false)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.pickerDoneText}>Done</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+          {/* Inline iOS picker — directly beneath its own row */}
+          {Platform.OS !== 'android' && showStartPicker && (
+            <View style={styles.inlinePickerContainer}>
+              <DateTimePicker
+                value={formData.startDatetime}
+                mode="datetime"
+                display="spinner"
+                minimumDate={new Date()}
+                maximumDate={MAX_EVENT_DATE}
+                textColor={Colors.text.primary}
+                themeVariant="light"
+                onChange={(_, d) => {
+                  if (d) setFormData((f) => withShiftedEnd(f, d));
+                }}
+                style={styles.picker}
+              />
+              <TouchableOpacity
+                style={styles.pickerDoneButton}
+                onPress={() => setShowStartPicker(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.pickerDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
-        <View style={styles.dateCardSpacing}>
-          <View style={styles.card}>
-            {/* End */}
-            <TouchableOpacity
-              style={styles.dateRow}
-              activeOpacity={0.6}
-              onPress={() => {
-                if (Platform.OS === 'android') {
-                  openAndroidPicker(formData.endDatetime, 'end');
-                } else {
-                  setShowStartPicker(false);
-                  setShowEndPicker((prev) => !prev);
-                }
-              }}
-            >
-              <View style={styles.fieldIcon}>
-                <CalendarDays size={16} color={Colors.primary} />
-              </View>
-              <View style={styles.dateTextBlock}>
-                <Text style={styles.dateLabel}>Ends</Text>
-                <Text style={styles.dateValue}>
-                  {formatDateTime(formData.endDatetime)}
-                </Text>
-              </View>
-              {showEndPicker ? (
-                <ChevronDown size={18} color={Colors.primary} />
-              ) : (
-                <ChevronRight size={18} color={Colors.text.tertiary} />
-              )}
-            </TouchableOpacity>
+          <View style={styles.fieldSeparator} />
 
-            {errors.endDatetime && (
-              <View style={styles.inlineError}>
-                <Text style={styles.errorText}>{errors.endDatetime}</Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* End picker rendered OUTSIDE the card */}
-        {Platform.OS !== 'android' && showEndPicker && (
-          <View style={styles.pickerContainer}>
-            <DateTimePicker
-              value={formData.endDatetime}
-              mode="datetime"
-              display="spinner"
-              minimumDate={new Date()}
-              maximumDate={MAX_EVENT_DATE}
-              textColor={Colors.text.primary}
-              themeVariant="light"
-              onChange={(_, d) => {
-                if (d) setFormData((f) => ({ ...f, endDatetime: d }));
-              }}
-              style={styles.picker}
-            />
-            <TouchableOpacity
-              style={styles.pickerDoneButton}
-              onPress={() => setShowEndPicker(false)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.pickerDoneText}>Done</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Recurrence (Premium only) */}
-        <View style={styles.dateCardSpacing}>
-          <View style={styles.card}>
-            <TouchableOpacity
-              style={styles.dateRow}
-              activeOpacity={0.6}
-              onPress={() => {
-                if (userBusiness?.subscription_tier !== 'premium') {
-                  notifyConfirm({
-                    title: 'Premium Feature',
-                    message:
-                      'Recurring events are only available for Premium businesses. Upgrade to create recurring events.',
-                    cancelLabel: 'OK',
-                    confirmLabel: 'Upgrade',
-                    onConfirm: () => router.push('/premium/plans' as never),
-                  });
-                  return;
-                }
-                recurrencePickerRef.current?.present();
-              }}
-            >
-              <View style={styles.fieldIcon}>
-                <Repeat size={16} color={Colors.primary} />
-              </View>
-              <View style={styles.dateTextBlock}>
-                <Text style={styles.dateLabel}>Repeat</Text>
-                <Text style={styles.dateValue}>
-                  {getRecurrenceLabel(formData.recurrence)}
-                  {userBusiness?.subscription_tier !== 'premium' && ' (Premium)'}
-                </Text>
-              </View>
+          {/* End */}
+          <TouchableOpacity
+            style={styles.dateRow}
+            activeOpacity={0.6}
+            onPress={() => {
+              if (Platform.OS === 'android') {
+                openAndroidPicker(formData.endDatetime, 'end');
+              } else {
+                setShowStartPicker(false);
+                setShowEndPicker((prev) => !prev);
+              }
+            }}
+          >
+            <View style={styles.dateTextBlock}>
+              <Text style={styles.dateLabel}>Ends</Text>
+              <Text style={styles.dateValue}>
+                {formatDateTime(formData.endDatetime)}
+              </Text>
+            </View>
+            {showEndPicker ? (
+              <ChevronDown size={18} color={Colors.primary} />
+            ) : (
               <ChevronRight size={18} color={Colors.text.tertiary} />
-            </TouchableOpacity>
-          </View>
+            )}
+          </TouchableOpacity>
+
+          {errors.endDatetime && (
+            <View style={styles.inlineError}>
+              <Text style={styles.errorText}>{errors.endDatetime}</Text>
+            </View>
+          )}
+
+          {/* Inline iOS picker — directly beneath its own row */}
+          {Platform.OS !== 'android' && showEndPicker && (
+            <View style={styles.inlinePickerContainer}>
+              <DateTimePicker
+                value={formData.endDatetime}
+                mode="datetime"
+                display="spinner"
+                minimumDate={new Date()}
+                maximumDate={MAX_EVENT_DATE}
+                textColor={Colors.text.primary}
+                themeVariant="light"
+                onChange={(_, d) => {
+                  if (d) setFormData((f) => ({ ...f, endDatetime: d }));
+                }}
+                style={styles.picker}
+              />
+              <TouchableOpacity
+                style={styles.pickerDoneButton}
+                onPress={() => setShowEndPicker(false)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.pickerDoneText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <View style={styles.fieldSeparator} />
+
+          {/* Repeat (Premium only) */}
+          <TouchableOpacity
+            style={styles.dateRow}
+            activeOpacity={0.6}
+            onPress={() => {
+              if (userBusiness?.subscription_tier !== 'premium') {
+                notifyConfirm({
+                  title: 'Premium Feature',
+                  message:
+                    'Recurring events are only available for Premium businesses. Upgrade to create recurring events.',
+                  cancelLabel: 'OK',
+                  confirmLabel: 'Upgrade',
+                  onConfirm: () => router.push('/premium/plans' as never),
+                });
+                return;
+              }
+              recurrencePickerRef.current?.present();
+            }}
+          >
+            <View style={styles.dateTextBlock}>
+              <Text style={styles.dateLabel}>Repeat</Text>
+              <Text style={styles.dateValue}>
+                {getRecurrenceLabel(formData.recurrence)}
+                {userBusiness?.subscription_tier !== 'premium' && ' (Premium)'}
+              </Text>
+            </View>
+            <ChevronRight size={18} color={Colors.text.tertiary} />
+          </TouchableOpacity>
         </View>
 
         {/* ── Section: Location ── */}
         <Text style={styles.sectionLabel}>Location</Text>
         <View style={styles.card}>
           <View style={styles.fieldRow}>
-            <View style={styles.fieldIcon}>
-              <Navigation size={16} color={Colors.primary} />
-            </View>
             <View style={styles.fieldContent}>
               <Text style={styles.locationNote}>
                 Defaults to your business address if you do not set a different venue
@@ -693,11 +692,11 @@ export default function CreateScreen() {
                       : 'Tap to set venue on map'}
                   </Text>
                 </View>
-                {!!formData.address?.trim() && (
-                  <Text style={styles.addressCoords}>
-                    {formData.lat.toFixed(4)}, {formData.lng.toFixed(4)}
-                  </Text>
-                )}
+                {!formData.address?.trim() &&
+                  (formData.lat !== DEFAULT_LOCATION.lat ||
+                    formData.lng !== DEFAULT_LOCATION.lng) && (
+                    <Text style={styles.addressCoords}>Location set</Text>
+                  )}
               </TouchableOpacity>
             </View>
           </View>
@@ -707,9 +706,6 @@ export default function CreateScreen() {
         <Text style={styles.sectionLabel}>Capacity</Text>
         <View style={styles.card}>
           <View style={styles.fieldRow}>
-            <View style={styles.fieldIcon}>
-              <Users size={16} color={Colors.primary} />
-            </View>
             <View style={styles.fieldContent}>
               <Input
                 label="Max attendees (optional)"
@@ -732,9 +728,6 @@ export default function CreateScreen() {
         <Text style={styles.sectionLabel}>Photos</Text>
         <View style={styles.card}>
           <View style={styles.fieldRow}>
-            <View style={styles.fieldIcon}>
-              <ImageIcon size={16} color={Colors.primary} />
-            </View>
             <View style={styles.fieldContent}>
               <Text style={styles.locationNote}>
                 First image becomes the cover photo
@@ -806,7 +799,7 @@ const styles = StyleSheet.create({
     tintColor: Colors.primary,
   },
   pageTitle: {
-    fontSize: 24,
+    fontSize: Typography.sizes.xl,
     fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
@@ -836,15 +829,7 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.cardBg,
     borderRadius: 20,
     overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 10,
-      },
-      android: { elevation: 3 },
-    }),
+    ...Shadows.card,
   },
 
   /* ── Field rows ── */
@@ -860,26 +845,22 @@ const styles = StyleSheet.create({
     paddingRight: 0,
     gap: 10,
   },
-  fieldIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: Palette.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   fieldContent: {
     flex: 1,
   },
   fieldSeparator: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: Palette.separator,
-    marginLeft: 66,
+    marginLeft: 16,
   },
 
   textArea: {
     minHeight: 90,
     textAlignVertical: 'top',
+  },
+  charCounter: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.text.tertiary,
   },
 
   /* ── Category chips ── */
@@ -943,26 +924,9 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
   },
-  dateCardSpacing: {
-    marginTop: 8,
-  },
-
-  /* ── Picker container (outside card) ── */
-  pickerContainer: {
-    backgroundColor: Palette.cardBg,
-    borderRadius: 16,
-    marginTop: 8,
+  /* ── Inline picker (inside the grouped card, under its own row) ── */
+  inlinePickerContainer: {
     paddingBottom: 8,
-    overflow: 'visible',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 10,
-      },
-      android: { elevation: 3 },
-    }),
   },
   picker: {
     height: 200,

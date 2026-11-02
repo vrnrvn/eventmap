@@ -3,21 +3,21 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
-  ActivityIndicator,
   RefreshControl,
-  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { socialService } from '@/services/social';
 import { notify, notifyConfirm } from '@/utils/notify';
 import { Business } from '@/types/database';
-import { Colors, Typography } from '@/constants/theme';
-import { ArrowLeft, Heart, HeartOff, ChevronRight } from 'lucide-react-native';
+import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
+import { Heart, HeartOff, ChevronRight } from 'lucide-react-native';
 import { Avatar } from '@/components/Avatar';
 import { CategoryIcon } from '@/components/CategoryIcon';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
+import { ErrorState } from '@/components/ui/ErrorState';
 
 type FollowedBusiness = Business & { followId: string };
 
@@ -27,6 +27,7 @@ export default function Following() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [unfollowingId, setUnfollowingId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   const loadFollowing = useCallback(async () => {
     try {
@@ -45,8 +46,10 @@ export default function Following() {
         }
       }
       setBusinesses(businessList);
+      setLoadError(false);
     } catch (error) {
       console.error('Failed to load following:', error);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -59,6 +62,11 @@ export default function Following() {
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     loadFollowing().finally(() => setRefreshing(false));
+  }, [loadFollowing]);
+
+  const retryLoad = useCallback(() => {
+    setLoading(true);
+    loadFollowing();
   }, [loadFollowing]);
 
   const handleUnfollow = (business: FollowedBusiness) => {
@@ -99,51 +107,35 @@ export default function Following() {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => router.back()}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <ArrowLeft size={22} color={Colors.text.primary} />
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <View style={styles.headerIconWrap}>
-            <Heart size={18} color={Colors.primary} />
-          </View>
-          <View>
-            <Text style={styles.headerTitle}>Following</Text>
-            <Text style={styles.headerSubtitle}>
-              {loading
-                ? 'Loading…'
-                : `${businesses.length} business${businesses.length !== 1 ? 'es' : ''}`}
-            </Text>
-          </View>
-        </View>
-        <View style={styles.headerSpacer} />
-      </View>
+      <ScreenHeader title="Following" safeArea={false} />
+      <Text style={styles.headerSubtitle}>
+        {loading
+          ? 'Loading…'
+          : `${businesses.length} business${businesses.length !== 1 ? 'es' : ''}`}
+      </Text>
 
       {loading ? (
-        <View style={styles.centerContainer}>
-          <View style={styles.loadingIconWrap}>
-            <Heart size={28} color={Colors.primary} />
-          </View>
-          <ActivityIndicator
-            size="large"
-            color={Colors.primary}
-            style={{ marginTop: 20 }}
-          />
-          <Text style={styles.loadingText}>Loading businesses you follow…</Text>
+        <View style={styles.skeletonList}>
+          {[0, 1, 2].map((i) => (
+            <View key={i} style={styles.skeletonCard}>
+              <View style={styles.skeletonCircle} />
+              <View style={styles.skeletonLines}>
+                <View style={styles.skeletonBar} />
+                <View style={[styles.skeletonBar, styles.skeletonBarShort]} />
+              </View>
+            </View>
+          ))}
         </View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={loadError ? [] : businesses}
+          keyExtractor={(item) => item.id}
+          // Rows read these from state; FlatList needs them to know when to re-render.
+          extraData={[followerCounts, unfollowingId]}
           style={styles.scroll}
           contentContainerStyle={[
             styles.scrollContent,
-            businesses.length === 0 && styles.scrollContentEmpty,
+            (loadError || businesses.length === 0) && styles.scrollContentEmpty,
             { paddingBottom: insets.bottom + 40 },
           ]}
           showsVerticalScrollIndicator={false}
@@ -155,34 +147,42 @@ export default function Following() {
               colors={[Colors.primary]}
             />
           }
-        >
-          {businesses.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <View style={styles.emptyIconWrap}>
-                <Heart size={36} color={Colors.primary} />
+          ListEmptyComponent={
+            loadError ? (
+              <ErrorState
+                title="Couldn't load who you follow"
+                onRetry={retryLoad}
+              />
+            ) : (
+              <View style={styles.emptyContainer}>
+                <View style={styles.emptyIconWrap}>
+                  <Heart size={36} color={Colors.primary} />
+                </View>
+                <Text style={styles.emptyTitle}>Not Following Anyone</Text>
+                <Text style={styles.emptySubtitle}>
+                  Follow businesses to see their events first and get notified when they post something new.
+                </Text>
+                <TouchableOpacity
+                  style={styles.exploreCta}
+                  onPress={() => router.push('/(tabs)/discover' as never)}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Discover Events"
+                >
+                  <Text style={styles.exploreCtaText}>Discover Events</Text>
+                  <ChevronRight size={16} color={Colors.primary} />
+                </TouchableOpacity>
               </View>
-              <Text style={styles.emptyTitle}>Not Following Anyone</Text>
-              <Text style={styles.emptySubtitle}>
-                Follow businesses to see their events first and get notified when they post something new.
-              </Text>
+            )
+          }
+          renderItem={({ item: business }) => (
               <TouchableOpacity
-                style={styles.exploreCta}
-                onPress={() => router.push('/(tabs)/discover' as never)}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.exploreCtaText}>Discover Events</Text>
-                <ChevronRight size={16} color={Colors.primary} />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            businesses.map((business) => (
-              <TouchableOpacity
-                key={business.id}
                 style={styles.businessCard}
                 onPress={() => router.push(`/business/${business.id}` as never)}
                 activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel={`View ${business.name}`}
               >
-                <View style={styles.followStrip} />
                 <View style={styles.cardBody}>
                   <View style={styles.cardTop}>
                     <Avatar
@@ -215,6 +215,9 @@ export default function Following() {
                       }}
                       disabled={unfollowingId === business.id}
                       activeOpacity={0.7}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Unfollow ${business.name}`}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
                       <HeartOff size={18} color={Colors.error} />
                       <Text style={styles.unfollowText}>Unfollow</Text>
@@ -222,13 +225,12 @@ export default function Following() {
                   </View>
                   <View style={styles.cardFooter}>
                     <Text style={styles.viewLabel}>View events</Text>
-                    <ChevronRight size={16} color={Colors.primary} />
+                    <ChevronRight size={16} color={Colors.text.secondary} />
                   </View>
                 </View>
               </TouchableOpacity>
-            ))
           )}
-        </ScrollView>
+        />
       )}
     </View>
   );
@@ -239,78 +241,53 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.background.primary,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: Colors.background.primary,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border.light,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: Colors.background.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  headerIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    backgroundColor: Colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: Colors.text.primary,
-  },
   headerSubtitle: {
     fontSize: Typography.sizes.xs,
     fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
-    marginTop: 1,
+    textAlign: 'center',
+    paddingBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border.light,
   },
-  headerSpacer: {
-    width: 40,
+  skeletonList: {
+    paddingHorizontal: Spacing.md,
+    paddingTop: 20,
   },
-  centerContainer: {
+  skeletonCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+    marginBottom: 12,
+    gap: 14,
+    ...Shadows.card,
+  },
+  skeletonCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.background.tertiary,
+  },
+  skeletonLines: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 40,
+    gap: Spacing.sm,
   },
-  loadingIconWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
-    backgroundColor: Colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
+  skeletonBar: {
+    height: 12,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.background.tertiary,
+    width: '70%',
   },
-  loadingText: {
-    marginTop: 16,
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-    color: Colors.text.secondary,
+  skeletonBarShort: {
+    width: '45%',
   },
   scroll: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: Spacing.md,
     paddingTop: 20,
   },
   scrollContentEmpty: {
@@ -332,7 +309,7 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: Typography.sizes.xl,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginBottom: 8,
@@ -362,25 +339,11 @@ const styles = StyleSheet.create({
   },
   businessCard: {
     flexDirection: 'row',
-    backgroundColor: Colors.background.primary,
+    backgroundColor: Colors.surface,
     borderRadius: 20,
     marginBottom: 12,
     overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 10,
-      },
-      android: { elevation: 3 },
-    }),
-  },
-  followStrip: {
-    width: 4,
-    backgroundColor: Colors.primary,
-    borderTopLeftRadius: 20,
-    borderBottomLeftRadius: 20,
+    ...Shadows.card,
   },
   cardBody: {
     flex: 1,
@@ -425,7 +388,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 10,
-    backgroundColor: 'rgba(239,68,68,0.1)',
+    backgroundColor: Colors.errorSoft,
   },
   unfollowBtnDisabled: {
     opacity: 0.6,
@@ -450,6 +413,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
-    color: Colors.primary,
+    color: Colors.text.secondary,
   },
 });

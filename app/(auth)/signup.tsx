@@ -1,4 +1,4 @@
-import { forwardRef, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,20 +9,18 @@ import {
   ScrollView,
   Image,
   TextInput,
-  type TextInputProps,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/Button';
-import { Colors, Typography, BorderRadius, Spacing } from '@/constants/theme';
-import { ArrowLeft, Eye, EyeOff, ArrowRight } from 'lucide-react-native';
+import { TextField } from '@/components/ui/TextField';
+import { Colors, Typography, BorderRadius, Spacing, alpha } from '@/constants/theme';
+import { ArrowLeft, ArrowRight, Mail, Lock } from 'lucide-react-native';
 import { GoogleIcon } from '@/components/icons/BrandIcons';
 import { oauthEnabled } from '@/services/runtime';
 import { notify } from '@/utils/notify';
 import { authErrorMessage } from '@/utils/authErrors';
-
-const EYE_HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
 
 export default function SignupScreen() {
   const insets = useSafeAreaInsets();
@@ -31,8 +29,6 @@ export default function SignupScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -119,11 +115,13 @@ export default function SignupScreen() {
           </View>
 
           <View style={styles.card}>
-            <Field
+            <TextField
               label="Full Name"
               value={name}
               onChangeText={setName}
               placeholder="Enter your full name"
+              error={errors.name}
+              containerStyle={styles.fieldBlock}
               autoComplete="name"
               textContentType="name"
               autoCapitalize="words"
@@ -131,14 +129,16 @@ export default function SignupScreen() {
               submitBehavior="submit"
               onSubmitEditing={() => emailRef.current?.focus()}
             />
-            {errors.name ? <Text style={styles.errorText}>{errors.name}</Text> : null}
 
-            <Field
+            <TextField
               ref={emailRef}
               label="Email Address"
               value={email}
               onChangeText={setEmail}
               placeholder="name@example.com"
+              error={errors.email}
+              leadingIcon={<Mail size={20} color={Colors.text.tertiary} />}
+              containerStyle={styles.fieldBlock}
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
@@ -148,68 +148,47 @@ export default function SignupScreen() {
               submitBehavior="submit"
               onSubmitEditing={() => passwordRef.current?.focus()}
             />
-            {errors.email ? <Text style={styles.errorText}>{errors.email}</Text> : null}
 
             <View style={styles.fieldBlock}>
-              <Text style={styles.fieldLabel}>Password</Text>
-              <View style={styles.inputShell}>
-                <TextInput
-                  ref={passwordRef}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="••••••••"
-                  placeholderTextColor={Colors.text.tertiary}
-                  secureTextEntry={!showPassword}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  autoComplete="new-password"
-                  textContentType="newPassword"
-                  returnKeyType="next"
-                  submitBehavior="submit"
-                  onSubmitEditing={() => confirmRef.current?.focus()}
-                  style={styles.input}
-                />
-                <TouchableOpacity
-                  onPress={() => setShowPassword((v) => !v)}
-                  hitSlop={EYE_HIT_SLOP}
-                  accessibilityRole="button"
-                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showPassword ? <EyeOff size={21} color={Colors.text.tertiary} /> : <Eye size={21} color={Colors.text.tertiary} />}
-                </TouchableOpacity>
-              </View>
+              <TextField
+                ref={passwordRef}
+                label="Password"
+                value={password}
+                onChangeText={setPassword}
+                placeholder="••••••••"
+                error={errors.password}
+                leadingIcon={<Lock size={20} color={Colors.text.tertiary} />}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="new-password"
+                textContentType="newPassword"
+                returnKeyType="next"
+                submitBehavior="submit"
+                onSubmitEditing={() => confirmRef.current?.focus()}
+              />
+              {!errors.password && (
+                <Text style={styles.passwordHint}>At least 8 characters</Text>
+              )}
             </View>
-            {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
 
-            <View style={styles.fieldBlock}>
-              <Text style={styles.fieldLabel}>Confirm Password</Text>
-              <View style={styles.inputShell}>
-                <TextInput
-                  ref={confirmRef}
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  placeholder="••••••••"
-                  placeholderTextColor={Colors.text.tertiary}
-                  secureTextEntry={!showConfirmPassword}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  autoComplete="new-password"
-                  textContentType="newPassword"
-                  returnKeyType="go"
-                  onSubmitEditing={handleSignUp}
-                  style={styles.input}
-                />
-                <TouchableOpacity
-                  onPress={() => setShowConfirmPassword((v) => !v)}
-                  hitSlop={EYE_HIT_SLOP}
-                  accessibilityRole="button"
-                  accessibilityLabel={showConfirmPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showConfirmPassword ? <EyeOff size={21} color={Colors.text.tertiary} /> : <Eye size={21} color={Colors.text.tertiary} />}
-                </TouchableOpacity>
-              </View>
-            </View>
-            {errors.confirm ? <Text style={styles.errorText}>{errors.confirm}</Text> : null}
+            <TextField
+              ref={confirmRef}
+              label="Confirm Password"
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              placeholder="••••••••"
+              error={errors.confirm}
+              leadingIcon={<Lock size={20} color={Colors.text.tertiary} />}
+              containerStyle={styles.fieldBlock}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="new-password"
+              textContentType="newPassword"
+              returnKeyType="go"
+              onSubmitEditing={handleSignUp}
+            />
 
             <Button
               label="Sign Up"
@@ -246,7 +225,12 @@ export default function SignupScreen() {
 
           <View style={styles.footer}>
             <Text style={styles.footerText}>Already have an account?</Text>
-            <TouchableOpacity onPress={() => router.push('/(auth)/login')}>
+            <TouchableOpacity
+              onPress={() => router.push('/(auth)/login')}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessibilityRole="button"
+              accessibilityLabel="Go to log in"
+            >
               <Text style={styles.footerLink}>Log In</Text>
             </TouchableOpacity>
           </View>
@@ -256,43 +240,23 @@ export default function SignupScreen() {
   );
 }
 
-/** Labelled text field; forwards any TextInput prop (autofill, keyboard flow). */
-const Field = forwardRef<TextInput, { label: string } & TextInputProps>(function Field(
-  { label, ...inputProps },
-  ref
-) {
-  return (
-    <View style={styles.fieldBlock}>
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <View style={styles.inputShell}>
-        <TextInput
-          ref={ref}
-          placeholderTextColor={Colors.text.tertiary}
-          {...inputProps}
-          style={styles.input}
-        />
-      </View>
-    </View>
-  );
-});
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background.primary },
   flex: { flex: 1 },
   backBtn: {
-    width: 42,
-    height: 42,
+    width: 44,
+    height: 44,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
   },
   hero: { alignItems: 'center', marginTop: 18, marginBottom: 18 },
   logoTile: {
     width: 106,
     height: 106,
     borderRadius: 30,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
@@ -304,58 +268,34 @@ const styles = StyleSheet.create({
     lineHeight: 38,
     color: Colors.text.primary,
     fontFamily: Typography.displayFontFamilies.extrabold,
-    fontWeight: '800',
+    fontWeight: Typography.weights.extrabold,
     letterSpacing: -0.8,
     textAlign: 'center',
   },
   heroSub: {
     marginTop: 6,
-    fontSize: 18,
+    fontSize: Typography.sizes.lg,
     lineHeight: 30,
     color: Colors.text.secondary,
     fontFamily: Typography.fontFamilies.medium,
     textAlign: 'center',
   },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
     borderRadius: 40,
     padding: 22,
     borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.04)',
+    borderColor: alpha('#000000', 0.04),
   },
-  fieldBlock: { marginBottom: 14 },
-  fieldLabel: {
-    marginBottom: 10,
-    color: Colors.text.secondary,
-    fontSize: 12,
-    letterSpacing: 1.8,
-    textTransform: 'uppercase',
-    fontFamily: Typography.labelFontFamilies.semibold,
+  fieldBlock: { marginBottom: Spacing.md },
+  passwordHint: {
+    marginTop: Spacing.xs,
+    marginLeft: Spacing.xs,
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamilies.regular,
+    color: Colors.text.tertiary,
   },
-  inputShell: {
-    height: 60,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Colors.background.secondary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    gap: 10,
-  },
-  input: {
-    flex: 1,
-    color: Colors.text.primary,
-    fontSize: 16,
-    fontFamily: Typography.fontFamilies.medium,
-  },
-  errorText: {
-    marginTop: -8,
-    marginBottom: 10,
-    marginLeft: 4,
-    color: Colors.error,
-    fontSize: 12,
-    fontFamily: Typography.fontFamilies.medium,
-  },
-  ctaWrap: { marginTop: Spacing.sm },
+  ctaWrap: { marginTop: Spacing.lg },
   divider: {
     marginTop: 24,
     marginBottom: 18,
@@ -379,12 +319,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 10,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
   },
   googleBtnDisabled: { opacity: 0.5 },
   googleText: {
     color: Colors.text.primary,
-    fontSize: 16,
+    fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
@@ -395,8 +335,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  footerText: { color: Colors.text.secondary, fontSize: 16, fontFamily: Typography.fontFamilies.medium },
-  footerLink: { color: Colors.primary, fontSize: 16, fontFamily: Typography.fontFamilies.bold, fontWeight: Typography.weights.bold },
+  footerText: { color: Colors.text.secondary, fontSize: Typography.sizes.md, fontFamily: Typography.fontFamilies.medium },
+  footerLink: { color: Colors.primary, fontSize: Typography.sizes.md, fontFamily: Typography.fontFamilies.bold, fontWeight: Typography.weights.bold },
   bgGlowTop: {
     position: 'absolute',
     width: 280,

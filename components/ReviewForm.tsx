@@ -48,6 +48,10 @@ export function ReviewForm({
             onPress={() => setRating(value)}
             style={styles.starBtn}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`Rate ${value} of 5 stars`}
+            accessibilityState={{ selected: value <= rating }}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
           >
             <Star
               size={28}
@@ -67,6 +71,7 @@ export function ReviewForm({
         multiline
         numberOfLines={3}
         editable={!saving}
+        accessibilityLabel="Your review"
       />
       <View style={styles.actions}>
         {onCancel && (
@@ -74,6 +79,9 @@ export function ReviewForm({
             style={styles.cancelBtn}
             onPress={onCancel}
             disabled={saving}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+            hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
           >
             <Text style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
@@ -82,6 +90,9 @@ export function ReviewForm({
           style={[styles.submitBtn, rating < 1 && styles.submitBtnDisabled]}
           onPress={handleSubmit}
           disabled={saving || rating < 1}
+          accessibilityRole="button"
+          accessibilityLabel={isEditing ? 'Update review' : 'Submit review'}
+          hitSlop={{ top: 6, bottom: 6 }}
         >
           <Text style={styles.submitText}>
             {saving ? 'Submitting…' : isEditing ? 'Update Review' : 'Submit Review'}
@@ -94,7 +105,7 @@ export function ReviewForm({
 
 const styles = StyleSheet.create({
   form: {
-    backgroundColor: Colors.background.secondary,
+    backgroundColor: Colors.surface,
     borderRadius: 12,
     padding: Spacing.md,
     marginBottom: Spacing.sm,
@@ -115,7 +126,7 @@ const styles = StyleSheet.create({
     padding: 2,
   },
   input: {
-    backgroundColor: Colors.background.primary,
+    backgroundColor: Colors.background.secondary,
     borderRadius: 8,
     padding: Spacing.sm,
     fontSize: Typography.sizes.sm,

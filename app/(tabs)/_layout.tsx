@@ -1,6 +1,6 @@
 import { Redirect, Tabs } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { Colors } from '@/constants/theme';
+import { Colors, Typography } from '@/constants/theme';
 import { Compass, PlusCircle, Bell, User } from 'lucide-react-native';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -48,15 +48,21 @@ export default function TabsLayout() {
         tabBarStyle: {
           borderTopWidth: 1,
           borderTopColor: Colors.border.light,
-          backgroundColor: Colors.background.primary,
+          backgroundColor: Colors.surface,
         },
+        tabBarLabelStyle: {
+          fontFamily: Typography.labelFontFamilies.medium,
+          fontSize: Typography.sizes.xxs,
+        },
+        // Fixed-height bar: cap scaling so labels don't clip at large a11y sizes
+        tabBarAllowFontScaling: false,
       }}
     >
       <Tabs.Screen
         name="discover"
         options={{
           title: 'Discover',
-          tabBarAccessibilityLabel: 'Discover tab',
+          tabBarAccessibilityLabel: 'Discover',
           tabBarIcon: ({ size, color }) => (
             <Compass size={size} color={color} />
           ),
@@ -66,7 +72,7 @@ export default function TabsLayout() {
         name="create"
         options={{
           title: 'Create',
-          tabBarAccessibilityLabel: 'Create event tab',
+          tabBarAccessibilityLabel: 'Create event',
           tabBarIcon: ({ size, color }) => (
             <PlusCircle size={size} color={color} />
           ),
@@ -79,8 +85,8 @@ export default function TabsLayout() {
           title: 'Notifications',
           tabBarAccessibilityLabel:
             unreadCount > 0
-              ? `Notifications tab, ${unreadCount} unread`
-              : 'Notifications tab',
+              ? `Notifications, ${unreadCount} unread`
+              : 'Notifications',
           tabBarIcon: ({ size, color }) => <Bell size={size} color={color} />,
           ...(unreadCount > 0
             ? {
@@ -88,7 +94,7 @@ export default function TabsLayout() {
                 tabBarBadgeStyle: {
                   backgroundColor: Colors.primary,
                   color: Colors.text.inverse,
-                  fontSize: 10,
+                  fontSize: Typography.sizes.xxs,
                 },
               }
             : {}),
@@ -98,7 +104,7 @@ export default function TabsLayout() {
         name="profile"
         options={{
           title: 'Profile',
-          tabBarAccessibilityLabel: 'Profile tab',
+          tabBarAccessibilityLabel: 'Profile',
           tabBarIcon: ({ size, color }) => <User size={size} color={color} />,
         }}
       />

@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   TextInput,
-  Dimensions,
 } from 'react-native';
 import { BottomSheetModal, BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,7 +16,6 @@ import { socialService } from '@/services/social';
 import { PublicAttendee } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const PAGE_SIZE = 30;
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -202,7 +200,10 @@ export const AttendeesBottomSheet = forwardRef<
   return (
     <BottomSheetModal
       ref={bottomSheetRef}
-      snapPoints={[SCREEN_HEIGHT - 40]}
+      snapPoints={['100%']}
+      // topInset keeps the sheet below the status bar on all devices; the
+      // header then needs no safe-area padding of its own (no double inset).
+      topInset={insets.top + Spacing.sm}
       index={0}
       enablePanDownToClose
       enableDismissOnClose
@@ -212,7 +213,7 @@ export const AttendeesBottomSheet = forwardRef<
       handleIndicatorStyle={styles.handleIndicator}
       backgroundStyle={styles.background}
     >
-      <View style={[styles.header, { paddingTop: insets.top || Spacing.md }]}>
+      <View style={[styles.header, { paddingTop: Spacing.sm }]}>
         <Text style={styles.title}>Who&apos;s Going</Text>
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
         <View style={styles.searchRow}>

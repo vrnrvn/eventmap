@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -12,10 +12,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { authService } from '@/services/auth';
-import { Input } from '@/components/Input';
+import { TextField } from '@/components/ui/TextField';
 import { Button } from '@/components/ui/Button';
 import { authErrorMessage } from '@/utils/authErrors';
-import { Colors, Spacing, Typography } from '@/constants/theme';
+import { Colors, Spacing, Typography, alpha } from '@/constants/theme';
 import {
   ArrowLeft,
   Mail,
@@ -31,6 +31,16 @@ export default function ForgotPasswordScreen() {
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Seconds left before the resend link re-enables after a send.
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((s) => (s > 1 ? s - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
 
   const validateEmail = () => {
     if (!email.trim()) {
@@ -53,6 +63,7 @@ export default function ForgotPasswordScreen() {
     try {
       await authService.resetPassword(email.trim());
       setSent(true);
+      setResendCooldown(30);
     } catch (err: unknown) {
       setError(authErrorMessage(err, 'Could not send the reset link. Please try again.'));
     } finally {
@@ -72,22 +83,10 @@ export default function ForgotPasswordScreen() {
           ]}
           showsVerticalScrollIndicator={false}
         >
-          {/* Back */}
-          <TouchableOpacity
-            style={styles.backBtn}
-            onPress={() => router.back()}
-            activeOpacity={0.7}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <ArrowLeft size={22} color={Colors.text.primary} />
-          </TouchableOpacity>
-
           <View style={styles.successCenter}>
             {/* Success icon */}
             <View style={styles.successIconWrap}>
-              <CheckCircle size={40} color={Colors.success} />
+              <CheckCircle size={40} color={Colors.successText} />
             </View>
 
             <Text style={styles.successTitle}>Check Your Email</Text>
@@ -98,7 +97,9 @@ export default function ForgotPasswordScreen() {
             {/* Email badge */}
             <View style={styles.emailBadge}>
               <Mail size={14} color={Colors.primary} />
-              <Text style={styles.emailBadgeText}>{email}</Text>
+              <Text style={styles.emailBadgeText} numberOfLines={1} ellipsizeMode="middle">
+                {email}
+              </Text>
             </View>
 
             <Text style={styles.successHint}>
@@ -116,17 +117,28 @@ export default function ForgotPasswordScreen() {
               icon={<LogIn size={18} color="#FFFFFF" />}
             />
 
-            {/* Resend */}
+            {/* Resend — disabled for 30s after each send */}
             <TouchableOpacity
               style={styles.resendBtn}
               onPress={() => {
                 setSent(false);
                 setError(null);
               }}
+              disabled={resendCooldown > 0}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={
+                resendCooldown > 0 ? `Resend available in ${resendCooldown} seconds` : 'Try again'
+              }
+              accessibilityState={{ disabled: resendCooldown > 0 }}
+              hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
             >
-              <Text style={styles.resendBtnText}>
-                Didn&apos;t receive it? Try again
+              <Text
+                style={[styles.resendBtnText, resendCooldown > 0 && styles.resendBtnTextDisabled]}
+              >
+                {resendCooldown > 0
+                  ? `Resend in ${resendCooldown}s`
+                  : "Didn't receive it? Try again"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -166,7 +178,7 @@ export default function ForgotPasswordScreen() {
           <View style={styles.heroSection}>
             <View style={styles.heroIconWrap}>
               <LinearGradient
-                colors={[Colors.primary, Colors.accent]}
+                colors={[Colors.primary, Colors.secondary]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.heroIconGradient}
@@ -182,30 +194,24 @@ export default function ForgotPasswordScreen() {
 
           {/* Form card */}
           <View style={styles.formCard}>
-            <View style={styles.fieldRow}>
-              <View style={styles.fieldIcon}>
-                <Mail size={16} color={Colors.primary} />
-              </View>
-              <View style={styles.fieldContent}>
-                <Input
-                  label="Email Address"
-                  value={email}
-                  onChangeText={(text) => {
-                    setEmail(text);
-                    setError(null);
-                  }}
-                  placeholder="your@email.com"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  autoComplete="email"
-                  textContentType="emailAddress"
-                  returnKeyType="send"
-                  onSubmitEditing={handleResetPassword}
-                  error={error ?? undefined}
-                />
-              </View>
-            </View>
+            <TextField
+              label="Email Address"
+              value={email}
+              onChangeText={(text) => {
+                setEmail(text);
+                setError(null);
+              }}
+              placeholder="your@email.com"
+              error={error ?? undefined}
+              leadingIcon={<Mail size={20} color={Colors.text.tertiary} />}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              textContentType="emailAddress"
+              returnKeyType="send"
+              onSubmitEditing={handleResetPassword}
+            />
           </View>
 
           {/* Submit */}
@@ -226,6 +232,9 @@ export default function ForgotPasswordScreen() {
             onPress={() => router.back()}
             disabled={loading}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Back to sign in"
+            hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
           >
             <LogIn size={16} color={Colors.primary} />
             <Text style={styles.backLinkText}>Back to Sign In</Text>
@@ -259,19 +268,10 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: Colors.background.primary,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: Colors.surface,
     marginTop: 12,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 8,
-      },
-      android: { elevation: 3 },
-    }),
   },
 
   /* ── Hero ── */
@@ -301,8 +301,8 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     fontSize: Typography.sizes.xxl,
-    fontFamily: Typography.displayFontFamilies.bold,
-    fontWeight: Typography.weights.bold,
+    fontFamily: Typography.displayFontFamilies.extrabold,
+    fontWeight: Typography.weights.extrabold,
     color: Colors.text.primary,
     marginBottom: 8,
   },
@@ -316,35 +316,11 @@ const styles = StyleSheet.create({
 
   /* ── Form card ── */
   formCard: {
-    backgroundColor: Colors.background.primary,
-    borderRadius: 22,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.07,
-        shadowRadius: 12,
-      },
-      android: { elevation: 4 },
-    }),
-  },
-  fieldRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 18,
-    paddingVertical: 18,
-    gap: 14,
-  },
-  fieldIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 11,
-    backgroundColor: Colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fieldContent: {
-    flex: 1,
+    backgroundColor: Colors.surface,
+    borderRadius: 40,
+    padding: 22,
+    borderWidth: 1,
+    borderColor: alpha('#000000', 0.04),
   },
 
   /* ── Submit ── */
@@ -359,20 +335,6 @@ const styles = StyleSheet.create({
       },
       android: { elevation: 8 },
     }),
-  },
-  submitGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 17,
-  },
-  submitText: {
-    fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: '#FFFFFF',
-    letterSpacing: 0.3,
   },
 
   /* ── Back link ── */
@@ -430,6 +392,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   emailBadgeText: {
+    flexShrink: 1,
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
@@ -444,34 +407,6 @@ const styles = StyleSheet.create({
     marginBottom: 28,
     paddingHorizontal: 8,
   },
-  successBtnWrap: {
-    width: '100%',
-    borderRadius: 16,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: Colors.primary,
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.3,
-        shadowRadius: 14,
-      },
-      android: { elevation: 8 },
-    }),
-  },
-  successBtnGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 17,
-  },
-  successBtnText: {
-    fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: '#FFFFFF',
-    letterSpacing: 0.3,
-  },
   resendBtn: {
     marginTop: 18,
     paddingVertical: 8,
@@ -481,5 +416,8 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
     color: Colors.primary,
+  },
+  resendBtnTextDisabled: {
+    color: Colors.text.tertiary,
   },
 });

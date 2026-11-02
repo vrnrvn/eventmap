@@ -16,10 +16,9 @@ import { authService } from '@/services/auth';
 import { notify } from '@/utils/notify';
 import { authErrorMessage } from '@/utils/authErrors';
 import { Button } from '@/components/ui/Button';
-import { Colors, Typography, BorderRadius, Spacing } from '@/constants/theme';
-import { ArrowLeft, Eye, EyeOff, Lock, KeyRound, LogIn } from 'lucide-react-native';
-
-const EYE_HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
+import { TextField } from '@/components/ui/TextField';
+import { Colors, Typography, Spacing } from '@/constants/theme';
+import { ArrowLeft, Lock, KeyRound, LogIn } from 'lucide-react-native';
 
 export default function ResetPasswordScreen() {
   const insets = useSafeAreaInsets();
@@ -29,9 +28,6 @@ export default function ResetPasswordScreen() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [showCurrent, setShowCurrent] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
   const [hasSession, setHasSession] = useState(false);
@@ -44,6 +40,21 @@ export default function ResetPasswordScreen() {
   }>({});
   const passwordRef = useRef<TextInput>(null);
   const confirmRef = useRef<TextInput>(null);
+  const [cancelling, setCancelling] = useState(false);
+
+  // Recovery mode otherwise has no way out: sign out of the recovery session
+  // and route back to login, same as the expired-link state does.
+  const handleCancelRecovery = async () => {
+    setCancelling(true);
+    try {
+      await authService.signOut();
+    } catch {
+      // Even if sign-out fails, send the user back to the sign-in screen.
+    } finally {
+      setCancelling(false);
+    }
+    router.replace('/(auth)/login');
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -123,7 +134,7 @@ export default function ResetPasswordScreen() {
   if (checkingSession) {
     return (
       <View style={[styles.root, styles.center]}>
-        <ActivityIndicator color={Colors.primary} />
+        <ActivityIndicator color={Colors.primary} accessibilityLabel="Loading" />
       </View>
     );
   }
@@ -199,110 +210,60 @@ export default function ResetPasswordScreen() {
 
           <View style={styles.card}>
             {requiresCurrentPassword ? (
-              <>
-                <Text style={styles.fieldLabel}>Current Password</Text>
-                <View style={styles.inputShell}>
-                  <Lock size={20} color={Colors.text.tertiary} />
-                  <TextInput
-                    value={currentPassword}
-                    onChangeText={setCurrentPassword}
-                    placeholder="••••••••"
-                    placeholderTextColor={Colors.text.tertiary}
-                    secureTextEntry={!showCurrent}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    autoComplete="current-password"
-                    textContentType="password"
-                    returnKeyType="next"
-                    submitBehavior="submit"
-                    onSubmitEditing={() => passwordRef.current?.focus()}
-                    style={styles.input}
-                  />
-                  <TouchableOpacity
-                    onPress={() => setShowCurrent((v) => !v)}
-                    hitSlop={EYE_HIT_SLOP}
-                    accessibilityRole="button"
-                    accessibilityLabel={showCurrent ? 'Hide password' : 'Show password'}
-                  >
-                    {showCurrent ? (
-                      <EyeOff size={21} color={Colors.text.tertiary} />
-                    ) : (
-                      <Eye size={21} color={Colors.text.tertiary} />
-                    )}
-                  </TouchableOpacity>
-                </View>
-                {errors.current ? <Text style={styles.errorText}>{errors.current}</Text> : null}
-              </>
-            ) : null}
-
-            <Text style={[styles.fieldLabel, requiresCurrentPassword && { marginTop: 16 }]}>
-              New Password
-            </Text>
-            <View style={styles.inputShell}>
-              <Lock size={20} color={Colors.text.tertiary} />
-              <TextInput
-                ref={passwordRef}
-                value={password}
-                onChangeText={setPassword}
+              <TextField
+                label="Current Password"
+                value={currentPassword}
+                onChangeText={setCurrentPassword}
                 placeholder="••••••••"
-                placeholderTextColor={Colors.text.tertiary}
-                secureTextEntry={!showPassword}
+                error={errors.current}
+                leadingIcon={<Lock size={20} color={Colors.text.tertiary} />}
+                secureTextEntry
                 autoCapitalize="none"
                 autoCorrect={false}
-                autoComplete="new-password"
-                textContentType="newPassword"
+                autoComplete="current-password"
+                textContentType="password"
                 returnKeyType="next"
                 submitBehavior="submit"
-                onSubmitEditing={() => confirmRef.current?.focus()}
-                style={styles.input}
+                onSubmitEditing={() => passwordRef.current?.focus()}
               />
-              <TouchableOpacity
-                onPress={() => setShowPassword((v) => !v)}
-                hitSlop={EYE_HIT_SLOP}
-                accessibilityRole="button"
-                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? (
-                  <EyeOff size={21} color={Colors.text.tertiary} />
-                ) : (
-                  <Eye size={21} color={Colors.text.tertiary} />
-                )}
-              </TouchableOpacity>
-            </View>
-            {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
+            ) : null}
 
-            <Text style={[styles.fieldLabel, { marginTop: 16 }]}>Confirm Password</Text>
-            <View style={styles.inputShell}>
-              <Lock size={20} color={Colors.text.tertiary} />
-              <TextInput
-                ref={confirmRef}
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                placeholder="••••••••"
-                placeholderTextColor={Colors.text.tertiary}
-                secureTextEntry={!showConfirm}
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoComplete="new-password"
-                textContentType="newPassword"
-                returnKeyType="go"
-                onSubmitEditing={handleSubmit}
-                style={styles.input}
-              />
-              <TouchableOpacity
-                onPress={() => setShowConfirm((v) => !v)}
-                hitSlop={EYE_HIT_SLOP}
-                accessibilityRole="button"
-                accessibilityLabel={showConfirm ? 'Hide password' : 'Show password'}
-              >
-                {showConfirm ? (
-                  <EyeOff size={21} color={Colors.text.tertiary} />
-                ) : (
-                  <Eye size={21} color={Colors.text.tertiary} />
-                )}
-              </TouchableOpacity>
-            </View>
-            {errors.confirm ? <Text style={styles.errorText}>{errors.confirm}</Text> : null}
+            <TextField
+              ref={passwordRef}
+              label="New Password"
+              containerStyle={requiresCurrentPassword ? styles.fieldSpacing : undefined}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="••••••••"
+              error={errors.password}
+              leadingIcon={<Lock size={20} color={Colors.text.tertiary} />}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="new-password"
+              textContentType="newPassword"
+              returnKeyType="next"
+              submitBehavior="submit"
+              onSubmitEditing={() => confirmRef.current?.focus()}
+            />
+
+            <TextField
+              ref={confirmRef}
+              label="Confirm Password"
+              containerStyle={styles.fieldSpacing}
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              placeholder="••••••••"
+              error={errors.confirm}
+              leadingIcon={<Lock size={20} color={Colors.text.tertiary} />}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="new-password"
+              textContentType="newPassword"
+              returnKeyType="go"
+              onSubmitEditing={handleSubmit}
+            />
 
             <Button
               label={isChangeMode ? 'Change Password' : 'Set Password'}
@@ -314,6 +275,22 @@ export default function ResetPasswordScreen() {
               style={styles.ctaWrap}
             />
           </View>
+
+          {!isChangeMode ? (
+            <TouchableOpacity
+              style={styles.cancelLink}
+              onPress={handleCancelRecovery}
+              disabled={loading || cancelling}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel and go back to sign in"
+              hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+            >
+              <Text style={styles.cancelLinkText}>
+                {cancelling ? 'Signing out…' : 'Cancel and back to sign in'}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -325,8 +302,8 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   center: { alignItems: 'center', justifyContent: 'center' },
   backBtn: {
-    width: 42,
-    height: 42,
+    width: 44,
+    height: 44,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -347,7 +324,7 @@ const styles = StyleSheet.create({
     lineHeight: 38,
     color: Colors.text.primary,
     fontFamily: Typography.displayFontFamilies.extrabold,
-    fontWeight: '800',
+    fontWeight: Typography.weights.extrabold,
     letterSpacing: -0.6,
     textAlign: 'center',
   },
@@ -366,37 +343,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border.light,
   },
-  fieldLabel: {
-    marginBottom: 10,
-    color: Colors.text.secondary,
-    fontSize: Typography.sizes.xs,
-    letterSpacing: 1.8,
-    textTransform: 'uppercase',
-    fontFamily: Typography.labelFontFamilies.semibold,
-  },
-  inputShell: {
-    height: 60,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Colors.background.secondary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    gap: 10,
-  },
-  input: {
-    flex: 1,
-    color: Colors.text.primary,
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.medium,
-  },
-  errorText: {
-    marginTop: 6,
-    marginLeft: 4,
-    color: Colors.error,
-    fontSize: Typography.sizes.xs,
-    fontFamily: Typography.fontFamilies.medium,
-  },
+  fieldSpacing: { marginTop: Spacing.md },
   ctaWrap: { marginTop: Spacing.lg, alignSelf: 'stretch' },
+  cancelLink: {
+    alignSelf: 'center',
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.sm,
+  },
+  cancelLinkText: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.text.secondary,
+  },
   expiredTitle: {
     fontSize: 28,
     color: Colors.text.primary,

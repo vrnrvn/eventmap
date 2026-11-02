@@ -124,7 +124,7 @@ export function ImagePickerButton({
           <TouchableOpacity
             style={styles.removeButton}
             onPress={() => handleRemove(index)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             accessibilityRole="button"
             accessibilityLabel={`Remove photo ${index + 1}`}
           >

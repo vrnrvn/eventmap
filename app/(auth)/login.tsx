@@ -15,11 +15,12 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { GoogleIcon } from '@/components/icons/BrandIcons';
 import { Button } from '@/components/ui/Button';
+import { TextField } from '@/components/ui/TextField';
 import { oauthEnabled } from '@/services/runtime';
 import { notify } from '@/utils/notify';
 import { authErrorMessage } from '@/utils/authErrors';
-import { Colors, Typography, BorderRadius, Spacing } from '@/constants/theme';
-import { ArrowLeft, Eye, EyeOff, Mail, Lock } from 'lucide-react-native';
+import { Colors, Typography, BorderRadius, Spacing, alpha } from '@/constants/theme';
+import { ArrowLeft, Mail, Lock } from 'lucide-react-native';
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
@@ -33,7 +34,6 @@ export default function LoginScreen() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
@@ -124,69 +124,50 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.fieldLabel}>Email Address</Text>
-            <View style={styles.inputShell}>
-              <Mail size={20} color={Colors.text.tertiary} />
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                placeholder="name@example.com"
-                placeholderTextColor={Colors.text.tertiary}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoComplete="email"
-                textContentType="emailAddress"
-                returnKeyType="next"
-                submitBehavior="submit"
-                onSubmitEditing={() => passwordRef.current?.focus()}
-                style={styles.input}
-              />
-            </View>
-            {errors.email ? <Text style={styles.errorText}>{errors.email}</Text> : null}
+            <TextField
+              label="Email Address"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="name@example.com"
+              error={errors.email}
+              leadingIcon={<Mail size={20} color={Colors.text.tertiary} />}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              textContentType="emailAddress"
+              returnKeyType="next"
+              submitBehavior="submit"
+              onSubmitEditing={() => passwordRef.current?.focus()}
+            />
 
-            <View style={styles.passwordRow}>
-              <Text style={styles.fieldLabel}>Password</Text>
-              <TouchableOpacity
-                onPress={() => router.push('/(auth)/forgot-password')}
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                accessibilityRole="button"
-                accessibilityLabel="Forgot password"
-              >
-                <Text style={styles.forgotText}>Forgot Password?</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.inputShell}>
-              <Lock size={20} color={Colors.text.tertiary} />
-              <TextInput
-                ref={passwordRef}
-                value={password}
-                onChangeText={setPassword}
-                placeholder="••••••••"
-                placeholderTextColor={Colors.text.tertiary}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoComplete="current-password"
-                textContentType="password"
-                returnKeyType="go"
-                onSubmitEditing={handleSignIn}
-                style={styles.input}
-              />
-              <TouchableOpacity
-                onPress={() => setShowPassword((v) => !v)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                accessibilityRole="button"
-                accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
-              >
-                {showPassword ? (
-                  <EyeOff size={21} color={Colors.text.tertiary} />
-                ) : (
-                  <Eye size={21} color={Colors.text.tertiary} />
-                )}
-              </TouchableOpacity>
-            </View>
-            {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
+            <TextField
+              ref={passwordRef}
+              label="Password"
+              labelAccessory={
+                <TouchableOpacity
+                  onPress={() => router.push('/(auth)/forgot-password')}
+                  hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Forgot password"
+                >
+                  <Text style={styles.forgotText}>Forgot Password?</Text>
+                </TouchableOpacity>
+              }
+              containerStyle={styles.fieldSpacing}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="••••••••"
+              error={errors.password}
+              leadingIcon={<Lock size={20} color={Colors.text.tertiary} />}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="current-password"
+              textContentType="password"
+              returnKeyType="go"
+              onSubmitEditing={handleSignIn}
+            />
 
             <Button
               label="Login"
@@ -241,19 +222,19 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: Colors.background.primary },
   flex: { flex: 1 },
   backBtn: {
-    width: 42,
-    height: 42,
+    width: 44,
+    height: 44,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
   },
   hero: { alignItems: 'center', marginTop: 18, marginBottom: 18 },
   logoTile: {
     width: 106,
     height: 106,
     borderRadius: 30,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
@@ -265,66 +246,30 @@ const styles = StyleSheet.create({
     lineHeight: 38,
     color: Colors.text.primary,
     fontFamily: Typography.displayFontFamilies.extrabold,
-    fontWeight: '800',
+    fontWeight: Typography.weights.extrabold,
     letterSpacing: -0.8,
   },
   heroSub: {
     marginTop: 6,
-    fontSize: 18,
+    fontSize: Typography.sizes.lg,
     lineHeight: 30,
     color: Colors.text.secondary,
     fontFamily: Typography.fontFamilies.medium,
   },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
     borderRadius: 40,
     padding: 22,
     borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.04)',
+    borderColor: alpha('#000000', 0.04),
   },
-  fieldLabel: {
-    marginBottom: 10,
-    color: Colors.text.secondary,
-    fontSize: 12,
-    letterSpacing: 1.8,
-    textTransform: 'uppercase',
-    fontFamily: Typography.labelFontFamilies.semibold,
-  },
-  inputShell: {
-    height: 60,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Colors.background.secondary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    gap: 10,
-  },
-  input: {
-    flex: 1,
-    color: Colors.text.primary,
-    fontSize: 16,
-    fontFamily: Typography.fontFamilies.medium,
-  },
-  passwordRow: {
-    marginTop: 16,
-    marginBottom: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
+  fieldSpacing: { marginTop: Spacing.md },
   forgotText: {
     color: Colors.primary,
-    fontSize: 12,
+    fontSize: Typography.sizes.xs,
     letterSpacing: 1.6,
     textTransform: 'uppercase',
     fontFamily: Typography.labelFontFamilies.semibold,
-  },
-  errorText: {
-    marginTop: 6,
-    marginLeft: 4,
-    color: Colors.error,
-    fontSize: 12,
-    fontFamily: Typography.fontFamilies.medium,
   },
   ctaWrap: { marginTop: Spacing.lg },
   divider: {
@@ -350,12 +295,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 10,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
   },
   googleBtnDisabled: { opacity: 0.5 },
   googleText: {
     color: Colors.text.primary,
-    fontSize: 16,
+    fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
@@ -366,8 +311,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  footerText: { color: Colors.text.secondary, fontSize: 16, fontFamily: Typography.fontFamilies.medium },
-  footerLink: { color: Colors.primary, fontSize: 16, fontFamily: Typography.fontFamilies.bold, fontWeight: Typography.weights.bold },
+  footerText: { color: Colors.text.secondary, fontSize: Typography.sizes.md, fontFamily: Typography.fontFamilies.medium },
+  footerLink: { color: Colors.primary, fontSize: Typography.sizes.md, fontFamily: Typography.fontFamilies.bold, fontWeight: Typography.weights.bold },
   bgGlowTop: {
     position: 'absolute',
     width: 280,

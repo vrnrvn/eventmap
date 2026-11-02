@@ -32,6 +32,7 @@ A clean, location-centric visual language built around the Eventmap brand red. A
 
 | Token | Size | Use |
 |-------|------|-----|
+| xxs | 11px | Smallest legible label — tiny badges and pills only |
 | xs | 12px | Labels, captions, badges |
 | sm | 14px | Meta text, secondary copy |
 | md | 16px | Body text |
@@ -40,7 +41,7 @@ A clean, location-centric visual language built around the Eventmap brand red. A
 | xxl | 32px | Hero text |
 | xxxl | 48px | Display |
 
-Weights: `Typography.weights` — 400 / 500 / 600 / 700. Line heights: `Typography.lineHeights` — tight 1.2, normal 1.5, relaxed 1.75.
+Weights: `Typography.weights` — 400 / 500 / 600 / 700 / 800 (extrabold). Line heights: `Typography.lineHeights` — tight 1.2, normal 1.5, relaxed 1.75.
 
 ---
 
@@ -67,7 +68,9 @@ The Eventmap brand color. Primary actions, active states, highlights.
 | Token | Hex | Soft tint |
 |-------|-----|-----------|
 | success | #2D8A6E | `Colors.successSoft` |
+| successText | #1F7058 | — (text/icons on light backgrounds; AA-safe) |
 | warning | #D4A017 | `Colors.warningSoft` |
+| warningText | #8A6A00 | — (text/icons on light backgrounds; AA-safe) |
 | error | #B41340 | `Colors.errorSoft` |
 | premium | #B40953 | `Colors.premiumSoft` |
 
@@ -77,16 +80,17 @@ The Eventmap brand color. Primary actions, active states, highlights.
 |-------|-----|-----|
 | text.primary | #2D2F2F | Headlines, primary copy |
 | text.secondary | #5A5C5C | Meta, descriptions |
-| text.tertiary | #767777 | Placeholders, hints |
+| text.tertiary | #6B6C6C | Placeholders, hints |
 | text.disabled | #9C9D9D | Disabled states |
 | text.inverse | #FFEFEE | Text on dark/brand surfaces |
+| white | #FFFFFF | Text/icons on filled brand surfaces |
 | surface | #FFFFFF | Cards and elevated surfaces |
 | background.primary | #F6F6F6 | Main app background (light gray) |
 | background.secondary | #F0F1F1 | Elevated surfaces, inputs |
 | background.tertiary | #E7E8E8 | Deeper contrast |
 | background.dark | #0C0F0F | Dark overlays / splash |
 | border.light | #DBDDDD | Subtle dividers |
-| border.medium | #ACADAD | Input borders |
+| border.medium | #8E8F8F | Input borders |
 | border.dark | #767777 | Strong outlines |
 | neutralSoft | rgba(45, 47, 47, 0.06) | Muted chips, icon wells |
 

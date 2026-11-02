@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
   RefreshControl,
   Platform,
 } from 'react-native';
@@ -15,9 +14,10 @@ import { socialService } from '@/services/social';
 import { confirmAction } from '@/utils/confirm';
 import { notify } from '@/utils/notify';
 import { Button } from '@/components/ui/Button';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { EventListItem, formatEventDate } from '@/components/EventListItem';
 import { RankedEvent } from '@/types/database';
-import { Colors, Typography } from '@/constants/theme';
+import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
 import {
   ArrowLeft,
   Calendar,
@@ -42,11 +42,16 @@ export default function SavedEvents() {
       setEvents(list);
       setError(null);
     } catch {
-      setError('Could not load saved events. Pull to retry.');
+      setError('Could not load your saved events.');
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const retryLoad = useCallback(() => {
+    setLoading(true);
+    void loadSavedEvents();
+  }, [loadSavedEvents]);
 
   // Saves are toggled from event pages; refresh whenever we come back here.
   useFocusEffect(
@@ -112,7 +117,8 @@ export default function SavedEvents() {
               onPress={() => handleUnsave(event)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
-              accessibilityLabel="Remove from saved events"
+              accessibilityLabel={`Remove ${event.title} from saved events`}
+              accessibilityState={{ selected: true }}
             >
               <Bookmark size={14} color={Colors.primary} fill={Colors.primary} />
             </TouchableOpacity>
@@ -134,6 +140,7 @@ export default function SavedEvents() {
           activeOpacity={0.7}
           accessibilityRole="button"
           accessibilityLabel="Go back"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <ArrowLeft size={22} color={Colors.text.primary} />
         </TouchableOpacity>
@@ -154,16 +161,20 @@ export default function SavedEvents() {
       </View>
 
       {loading ? (
-        <View style={styles.centerContainer}>
-          <View style={styles.loadingIconWrap}>
-            <Bookmark size={28} color={Colors.primary} />
-          </View>
-          <ActivityIndicator
-            size="large"
-            color={Colors.primary}
-            style={{ marginTop: 20 }}
-          />
-          <Text style={styles.loadingText}>Loading your saved events…</Text>
+        <View
+          style={styles.skeletonList}
+          accessibilityLabel="Loading your saved events"
+          accessibilityState={{ busy: true }}
+        >
+          {[0, 1, 2].map((i) => (
+            <View key={i} style={styles.skeletonCard}>
+              <View style={styles.skeletonThumb} />
+              <View style={styles.skeletonLines}>
+                <View style={styles.skeletonBar} />
+                <View style={[styles.skeletonBar, styles.skeletonBarShort]} />
+              </View>
+            </View>
+          ))}
         </View>
       ) : (
         <ScrollView
@@ -184,9 +195,11 @@ export default function SavedEvents() {
           }
         >
           {error ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
+            <ErrorState
+              title="Couldn't load saved events"
+              message={error}
+              onRetry={retryLoad}
+            />
           ) : events.length === 0 ? (
             <View style={styles.emptyContainer}>
               <View style={styles.emptyIconWrap}>
@@ -241,11 +254,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
-  errorText: {
-    fontSize: Typography.sizes.sm,
-    color: Colors.error,
-    textAlign: 'center',
-  },
   /* ── Header ── */
   header: {
     flexDirection: 'row',
@@ -294,27 +302,40 @@ const styles = StyleSheet.create({
     width: 40,
   },
 
-  /* ── Loading ── */
-  centerContainer: {
+  /* ── Loading skeleton (mirrors EventListItem) ── */
+  skeletonList: {
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.md + Spacing.xs,
+  },
+  skeletonCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+    padding: Spacing.md,
+    marginBottom: 12,
+  },
+  skeletonThumb: {
+    width: 58,
+    height: 58,
+    borderRadius: BorderRadius.md + 2,
+    backgroundColor: Colors.background.tertiary,
+  },
+  skeletonLines: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 40,
+    gap: Spacing.sm,
   },
-  loadingIconWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
-    backgroundColor: Colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
+  skeletonBar: {
+    height: 12,
+    width: '70%',
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.background.tertiary,
   },
-  loadingText: {
-    marginTop: 16,
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-    color: Colors.text.secondary,
+  skeletonBarShort: {
+    width: '45%',
   },
 
   /* ── Scroll ── */

@@ -12,14 +12,14 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ban, Flag } from 'lucide-react-native';
+import { Ban, Flag, Lock, Pencil } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { complaintsService } from '@/services/complaints';
 import { notify, notifyConfirm } from '@/utils/notify';
 import { profilesService } from '@/services/profiles';
 import { socialService } from '@/services/social';
 import { Profile, RankedEvent } from '@/types/database';
-import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { Avatar } from '@/components/Avatar';
 import { EventCardCarousel } from '@/components/EventCardCarousel';
 import { CategoryIcon } from '@/components/CategoryIcon';
@@ -33,7 +33,8 @@ const EVENT_CARD_WIDTH = SCREEN_WIDTH * 0.7;
 
 function formatDate(iso: string) {
   const d = new Date(iso);
-  return d.toLocaleDateString(undefined, {
+  // en-US to match date formatting across the rest of the app.
+  return d.toLocaleDateString('en-US', {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -205,8 +206,18 @@ export default function UserProfile() {
     });
   }, [id, blocked, blockBusy]);
 
-  const headerActions =
-    user && !isOwnProfile ? (
+  const headerActions = user && isOwnProfile ? (
+    <TouchableOpacity
+      onPress={() => router.push('/settings' as never)}
+      style={styles.headerIconBtn}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      accessibilityRole="button"
+      accessibilityLabel="Edit profile"
+      activeOpacity={0.7}
+    >
+      <Pencil size={20} color={Colors.text.secondary} />
+    </TouchableOpacity>
+  ) : user && !isOwnProfile ? (
       <View style={styles.headerActions}>
         <TouchableOpacity
           onPress={handleToggleBlock}
@@ -247,7 +258,7 @@ export default function UserProfile() {
         <ScreenHeader title="Profile" safeArea={false} />
         <View style={styles.privateState}>
           <View style={styles.privateIconWrap}>
-            <Avatar imageUrl={null} name="?" size={80} />
+            <Lock size={32} color={Colors.text.tertiary} />
           </View>
           <Text style={styles.privateTitle}>Private Profile</Text>
           <Text style={styles.privateSubtitle}>
@@ -313,7 +324,7 @@ export default function UserProfile() {
             <TouchableOpacity
               onPress={handleToggleBlock}
               disabled={blockBusy}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              hitSlop={{ top: 14, bottom: 14, left: 12, right: 12 }}
               accessibilityRole="button"
               accessibilityLabel="Unblock user"
             >
@@ -325,21 +336,26 @@ export default function UserProfile() {
         <View style={styles.hero}>
           <Avatar imageUrl={profile.avatar_url} name={profile.name} size={100} />
           <Text style={styles.name}>{profile.name}</Text>
-          {profile.bio ? (
-            <>
-              <Text style={styles.sectionLabel}>About me</Text>
-              <Text style={styles.bio}>{profile.bio}</Text>
-            </>
-          ) : null}
-          {profile.hobbies ? (
-            <>
-              <Text style={[styles.sectionLabel, { marginTop: profile.bio ? Spacing.md : Spacing.sm }]}>
-                Hobbies
-              </Text>
-              <Text style={styles.hobbies}>{profile.hobbies}</Text>
-            </>
-          ) : null}
         </View>
+
+        {(profile.bio || profile.hobbies) ? (
+          <View style={styles.aboutCard}>
+            {profile.bio ? (
+              <>
+                <Text style={styles.sectionLabel}>About me</Text>
+                <Text style={styles.bio}>{profile.bio}</Text>
+              </>
+            ) : null}
+            {profile.hobbies ? (
+              <>
+                <Text style={[styles.sectionLabel, profile.bio ? styles.sectionLabelSpaced : null]}>
+                  Hobbies
+                </Text>
+                <Text style={styles.hobbies}>{profile.hobbies}</Text>
+              </>
+            ) : null}
+          </View>
+        ) : null}
 
         {(socialHandles.instagram || socialHandles.facebook) ? (
           <View style={styles.socialsSection}>
@@ -350,6 +366,9 @@ export default function UserProfile() {
                 style={styles.socialBtn}
                 onPress={() => Linking.openURL(buildInstagramUrl(socialHandles.instagram!))}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Open Instagram profile"
+                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
               >
                 <InstagramIcon size={24} />
               </TouchableOpacity>
@@ -359,6 +378,9 @@ export default function UserProfile() {
                 style={styles.socialBtn}
                 onPress={() => Linking.openURL(buildFacebookUrl(socialHandles.facebook!))}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Open Facebook profile"
+                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
               >
                 <FacebookIcon size={24} />
               </TouchableOpacity>
@@ -367,9 +389,13 @@ export default function UserProfile() {
           </View>
         ) : null}
 
-        {upcomingEvents.length > 0 ? (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Events I&apos;m Planning to Attend</Text>
+        {/* Hidden entirely (not "No upcoming events") when the user opted out
+            of showing future events — an empty state would misrepresent a
+            privacy choice as an empty schedule. */}
+        {profile.show_future_events !== false ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Events I&apos;m Planning to Attend</Text>
+          {upcomingEvents.length > 0 ? (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={true}
@@ -381,6 +407,8 @@ export default function UserProfile() {
                   style={styles.eventCard}
                   onPress={() => router.push(`/event/${event.id}` as any)}
                   activeOpacity={0.9}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${event.title}, ${formatDate(event.start_datetime)}`}
                 >
                   <EventCardCarousel
                     imageUrls={event.cover_image_url ? [event.cover_image_url] : []}
@@ -406,7 +434,10 @@ export default function UserProfile() {
                 </TouchableOpacity>
               ))}
             </ScrollView>
-          </View>
+          ) : (
+            <Text style={styles.emptyEventsText}>No upcoming events</Text>
+          )}
+        </View>
         ) : null}
       </ScrollView>
     </View>
@@ -436,11 +467,19 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: Typography.sizes.xxl,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
     color: Colors.text.primary,
     marginTop: Spacing.md,
     textAlign: 'center',
+  },
+  aboutCard: {
+    marginHorizontal: Spacing.lg,
+    marginBottom: Spacing.xl,
+    padding: Spacing.md,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    ...Shadows.card,
   },
   sectionLabel: {
     fontSize: Typography.sizes.sm,
@@ -449,20 +488,24 @@ const styles = StyleSheet.create({
     color: Colors.text.tertiary,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
-    marginTop: Spacing.sm,
+  },
+  sectionLabelSpaced: {
+    marginTop: Spacing.md,
   },
   bio: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
     marginTop: Spacing.xs,
-    textAlign: 'center',
+    textAlign: 'left',
     lineHeight: 22,
   },
   hobbies: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
     marginTop: Spacing.xs,
-    textAlign: 'center',
+    textAlign: 'left',
     lineHeight: 22,
   },
   socialsSection: {
@@ -525,6 +568,7 @@ const styles = StyleSheet.create({
   },
   eventMetaText: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
   },
   categoryBadge: {
@@ -542,6 +586,12 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
   },
+  emptyEventsText: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+    paddingHorizontal: Spacing.xl,
+  },
   privateState: {
     flex: 1,
     alignItems: 'center',
@@ -549,7 +599,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl,
   },
   privateIconWrap: {
-    opacity: 0.5,
+    width: 72,
+    height: 72,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.neutralSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   privateTitle: {
     fontSize: Typography.sizes.xl,
@@ -560,12 +615,14 @@ const styles = StyleSheet.create({
   },
   privateSubtitle: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
     marginTop: Spacing.sm,
     textAlign: 'center',
   },
   errorText: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
     textAlign: 'center',
     paddingHorizontal: Spacing.xl,
@@ -591,6 +648,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   reportBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerIconBtn: {
     width: 44,
     height: 44,
     alignItems: 'center',

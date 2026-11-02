@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Image,
@@ -23,7 +23,23 @@ type ImageViewerProps = {
 
 export function ImageViewer({ visible, images, initialIndex = 0, onClose }: ImageViewerProps) {
   const insets = useSafeAreaInsets();
-  const [activeIndex, setActiveIndex] = useState(initialIndex);
+  // Clamp: the photos array may have shrunk between opens, and
+  // scrollToIndex/initialScrollIndex throw when index > length - 1.
+  const safeInitialIndex =
+    images.length > 0 ? Math.min(Math.max(0, initialIndex), images.length - 1) : 0;
+  const [activeIndex, setActiveIndex] = useState(safeInitialIndex);
+  const listRef = useRef<FlatList<string>>(null);
+
+  // The viewer stays mounted between opens, so re-sync the active image
+  // whenever it becomes visible (possibly with a different initialIndex).
+  useEffect(() => {
+    if (visible) {
+      setActiveIndex(safeInitialIndex);
+      if (images.length > 0) {
+        listRef.current?.scrollToIndex({ index: safeInitialIndex, animated: false });
+      }
+    }
+  }, [visible, safeInitialIndex, images.length]);
 
   const handleScroll = (e: any) => {
     const offset = e.nativeEvent.contentOffset.x;
@@ -48,17 +64,20 @@ export function ImageViewer({ visible, images, initialIndex = 0, onClose }: Imag
           style={[styles.closeButton, { top: insets.top + 12 }]}
           onPress={onClose}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityRole="button"
+          accessibilityLabel="Close"
         >
           <X size={24} color="#FFFFFF" />
         </TouchableOpacity>
 
         {/* Image pager */}
         <FlatList
+          ref={listRef}
           data={images}
           horizontal
           pagingEnabled
           showsHorizontalScrollIndicator={false}
-          initialScrollIndex={initialIndex}
+          initialScrollIndex={safeInitialIndex}
           getItemLayout={(_, index) => ({
             length: SCREEN_WIDTH,
             offset: SCREEN_WIDTH * index,

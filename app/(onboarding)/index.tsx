@@ -13,6 +13,8 @@ import {
   KeyboardAvoidingView,
   Switch,
   useWindowDimensions,
+  TextInput,
+  Linking,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onboardingDraftKey as draftKey, clearOnboardingDraft } from '@/utils/onboardingDraft';
@@ -51,7 +53,8 @@ import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/con
 import { Avatar } from '@/components/Avatar';
 import { AvatarRing } from '@/components/AvatarRing';
 import { CategoryIcon } from '@/components/CategoryIcon';
-import { Input } from '@/components/Input';
+import { Button } from '@/components/ui/Button';
+import { TextField } from '@/components/ui/TextField';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -68,6 +71,9 @@ const PAGE = {
 const TOTAL_PAGES = 7;
 const STEP_COUNT = TOTAL_PAGES - 1;
 
+/** Pill widths for the interests loading skeleton — varied so it reads as chips. */
+const CHIP_SKELETON_WIDTHS = [104, 128, 88, 140, 96, 120, 84, 112];
+
 const BIO_MAX = 160;
 const HOBBIES_MAX = 80;
 const NAME_MAX = 40;
@@ -77,13 +83,13 @@ const Palette = {
   gradientStart: Colors.primary,
   gradientEnd: Colors.accent,
   gradientDeep: Colors.primaryDark,
-  cardBg: Colors.background.primary,
+  cardBg: Colors.surface,
   surfaceMuted: Colors.background.primary,
   accentSoft: Colors.primarySoft,
   textOnGradient: Colors.text.inverse,
   textOnGradientMuted: alpha(Colors.surface, 0.7),
   separator: Colors.border.light,
-  successGreen: Colors.success,
+  successGreen: Colors.successText,
   successBg: Colors.successSoft,
 };
 
@@ -132,7 +138,9 @@ export default function OnboardingScreen() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
+  const [locationDenied, setLocationDenied] = useState(false);
   const [notificationGranted, setNotificationGranted] = useState(false);
+  const [notificationDenied, setNotificationDenied] = useState(false);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [userCity, setUserCity] = useState<string | null>(null);
   const [cityArea, setCityArea] = useState('');
@@ -428,12 +436,14 @@ export default function OnboardingScreen() {
       if (status === 'granted') {
         tapHaptic();
         setLocationGranted(true);
+        setLocationDenied(false);
         const loc = await Location.getCurrentPositionAsync({});
         const coords = { lat: loc.coords.latitude, lng: loc.coords.longitude };
         setUserCoords(coords);
         const geo = await geocodingService.reverseGeocode(coords.lat, coords.lng);
         if (geo) setUserCity(geo.formattedAddress);
       } else {
+        setLocationDenied(true);
         notify.error('Location permission denied. You can enable it later in Settings.');
       }
     } catch {
@@ -446,6 +456,7 @@ export default function OnboardingScreen() {
       const Notifications = await import('expo-notifications');
       const { status } = await Notifications.requestPermissionsAsync();
       setNotificationGranted(status === 'granted');
+      setNotificationDenied(status !== 'granted');
       if (status === 'granted') tapHaptic();
       if (status !== 'granted') {
         notify.error('Notification permission denied. You can enable it later in Settings.');
@@ -539,7 +550,9 @@ export default function OnboardingScreen() {
           <PermissionsPage
             {...shellProps}
             locationGranted={locationGranted}
+            locationDenied={locationDenied}
             notificationGranted={notificationGranted}
+            notificationDenied={notificationDenied}
             onRequestLocation={handleLocationPermission}
             onRequestNotification={handleNotificationPermission}
             onNext={goNext}
@@ -668,6 +681,7 @@ function PageShell({
           activeOpacity={0.7}
           accessibilityRole="button"
           accessibilityLabel="Go back"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <ChevronLeft size={22} color={Colors.text.primary} />
         </TouchableOpacity>
@@ -681,6 +695,7 @@ function PageShell({
             style={styles.skipPill}
             accessibilityRole="button"
             accessibilityLabel="Skip this step"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Text style={styles.skipText}>Skip</Text>
           </TouchableOpacity>
@@ -688,7 +703,12 @@ function PageShell({
           <View style={styles.headerSpacer} />
         )}
       </View>
-      <View style={styles.progressTrack} accessibilityRole="progressbar">
+      <View
+        style={styles.progressTrack}
+        accessibilityRole="progressbar"
+        accessibilityLabel="Setup progress"
+        accessibilityValue={{ min: 0, max: STEP_COUNT, now: step }}
+      >
         <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
       </View>
 
@@ -712,52 +732,6 @@ function PageShell({
   );
 }
 
-function PrimaryButton({
-  label,
-  onPress,
-  disabled,
-  loading,
-  icon,
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  loading?: boolean;
-  icon?: React.ReactNode;
-}) {
-  const inactive = disabled || loading;
-  return (
-    <TouchableOpacity
-      style={[styles.primaryBtnWrap, inactive && styles.primaryBtnWrapDisabled]}
-      onPress={onPress}
-      disabled={inactive}
-      activeOpacity={0.85}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: inactive }}
-    >
-      <LinearGradient
-        colors={
-          disabled
-            ? [Colors.border.medium, Colors.border.medium]
-            : [Palette.gradientStart, Palette.gradientEnd]
-        }
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={styles.primaryBtnGradient}
-      >
-        {loading ? (
-          <ActivityIndicator color="#FFFFFF" />
-        ) : (
-          <>
-            <Text style={styles.primaryBtnText}>{label}</Text>
-            {icon ?? <ChevronRight size={20} color="#FFFFFF" />}
-          </>
-        )}
-      </LinearGradient>
-    </TouchableOpacity>
-  );
-}
-
 /* ─── Page 0: Welcome ─── */
 
 function WelcomePage({
@@ -772,7 +746,7 @@ function WelcomePage({
   return (
     <View style={[styles.page, { height: pageHeight, paddingTop: insets.top }]}>
       <LinearGradient
-        colors={[Palette.gradientDeep, Palette.gradientStart, Palette.gradientEnd]}
+        colors={[Colors.primary, Colors.secondary]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.welcomeGradient}
@@ -801,18 +775,18 @@ function WelcomePage({
             text="Discover events near you"
           />
           <WelcomeFeature
-            icon={<Heart size={20} color="#EF4444" />}
+            icon={<Heart size={20} color={Colors.error} />}
             text="Join, save, and chat with attendees"
           />
           <WelcomeFeature
-            icon={<MapPin size={20} color={Colors.warning} />}
+            icon={<MapPin size={20} color={Colors.warningText} />}
             text="Navigate with the map"
           />
         </View>
       </LinearGradient>
 
       <View style={[styles.welcomeActions, { paddingBottom: insets.bottom + 20 }]}>
-        <PrimaryButton label="Let's Get Started" onPress={onNext} />
+        <Button label="Let's Get Started" onPress={onNext} variant="primary" gradient size="lg" fullWidth />
         <Text style={styles.welcomeHint}>You can skip any step and change everything later.</Text>
       </View>
     </View>
@@ -866,6 +840,10 @@ function ProfilePage({
 }) {
   const nameEmpty = !name.trim();
   const [nameTouched, setNameTouched] = useState(false);
+  const bioRef = useRef<TextInput>(null);
+  const hobbiesRef = useRef<TextInput>(null);
+  const instagramRef = useRef<TextInput>(null);
+  const facebookRef = useRef<TextInput>(null);
   return (
     <PageShell
       {...shell}
@@ -873,11 +851,15 @@ function ProfilePage({
       title="Make it yours"
       subtitle="A photo and a line about you help other attendees recognise you. Everything except your name is optional."
       footer={
-        <PrimaryButton
+        <Button
           label="Continue"
           onPress={onNext}
           disabled={nameEmpty}
           loading={shell.saving}
+          variant="primary"
+          gradient
+          size="lg"
+          fullWidth
         />
       }
     >
@@ -906,7 +888,7 @@ function ProfilePage({
       </View>
 
       <View style={styles.formCard}>
-        <Input
+        <TextField
           label="Name"
           value={name}
           onChangeText={(t) => {
@@ -918,27 +900,33 @@ function ProfilePage({
           autoCapitalize="words"
           autoCorrect={false}
           returnKeyType="next"
+          submitBehavior="submit"
+          onSubmitEditing={() => bioRef.current?.focus()}
           error={nameEmpty && nameTouched ? 'Your name is required' : undefined}
+          containerStyle={styles.fieldSpacing}
         />
-        <Input
+        <TextField
+          ref={bioRef}
           label="About you"
           value={bio}
           onChangeText={(t) => setBio(t.slice(0, BIO_MAX))}
           placeholder="What should people know about you?"
           multiline
           numberOfLines={3}
-          style={styles.multilineInput}
-          textAlignVertical="top"
-          rightAdornment={<Text style={styles.counter}>{bio.length}/{BIO_MAX}</Text>}
+          counter={{ count: bio.length, max: BIO_MAX }}
+          containerStyle={styles.fieldSpacing}
         />
-        <Input
+        <TextField
+          ref={hobbiesRef}
           label="Hobbies"
           value={hobbies}
           onChangeText={(t) => setHobbies(t.slice(0, HOBBIES_MAX))}
           placeholder="Live music, hiking, board games…"
           autoCapitalize="sentences"
           returnKeyType="next"
-          rightAdornment={<Text style={styles.counter}>{hobbies.length}/{HOBBIES_MAX}</Text>}
+          submitBehavior="submit"
+          onSubmitEditing={() => instagramRef.current?.focus()}
+          containerStyle={styles.fieldSpacing}
         />
 
         <View style={styles.socialsHeader}>
@@ -948,7 +936,8 @@ function ProfilePage({
         <Text style={styles.socialsHint}>
           Shown on your public profile only when it is visible to others.
         </Text>
-        <Input
+        <TextField
+          ref={instagramRef}
           label="Instagram"
           value={instagram}
           onChangeText={(t) => setInstagram(t.slice(0, HANDLE_MAX))}
@@ -956,8 +945,12 @@ function ProfilePage({
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="next"
+          submitBehavior="submit"
+          onSubmitEditing={() => facebookRef.current?.focus()}
+          containerStyle={styles.fieldSpacing}
         />
-        <Input
+        <TextField
+          ref={facebookRef}
           label="Facebook"
           value={facebook}
           onChangeText={(t) => setFacebook(t.slice(0, HANDLE_MAX))}
@@ -965,6 +958,7 @@ function ProfilePage({
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="done"
+          containerStyle={styles.fieldSpacing}
         />
       </View>
     </PageShell>
@@ -999,10 +993,14 @@ function CategoriesPage({
       title="What interests you?"
       subtitle="Pick a few so Discover leads with events you'll actually want to go to. This step is optional."
       footer={
-        <PrimaryButton
-          label={none ? 'Continue without' : 'Continue'}
+        <Button
+          label={none ? 'Skip for now' : 'Continue'}
           onPress={onNext}
           loading={shell.saving}
+          variant="primary"
+          gradient
+          size="lg"
+          fullWidth
         />
       }
     >
@@ -1022,7 +1020,16 @@ function CategoriesPage({
           </TouchableOpacity>
         </View>
       ) : categoriesStatus === 'loading' ? (
-        <ActivityIndicator color={Colors.primary} style={{ marginTop: 24 }} />
+        <View
+          style={styles.categoriesGrid}
+          accessible
+          accessibilityLabel="Loading interests"
+          accessibilityState={{ busy: true }}
+        >
+          {CHIP_SKELETON_WIDTHS.map((width, i) => (
+            <View key={i} style={[styles.categoryChipSkeleton, { width }]} />
+          ))}
+        </View>
       ) : (
         <View style={styles.categoriesGrid}>
           {categories.map((cat) => {
@@ -1070,7 +1077,9 @@ function CategoriesPage({
 
 function PermissionsPage({
   locationGranted,
+  locationDenied,
   notificationGranted,
+  notificationDenied,
   onRequestLocation,
   onRequestNotification,
   onNext,
@@ -1078,7 +1087,9 @@ function PermissionsPage({
   ...shell
 }: ShellProps & {
   locationGranted: boolean;
+  locationDenied: boolean;
   notificationGranted: boolean;
+  notificationDenied: boolean;
   onRequestLocation: () => void;
   onRequestNotification: () => void;
   onNext: () => void;
@@ -1092,7 +1103,16 @@ function PermissionsPage({
       title="Enable permissions"
       subtitle="Both are optional. Location puts nearby events on the map, and notifications remind you before events you joined."
       scroll={false}
-      footer={<PrimaryButton label={allGranted ? 'Continue' : 'Continue without'} onPress={onNext} />}
+      footer={
+        <Button
+          label={allGranted ? 'Continue' : 'Continue without'}
+          onPress={onNext}
+          variant="primary"
+          gradient
+          size="lg"
+          fullWidth
+        />
+      }
     >
       <View style={styles.permissionCards}>
         <PermissionCard
@@ -1101,6 +1121,7 @@ function PermissionsPage({
           title="Location"
           description={locationGranted ? 'Enabled. Nearby events will appear first.' : 'Show events near you on the map'}
           granted={locationGranted}
+          denied={locationDenied}
           onPress={onRequestLocation}
         />
         <PermissionCard
@@ -1109,6 +1130,7 @@ function PermissionsPage({
           title="Notifications"
           description={notificationGranted ? 'Enabled. You can fine-tune them in Settings.' : 'Reminders and chat messages for events you join'}
           granted={notificationGranted}
+          denied={notificationDenied}
           onPress={onRequestNotification}
         />
       </View>
@@ -1123,6 +1145,7 @@ function PermissionCard({
   title,
   description,
   granted,
+  denied,
   onPress,
 }: {
   icon: React.ReactNode;
@@ -1130,29 +1153,47 @@ function PermissionCard({
   title: string;
   description: string;
   granted: boolean;
+  denied: boolean;
   onPress: () => void;
 }) {
   return (
     <View style={styles.permissionCard}>
-      <View style={[styles.permissionIcon, { backgroundColor: iconBg }]}>{icon}</View>
-      <View style={styles.permissionContent}>
-        <Text style={styles.permissionTitle}>{title}</Text>
-        <Text style={styles.permissionDesc}>{description}</Text>
+      <View style={styles.permissionRow}>
+        <View style={[styles.permissionIcon, { backgroundColor: iconBg }]}>{icon}</View>
+        <View style={styles.permissionContent}>
+          <Text style={styles.permissionTitle}>{title}</Text>
+          <Text style={styles.permissionDesc}>{description}</Text>
+        </View>
+        <TouchableOpacity
+          style={[styles.permissionBtn, granted && styles.permissionBtnGranted]}
+          onPress={onPress}
+          disabled={granted}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={granted ? `${title} enabled` : `Enable ${title}`}
+          accessibilityState={{ disabled: granted, selected: granted }}
+        >
+          {granted ? (
+            <Check size={16} color={Palette.successGreen} />
+          ) : (
+            <Text style={styles.permissionBtnText}>Enable</Text>
+          )}
+        </TouchableOpacity>
       </View>
-      <TouchableOpacity
-        style={[styles.permissionBtn, granted && styles.permissionBtnGranted]}
-        onPress={onPress}
-        disabled={granted}
-        activeOpacity={0.7}
-        accessibilityRole="button"
-        accessibilityLabel={granted ? `${title} enabled` : `Enable ${title}`}
-      >
-        {granted ? (
-          <Check size={16} color={Palette.successGreen} />
-        ) : (
-          <Text style={styles.permissionBtnText}>Enable</Text>
-        )}
-      </TouchableOpacity>
+      {denied && !granted ? (
+        <TouchableOpacity
+          style={styles.permissionSettingsLink}
+          onPress={() => Linking.openSettings()}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`Open device settings to enable ${title}`}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.permissionSettingsText}>
+            Permission denied — Open Settings
+          </Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -1184,10 +1225,14 @@ function CityOrAreaPage({
       subtitle="Your home area sets the default map view and powers the distance on event cards. It is shown on your profile as a city only."
       scroll={false}
       footer={
-        <PrimaryButton
+        <Button
           label={hasLocation ? 'Continue' : 'Continue without'}
           onPress={onNext}
           loading={shell.saving}
+          variant="primary"
+          gradient
+          size="lg"
+          fullWidth
         />
       }
     >
@@ -1221,7 +1266,14 @@ function CityOrAreaPage({
           </View>
         </TouchableOpacity>
         {hasLocation ? (
-          <TouchableOpacity onPress={onClear} style={styles.clearLink} activeOpacity={0.7}>
+          <TouchableOpacity
+            onPress={onClear}
+            style={styles.clearLink}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Clear location"
+            hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
+          >
             <Text style={styles.clearLinkText}>Clear</Text>
           </TouchableOpacity>
         ) : null}
@@ -1266,7 +1318,17 @@ function PrivacySetupPage({
       onSkip={onSkip}
       title="Privacy & visibility"
       subtitle="Decide what other attendees can see. Defaults are open; you can tighten them any time in Settings."
-      footer={<PrimaryButton label="Continue" onPress={onNext} loading={shell.saving} />}
+      footer={
+        <Button
+          label="Continue"
+          onPress={onNext}
+          loading={shell.saving}
+          variant="primary"
+          gradient
+          size="lg"
+          fullWidth
+        />
+      }
     >
       <TouchableOpacity
         style={styles.previewCard}
@@ -1359,6 +1421,7 @@ function PrivacyRow({
         trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
         thumbColor={effective ? Colors.primary : Colors.background.secondary}
         accessibilityLabel={title}
+        accessibilityHint={disabled ? 'Not applicable while your profile is hidden.' : description}
       />
     </View>
   );
@@ -1380,11 +1443,15 @@ function TutorialPage({
       title="You're all set"
       subtitle="Three gestures are all you need on the map."
       footer={
-        <PrimaryButton
+        <Button
           label="Start Exploring"
           onPress={onComplete}
           loading={completing}
-          icon={<Compass size={20} color="#FFFFFF" />}
+          icon={<Compass size={20} color={Colors.white} />}
+          variant="primary"
+          gradient
+          size="lg"
+          fullWidth
         />
       }
     >
@@ -1395,12 +1462,12 @@ function TutorialPage({
           description="Pinch to zoom, drag to move around and discover other areas."
         />
         <TutorialCard
-          icon={<Map size={28} color="#EF4444" />}
+          icon={<Map size={28} color={Colors.error} />}
           title="Tap a pin"
           description="Open the event card, join, save, or share it."
         />
         <TutorialCard
-          icon={<ArrowUpFromLine size={28} color={Colors.warning} />}
+          icon={<ArrowUpFromLine size={28} color={Colors.warningText} />}
           title="Pull up the list"
           description="Drag the bottom panel up to browse everything in view."
         />
@@ -1466,10 +1533,7 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.cardBg,
     alignItems: 'center',
     justifyContent: 'center',
-    ...Platform.select({
-      ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8 },
-      android: { elevation: 3 },
-    }),
+    ...Shadows.card,
   },
   stepLabel: {
     fontSize: Typography.sizes.sm,
@@ -1546,35 +1610,6 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     backgroundColor: Palette.surfaceMuted,
   },
-  primaryBtnWrap: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    ...Platform.select({
-      ios: { shadowColor: Colors.primary, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 16 },
-      android: { elevation: 8 },
-    }),
-  },
-  primaryBtnWrapDisabled: {
-    ...Platform.select({
-      ios: { shadowOpacity: 0 },
-      android: { elevation: 0 },
-    }),
-  },
-  primaryBtnGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 18,
-  },
-  primaryBtnText: {
-    fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: '#FFFFFF',
-    letterSpacing: 0.3,
-  },
-
   /* ─── Welcome ─── */
   welcomeGradient: {
     flex: 1,
@@ -1715,8 +1750,8 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
     ...Shadows.sm,
   },
-  multilineInput: {
-    minHeight: 84,
+  fieldSpacing: {
+    marginBottom: Spacing.md,
   },
   socialsHeader: {
     flexDirection: 'row',
@@ -1739,11 +1774,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     lineHeight: 16,
   },
-  counter: {
-    fontSize: Typography.sizes.xs,
-    color: Colors.text.tertiary,
-  },
-
   /* ─── Interests ─── */
   categoriesGrid: {
     flexDirection: 'row',
@@ -1772,6 +1802,11 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
+  },
+  categoryChipSkeleton: {
+    height: 44,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.background.tertiary,
   },
   categoriesError: {
     marginTop: 24,
@@ -1812,13 +1847,26 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   permissionCard: {
+    backgroundColor: Palette.cardBg,
+    borderRadius: BorderRadius.lg,
+    padding: 18,
+    ...Shadows.sm,
+  },
+  permissionRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Palette.cardBg,
-    borderRadius: 18,
-    padding: 18,
     gap: 14,
-    ...Shadows.sm,
+  },
+  permissionSettingsLink: {
+    alignSelf: 'flex-start',
+    marginTop: Spacing.sm + 4,
+    paddingVertical: Spacing.xs,
+  },
+  permissionSettingsText: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.primary,
   },
   permissionIcon: {
     width: 52,
@@ -1844,12 +1892,15 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   permissionBtn: {
+    minHeight: 44,
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: BorderRadius.lg,
     backgroundColor: Palette.accentSoft,
     borderWidth: 1.5,
     borderColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   permissionBtnGranted: {
     backgroundColor: Palette.successBg,
@@ -1979,6 +2030,8 @@ const styles = StyleSheet.create({
   clearLink: {
     alignSelf: 'flex-end',
     marginTop: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
   },
   clearLinkText: {
     fontSize: Typography.sizes.sm,

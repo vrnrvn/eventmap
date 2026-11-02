@@ -37,7 +37,7 @@ type EventListItemProps = {
 
 const badgeTones = {
   danger: { bg: Colors.errorSoft, fg: Colors.error },
-  success: { bg: Colors.success, fg: Colors.text.inverse },
+  success: { bg: Colors.successSoft, fg: Colors.successText },
   primary: { bg: Colors.primarySoft, fg: Colors.primary },
   neutral: { bg: Colors.background.secondary, fg: Colors.text.tertiary },
 } as const;
@@ -134,11 +134,11 @@ export function EventListItem({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: Colors.background.primary,
-    borderRadius: BorderRadius.md + 4,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
     borderWidth: 1,
     borderColor: Colors.border.light,
-    padding: Spacing.sm + 4,
+    padding: Spacing.md,
     minHeight: 44,
   },
   cardDimmed: {
@@ -147,7 +147,7 @@ const styles = StyleSheet.create({
   mainRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.sm + 4,
+    gap: Spacing.md,
   },
   thumb: {
     width: 58,
@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     color: Colors.text.primary,
     fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.bold,
+    fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
   },
   badge: {
@@ -215,8 +215,8 @@ const styles = StyleSheet.create({
   actionsRow: {
     flexDirection: 'row',
     gap: Spacing.sm + 2,
-    marginTop: Spacing.sm + 4,
-    paddingTop: Spacing.sm + 4,
+    marginTop: Spacing.md,
+    paddingTop: Spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.border.light,
   },

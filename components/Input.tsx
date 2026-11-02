@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { forwardRef, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, TextInputProps } from 'react-native';
 import { Colors, Spacing, Typography } from '@/constants/theme';
 
@@ -8,7 +8,10 @@ type InputProps = TextInputProps & {
   rightAdornment?: React.ReactNode;
 };
 
-export function Input({ label, error, style, onFocus, onBlur, rightAdornment, ...props }: InputProps) {
+export const Input = forwardRef<TextInput, InputProps>(function Input(
+  { label, error, style, onFocus, onBlur, rightAdornment, multiline, ...props },
+  ref
+) {
   const [focused, setFocused] = useState(false);
 
   return (
@@ -16,14 +19,20 @@ export function Input({ label, error, style, onFocus, onBlur, rightAdornment, ..
       {label && <Text style={styles.label}>{label}</Text>}
       <View style={styles.inputRow}>
         <TextInput
+          ref={ref}
           style={[
             styles.input,
             focused && styles.inputFocused,
             error && styles.inputError,
             !!rightAdornment && styles.inputWithAdornment,
+            // Multiline text wraps the full width, so clear the counter
+            // vertically instead of horizontally.
+            !!rightAdornment && multiline && styles.inputMultilineWithAdornment,
             style,
           ]}
           placeholderTextColor={Colors.text.tertiary}
+          accessibilityLabel={label}
+          multiline={multiline}
           onFocus={(e) => {
             setFocused(true);
             onFocus?.(e);
@@ -36,10 +45,14 @@ export function Input({ label, error, style, onFocus, onBlur, rightAdornment, ..
         />
         {rightAdornment && <View style={styles.adornment}>{rightAdornment}</View>}
       </View>
-      {error && <Text style={styles.errorText}>{error}</Text>}
+      {error && (
+        <Text style={styles.errorText} accessibilityLiveRegion="polite">
+          {error}
+        </Text>
+      )}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -64,11 +77,17 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingRight: 0,
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.regular,
     color: Colors.text.primary,
     backgroundColor: 'transparent',
   },
   inputWithAdornment: {
     paddingRight: 36,
+  },
+  inputMultilineWithAdornment: {
+    // Keep the last line of text above the absolutely-positioned counter.
+    paddingRight: 0,
+    paddingBottom: Spacing.xl,
   },
   adornment: {
     position: 'absolute',
@@ -83,6 +102,7 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamilies.regular,
     color: Colors.error,
     marginTop: Spacing.xs,
   },

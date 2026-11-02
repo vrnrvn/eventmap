@@ -4,11 +4,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Camera } from 'lucide-react-native';
 import { Colors, Typography } from '@/constants/theme';
 
+// Brand-token pairs only — every background is dark enough for white
+// initials to pass contrast (no accent #FF8EAA / secondaryLight tints).
 const GRADIENT_PAIRS: [string, string][] = [
-  [Colors.primary, Colors.accent],
-  [Colors.secondary, Colors.secondaryLight],
-  ['#EC4899', '#F43F5E'],
-  [Colors.accent, Colors.accentDark],
+  [Colors.primary, Colors.secondary],
+  [Colors.secondary, Colors.secondaryDark],
+  [Colors.accentDark, Colors.primary],
+  [Colors.primaryDark, Colors.accentDark],
   [Colors.primaryDark, Colors.primary],
 ];
 
@@ -21,12 +23,15 @@ function getGradient(name: string): [string, string] {
 }
 
 function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .map((w) => w[0])
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 'U';
+  return words
+    .slice(0, 2)
+    // Array.from is code-point aware; w[0] would split emoji/astral chars
+    // into a lone surrogate that renders as "�".
+    .map((w) => Array.from(w)[0])
     .join('')
-    .toUpperCase()
-    .slice(0, 2);
+    .toUpperCase();
 }
 
 type AvatarProps = {
@@ -40,18 +45,20 @@ type AvatarProps = {
 };
 
 export function Avatar({ imageUrl, name, size, editable, onPress }: AvatarProps) {
-  const [imgFailed, setImgFailed] = useState(false);
+  // Track which URL failed so a newly uploaded avatar isn't blocked by a
+  // previous URL's load error.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const borderRadius = size / 2;
   const fontSize = size * 0.38;
   const cameraSize = Math.max(size * 0.3, 20);
 
-  const showImage = imageUrl && !imgFailed;
+  const showImage = imageUrl && failedUrl !== imageUrl;
 
   const content = showImage ? (
     <Image
       source={{ uri: imageUrl }}
       style={{ width: size, height: size, borderRadius }}
-      onError={() => setImgFailed(true)}
+      onError={() => setFailedUrl(imageUrl)}
     />
   ) : (
     <LinearGradient
@@ -65,7 +72,7 @@ export function Avatar({ imageUrl, name, size, editable, onPress }: AvatarProps)
           fontSize,
           fontFamily: Typography.fontFamilies.bold,
           fontWeight: Typography.weights.bold,
-          color: '#FFFFFF',
+          color: Colors.white,
           letterSpacing: 1,
         }}
       >
@@ -92,7 +99,7 @@ export function Avatar({ imageUrl, name, size, editable, onPress }: AvatarProps)
             },
           ]}
         >
-          <Camera size={cameraSize * 0.5} color="#FFFFFF" />
+          <Camera size={cameraSize * 0.5} color={Colors.white} />
         </View>
       </TouchableOpacity>
     );
@@ -118,10 +125,10 @@ export function Avatar({ imageUrl, name, size, editable, onPress }: AvatarProps)
 const styles = StyleSheet.create({
   cameraBadge: {
     position: 'absolute',
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: Colors.overlay.dark,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderColor: Colors.white,
   },
 });

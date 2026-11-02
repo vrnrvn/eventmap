@@ -9,7 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Button } from '@/components/ui/Button';
-import { alpha, Colors, Typography } from '@/constants/theme';
+import { alpha, Colors, Shadows, Typography } from '@/constants/theme';
 import {
   Compass,
   Heart,
@@ -19,17 +19,11 @@ import {
 } from 'lucide-react-native';
 
 const Palette = {
-  gradientStart: Colors.primary,
-  gradientEnd: Colors.accent,
-  gradientDeep: Colors.primaryDark,
-  cardBg: Colors.background.primary,
+  cardBg: Colors.surface,
   surfaceMuted: Colors.background.primary,
-  accentSoft: Colors.primarySoft,
-  accentMedium: alpha(Colors.primary, 0.18),
   textOnGradient: Colors.text.inverse,
   textOnGradientMuted: alpha(Colors.surface, 0.8),
   separator: Colors.border.light,
-  badge: Colors.primary,
   featurePin: alpha(Colors.secondary, 0.12),
   featureHeart: Colors.primarySoft,
   featureBiz: alpha(Colors.accent, 0.15),
@@ -45,29 +39,44 @@ export default function WelcomeScreen() {
     <View style={styles.root}>
       {/* ── Top gradient hero ── */}
       <LinearGradient
-        colors={[Palette.gradientDeep, Palette.gradientStart, Palette.gradientEnd]}
+        colors={[Colors.primary, Colors.secondary]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={[styles.heroGradient, { paddingTop: insets.top + 48 }]}
       >
-        {/* Decorative circles */}
-        <View style={styles.decoCircleLg} />
-        <View style={styles.decoCircleSm} />
+        {/* Decorative circles — hidden from screen readers */}
+        <View
+          style={styles.decoCircleLg}
+          accessible={false}
+          importantForAccessibility="no-hide-descendants"
+        />
+        <View
+          style={styles.decoCircleSm}
+          accessible={false}
+          importantForAccessibility="no-hide-descendants"
+        />
 
-        {/* Logo */}
-        <View style={styles.logoContainer}>
+        {/* Logo (decorative) */}
+        <View
+          style={styles.logoContainer}
+          accessible={false}
+          importantForAccessibility="no-hide-descendants"
+        >
           <View style={styles.logoOuter}>
             <View style={styles.logoInner}>
               <Image
                 source={require('@/assets/images/EMlogo.png')}
                 style={[styles.heroLogo, styles.heroLogoTint]}
                 resizeMode="contain"
+                accessible={false}
               />
             </View>
           </View>
         </View>
 
-        <Text style={styles.heroTitle}>Event Maps</Text>
+        <Text style={styles.heroTitle} accessibilityRole="header">
+          EventMap
+        </Text>
         <Text style={styles.heroSubtitle}>
           Discover what&apos;s happening{'\n'}around you
         </Text>
@@ -256,15 +265,7 @@ const styles = StyleSheet.create({
     backgroundColor: Palette.cardBg,
     borderRadius: 22,
     paddingVertical: 6,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.08,
-        shadowRadius: 16,
-      },
-      android: { elevation: 6 },
-    }),
+    ...Shadows.card,
   },
   featureRow: {
     flexDirection: 'row',
@@ -321,47 +322,5 @@ const styles = StyleSheet.create({
       },
       android: { elevation: 10 },
     }),
-  },
-  primaryBtnGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 18,
-  },
-  primaryBtnText: {
-    fontSize: Typography.sizes.lg,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: '#FFFFFF',
-    letterSpacing: 0.3,
-  },
-
-  /* Secondary button */
-  secondaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 16,
-    borderRadius: 16,
-    backgroundColor: Palette.cardBg,
-    borderWidth: 1.5,
-    borderColor: Colors.border.light,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.04,
-        shadowRadius: 8,
-      },
-      android: { elevation: 2 },
-    }),
-  },
-  secondaryBtnText: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.primary,
   },
 });

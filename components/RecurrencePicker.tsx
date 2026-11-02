@@ -2,6 +2,7 @@ import React, { forwardRef, useImperativeHandle, useRef } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { NativeViewGestureHandler } from 'react-native-gesture-handler';
 import { BottomSheetModal, BottomSheetView, TouchableOpacity } from '@gorhom/bottom-sheet';
+import { Check } from 'lucide-react-native';
 import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { RECURRENCE_OPTIONS, type RecurrenceOption } from '@/utils/recurrence';
 
@@ -37,7 +38,9 @@ export const RecurrencePicker = forwardRef<RecurrencePickerHandle, RecurrencePic
     return (
       <BottomSheetModal
         ref={bottomSheetRef}
-        snapPoints={['40%']}
+        // Content-sized: dynamic sizing measures the BottomSheetView child, so
+        // every option stays visible on small screens.
+        enableDynamicSizing
         enablePanDownToClose
         enableDismissOnClose
         handleIndicatorStyle={styles.handleIndicator}
@@ -51,12 +54,13 @@ export const RecurrencePicker = forwardRef<RecurrencePickerHandle, RecurrencePic
               </View>
               <View style={styles.options}>
             {RECURRENCE_OPTIONS.map((opt) => {
-            const isSelected =
+            const isSelected = Boolean(
               (opt.value === null && selectedValue === null) ||
-              (opt.value &&
-                selectedValue &&
-                opt.value.frequency === selectedValue.frequency &&
-                opt.value.interval === selectedValue.interval);
+                (opt.value &&
+                  selectedValue &&
+                  opt.value.frequency === selectedValue.frequency &&
+                  opt.value.interval === selectedValue.interval)
+            );
             return (
               <TouchableOpacity
                 key={opt.label}
@@ -68,10 +72,14 @@ export const RecurrencePicker = forwardRef<RecurrencePickerHandle, RecurrencePic
                   });
                 }}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`Repeat ${opt.label}`}
+                accessibilityState={{ selected: isSelected }}
               >
                 <Text style={[styles.optionText, isSelected && styles.optionTextSelected]}>
                   {opt.label}
                 </Text>
+                {isSelected ? <Check size={18} color={Colors.primary} /> : null}
               </TouchableOpacity>
             );
           })}
@@ -91,7 +99,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border.medium,
   },
   background: {
-    backgroundColor: Colors.background.primary,
+    backgroundColor: Colors.surface,
   },
   header: {
     paddingHorizontal: Spacing.xl,
@@ -108,6 +116,10 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.xl,
   },
   option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.sm,
     paddingVertical: Spacing.md,
     paddingHorizontal: Spacing.md,
     borderRadius: BorderRadius.md,
@@ -118,6 +130,7 @@ const styles = StyleSheet.create({
   },
   optionText: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.regular,
     color: Colors.text.primary,
   },
   optionTextSelected: {

@@ -25,6 +25,7 @@ import { Event, RankedEvent } from '@/types/database';
 import { hasEventEnded } from '@/utils/eventStatus';
 import { AvatarRing } from '@/components/AvatarRing';
 import { Button } from '@/components/ui/Button';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { confirmAction } from '@/utils/confirm';
 import {
   MapPin,
@@ -33,7 +34,8 @@ import {
   ChevronRight,
   LogOut,
   ArrowLeftRight,
-  SlidersHorizontal,
+  Settings,
+  Sparkles,
   PlusCircle,
   MessageCircle,
   Bookmark,
@@ -78,6 +80,7 @@ export default function ProfileScreen() {
   const [chatUnread, setChatUnread] = useState<Record<string, number>>({});
   const [stats, setStats] = useState<ProfileStats>({ upcoming: 0, attended: 0, saved: 0, created: 0 });
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const isBizMode = hasBusiness && userMode === 'business';
   const businessId = hasBusiness ? userBusiness?.id : undefined;
@@ -123,6 +126,7 @@ export default function ProfileScreen() {
           saved: counts.saved,
           created: createdCount,
         });
+        setLoadError(false);
         setLoaded(true);
 
         const joinedIds = upcoming.map((event) => event.id);
@@ -136,15 +140,20 @@ export default function ProfileScreen() {
         setChatUnread(Object.fromEntries(unread.map((row) => [row.event_id, row.unread_count])));
       } catch {
         if (isCancelled()) return;
-        setCreatedEvents([]);
-        setJoinedEvents([]);
-        setChatUnread({});
-        setStats({ upcoming: 0, attended: 0, saved: 0, created: 0 });
+        // Don't zero everything out: surface the failure instead of
+        // rendering it as "no events / 0 stats".
+        setLoadError(true);
         setLoaded(true);
       }
     },
     [businessId, userId]
   );
+
+  const retryLoad = useCallback(() => {
+    setLoadError(false);
+    setLoaded(false);
+    loadProfileData(() => false);
+  }, [loadProfileData]);
 
   useFocusEffect(
     useCallback(() => {
@@ -236,7 +245,7 @@ export default function ProfileScreen() {
             accessibilityLabel="Open settings"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <SlidersHorizontal size={17} color={Palette.muted} />
+            <Settings size={17} color={Palette.muted} />
           </TouchableOpacity>
         </View>
 
@@ -287,22 +296,28 @@ export default function ProfileScreen() {
           {headerBio ? (
             <Text style={styles.bioText}>{headerBio}</Text>
           ) : isBizMode ? null : (
-            <TouchableOpacity onPress={() => router.push('/settings')} activeOpacity={0.7}>
+            <TouchableOpacity
+              onPress={() => router.push('/settings')}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Add a short bio in Settings"
+            >
               <Text style={styles.bioPlaceholder}>Add a short bio in Settings</Text>
             </TouchableOpacity>
           )}
 
+          {!loadError && (
           <View style={styles.statGrid}>
             <ProfileStat
               label="Upcoming"
               value={loaded ? String(stats.upcoming) : '–'}
-              color={Palette.primary}
+              color={Palette.text}
               onPress={() => router.push('/joined-events' as never)}
             />
             <ProfileStat
               label="Attended"
               value={loaded ? String(stats.attended) : '–'}
-              color={Palette.secondary}
+              color={Palette.text}
               onPress={() => router.push({ pathname: '/joined-events', params: { tab: 'past' } } as never)}
             />
             {isBizMode ? (
@@ -321,6 +336,7 @@ export default function ProfileScreen() {
               />
             )}
           </View>
+          )}
 
           <View style={styles.quickLinks}>
             {isBizMode ? (
@@ -363,7 +379,14 @@ export default function ProfileScreen() {
           ) : null}
 
           {hasBusiness ? (
-            <TouchableOpacity style={styles.modeSwitchPill} onPress={toggleMode} activeOpacity={0.8}>
+            <TouchableOpacity
+              style={styles.modeSwitchPill}
+              onPress={toggleMode}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={userMode === 'user' ? 'Switch to business mode' : 'Switch to personal mode'}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
               <ArrowLeftRight size={14} color={Palette.primary} />
               <Text style={styles.modeSwitchText}>
                 {userMode === 'user' ? 'Switch to Business' : 'Switch to Personal'}
@@ -378,11 +401,21 @@ export default function ProfileScreen() {
           )}
         </View>
 
+        {loadError ? (
+          <ErrorState
+            title="Couldn't load your profile"
+            onRetry={retryLoad}
+            style={styles.errorState}
+          />
+        ) : (
+        <>
         {!appLoading && hasBusiness && (
           <TouchableOpacity
             style={styles.createEventWrap}
             onPress={() => router.push('/(tabs)/create')}
             activeOpacity={0.88}
+            accessibilityRole="button"
+            accessibilityLabel="Create event"
           >
             <LinearGradient
               colors={[Palette.primary, Palette.secondary]}
@@ -406,7 +439,12 @@ export default function ProfileScreen() {
         <View style={styles.sectionWrap}>
           <View style={styles.sectionHead}>
             <Text style={styles.sectionTitle}>Events Created</Text>
-            <TouchableOpacity onPress={() => router.push('/my-events')}>
+            <TouchableOpacity
+              onPress={() => router.push('/my-events')}
+              accessibilityRole="button"
+              accessibilityLabel="View all created events"
+              hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+            >
               <Text style={styles.sectionLink}>View All</Text>
             </TouchableOpacity>
           </View>
@@ -432,6 +470,8 @@ export default function ProfileScreen() {
                   style={styles.eventCard}
                   activeOpacity={0.9}
                   onPress={() => router.push(`/event/${event.id}`)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${event.title}, ${formatEventDateTime(event.start_datetime)}`}
                 >
                   <View style={styles.eventImageWrap}>
                     {event.cover_image_url ? (
@@ -466,7 +506,12 @@ export default function ProfileScreen() {
         <View style={styles.sectionWrap}>
           <View style={styles.sectionHead}>
             <Text style={styles.sectionTitle}>Events Joined</Text>
-            <TouchableOpacity onPress={() => router.push('/joined-events' as never)}>
+            <TouchableOpacity
+              onPress={() => router.push('/joined-events' as never)}
+              accessibilityRole="button"
+              accessibilityLabel="View all joined events"
+              hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+            >
               <Text style={styles.sectionLink}>View All</Text>
             </TouchableOpacity>
           </View>
@@ -483,6 +528,8 @@ export default function ProfileScreen() {
                 style={styles.joinedCard}
                 activeOpacity={0.85}
                 onPress={() => router.push(`/event/${event.id}`)}
+                accessibilityRole="button"
+                accessibilityLabel={`${event.title}, ${formatEventDayLabel(event.next_start_datetime || event.start_datetime)} at ${formatEventTime(event.next_start_datetime || event.start_datetime)}`}
               >
                 {event.cover_image_url ? (
                   <Image source={{ uri: event.cover_image_url }} style={styles.joinedImage} />
@@ -543,19 +590,22 @@ export default function ProfileScreen() {
             style={styles.upgradeCard}
             onPress={() => router.push('/premium/plans' as never)}
             activeOpacity={0.9}
+            accessibilityRole="button"
+            accessibilityLabel="Upgrade to Premium"
           >
-            <LinearGradient
-              colors={[Palette.primary, Palette.secondary]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.upgradeGradient}
-            >
+            <View style={styles.upgradeIconWell}>
+              <Sparkles size={20} color={Colors.premium} />
+            </View>
+            <View style={styles.upgradeCopy}>
               <Text style={styles.upgradeTitle}>Upgrade to Premium</Text>
               <Text style={styles.upgradeSub}>
                 Boosted placement, analytics, recurring events, and more
               </Text>
-            </LinearGradient>
+            </View>
+            <ChevronRight size={18} color={Colors.premium} />
           </TouchableOpacity>
+        )}
+        </>
         )}
 
         {!appLoading && !hasBusiness ? (
@@ -577,7 +627,14 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         ) : null}
 
-        <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut} activeOpacity={0.8}>
+        <TouchableOpacity
+          style={styles.signOutButton}
+          onPress={handleSignOut}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Sign out"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
           <LogOut size={16} color={Colors.error} />
           <Text style={styles.signOutText}>Sign Out</Text>
         </TouchableOpacity>
@@ -646,9 +703,9 @@ function formatEventDateTime(value: string) {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
-    hour12: false,
+    hour12: true,
   }).replace(',', ' •');
 }
 
@@ -1101,21 +1158,35 @@ const styles = StyleSheet.create({
   upgradeCard: {
     marginTop: 12,
     borderRadius: 16,
-    overflow: 'hidden',
-  },
-  upgradeGradient: {
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Palette.softBorder,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
     paddingHorizontal: 16,
     paddingVertical: 16,
   },
+  upgradeIconWell: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: Colors.premiumSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  upgradeCopy: {
+    flex: 1,
+  },
   upgradeTitle: {
-    color: '#FFFFFF',
+    color: Colors.premium,
     fontSize: 16,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
   },
   upgradeSub: {
     marginTop: 2,
-    color: 'rgba(255,255,255,0.82)',
+    color: Palette.muted,
     fontSize: 12,
     fontFamily: Typography.labelFontFamilies.medium,
   },
@@ -1153,6 +1224,9 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     color: Palette.muted,
     fontFamily: Typography.labelFontFamilies.medium,
+  },
+  errorState: {
+    marginTop: 28,
   },
   signOutButton: {
     marginTop: 20,

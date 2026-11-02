@@ -5,6 +5,7 @@ import Animated, {
   FadeOut,
   interpolate,
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
   withDelay,
   withSequence,
@@ -12,7 +13,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { alpha, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
+import { alpha, BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 
 type BrandedSplashScreenProps = {
   visible: boolean;
@@ -21,11 +22,20 @@ type BrandedSplashScreenProps = {
 const AnimatedImage = Animated.createAnimatedComponent(Image);
 
 export function BrandedSplashScreen({ visible }: BrandedSplashScreenProps) {
+  const reduceMotion = useReducedMotion();
   const progress = useSharedValue(0);
   const pulse = useSharedValue(0);
 
   useEffect(() => {
     if (!visible) {
+      return;
+    }
+
+    // Respect the OS "reduce motion" setting: jump straight to the resting
+    // state instead of running the scale/translate and halo pulse animations.
+    if (reduceMotion) {
+      progress.value = 1;
+      pulse.value = 0.2;
       return;
     }
 
@@ -41,7 +51,7 @@ export function BrandedSplashScreen({ visible }: BrandedSplashScreenProps) {
         withTiming(0.2, { duration: 900, easing: Easing.inOut(Easing.quad) }),
       ),
     );
-  }, [progress, pulse, visible]);
+  }, [progress, pulse, visible, reduceMotion]);
 
   const logoStyle = useAnimatedStyle(() => ({
     opacity: interpolate(progress.value, [0, 1], [0, 1]),
@@ -96,7 +106,7 @@ export function BrandedSplashScreen({ visible }: BrandedSplashScreenProps) {
         </Animated.View>
 
         <Animated.View style={[styles.wordmarkWrap, wordmarkStyle]}>
-          <Text style={styles.title}>Event Maps</Text>
+          <Text style={styles.title}>EventMap</Text>
           <Text style={styles.subtitle}>Find the signal in your city.</Text>
         </Animated.View>
       </LinearGradient>
@@ -117,7 +127,7 @@ const styles = StyleSheet.create({
     right: -80,
     width: 280,
     height: 280,
-    borderRadius: 999,
+    borderRadius: BorderRadius.round,
     backgroundColor: alpha(Colors.accent, 0.16),
   },
   glowBottom: {
@@ -126,15 +136,15 @@ const styles = StyleSheet.create({
     left: -50,
     width: 240,
     height: 240,
-    borderRadius: 999,
+    borderRadius: BorderRadius.round,
     backgroundColor: alpha(Colors.primary, 0.2),
   },
   halo: {
     position: 'absolute',
     width: 184,
     height: 184,
-    borderRadius: 999,
-    backgroundColor: 'rgba(250, 248, 245, 0.12)',
+    borderRadius: BorderRadius.round,
+    backgroundColor: alpha(Colors.white, 0.12),
   },
   logoShell: {
     ...Shadows.lg,
@@ -149,7 +159,7 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(250, 248, 245, 0.98)',
+    backgroundColor: alpha(Colors.white, 0.98),
     borderWidth: 1,
     borderColor: alpha(Colors.surface, 0.24),
   },
@@ -167,12 +177,12 @@ const styles = StyleSheet.create({
   },
   title: {
     color: Colors.text.inverse,
-    fontSize: 34,
+    fontSize: Typography.sizes.xxl,
     fontFamily: Typography.displayFont,
     letterSpacing: 0.4,
   },
   subtitle: {
-    color: 'rgba(250, 248, 245, 0.74)',
+    color: alpha(Colors.text.inverse, 0.74),
     fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamily,
     letterSpacing: 0.2,

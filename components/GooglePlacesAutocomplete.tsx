@@ -97,6 +97,7 @@ export function GooglePlacesAutocomplete({
       <TextInput
         style={styles.input}
         placeholder={placeholder}
+        accessibilityLabel={placeholder}
         placeholderTextColor={Colors.text.tertiary}
         value={value}
         onChangeText={handleInputChange}

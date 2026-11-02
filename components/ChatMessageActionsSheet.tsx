@@ -243,7 +243,7 @@ export function ChatMessageActionsSheet({
   };
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close message actions">
         <Pressable
           style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, Spacing.md) }]}
@@ -296,7 +296,7 @@ function ActionRow({
       accessibilityLabel={label}
     >
       <View style={styles.actionIcon}>{icon}</View>
-      <Text style={[styles.actionLabel, destructive && styles.actionLabelDestructive]} numberOfLines={1}>
+      <Text style={[styles.actionLabel, destructive && styles.actionLabelDestructive]} numberOfLines={2}>
         {label}
       </Text>
     </Pressable>
@@ -307,10 +307,10 @@ const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(20, 20, 20, 0.4)',
+    backgroundColor: Colors.overlay.dark,
   },
   sheet: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
     borderTopLeftRadius: BorderRadius.xl,
     borderTopRightRadius: BorderRadius.xl,
     paddingHorizontal: Spacing.md,
@@ -417,7 +417,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.round,
     borderWidth: 1,
     borderColor: Colors.border.medium,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: Colors.surface,
   },
   reasonChipSelected: {
     borderColor: Colors.primary,
@@ -460,7 +460,7 @@ const styles = StyleSheet.create({
   },
   confirmDestructiveText: {
     fontSize: Typography.sizes.md,
-    color: '#FFFFFF',
+    color: Colors.white,
     fontFamily: Typography.fontFamilies.semibold,
   },
 });

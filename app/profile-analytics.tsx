@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import {
-  ArrowLeft,
   BarChart3,
   CalendarClock,
   Crown,
@@ -27,6 +26,7 @@ import { useApp } from '@/contexts/AppContext';
 import { usePremium } from '@/contexts/PremiumContext';
 import { analyticsService, type AnalyticsTopEvent, type AnalyticsTrendPoint } from '@/services/analytics';
 import { Business } from '@/types/database';
+import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 
 const PERIOD_OPTIONS = [7, 30, 90] as const;
@@ -78,9 +78,13 @@ export default function ProfileAnalyticsScreen() {
   const canAccessAnalytics = isPremium && canUse('analytics');
   const [period, setPeriod] = useState<PeriodDays>(30);
   const [loading, setLoading] = useState(true);
+  // True while a refetch (period change, re-focus) is in flight after the
+  // first load; shows an inline indicator instead of replacing the dashboard.
+  const [fetching, setFetching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [data, setData] = useState<AnalyticsData>(emptyAnalytics());
+  const hasLoadedOnceRef = useRef(false);
 
   const isBusinessMode = userMode === 'business';
 
@@ -89,6 +93,7 @@ export default function ProfileAnalyticsScreen() {
       setData(emptyAnalytics());
       setErrorMessage(null);
       setLoading(false);
+      setFetching(false);
       setRefreshing(false);
       return;
     }
@@ -115,14 +120,22 @@ export default function ProfileAnalyticsScreen() {
       );
       setData(emptyAnalytics());
     } finally {
+      hasLoadedOnceRef.current = true;
       setLoading(false);
+      setFetching(false);
       setRefreshing(false);
     }
   }, [userBusiness, canAccessAnalytics, period]);
 
   useFocusEffect(
     useCallback(() => {
-      setLoading(true);
+      // Only the very first load replaces the dashboard with a spinner; period
+      // changes and re-focuses refetch behind the existing content.
+      if (!hasLoadedOnceRef.current) {
+        setLoading(true);
+      } else {
+        setFetching(true);
+      }
       loadAnalytics();
     }, [loadAnalytics])
   );
@@ -139,28 +152,17 @@ export default function ProfileAnalyticsScreen() {
 
   return (
     <View style={styles.root}>
+      {/* Header sits above the gradient so ScreenHeader's dark text stays legible. */}
+      <ScreenHeader
+        title="Analytics"
+        right={<BarChart3 size={18} color={Colors.text.secondary} />}
+      />
       <LinearGradient
-        colors={[Colors.primary, Colors.accent]}
+        colors={[Colors.primary, Colors.secondary]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={[styles.header, { paddingTop: insets.top + Spacing.md }]}
+        style={styles.header}
       >
-        <View style={styles.headerRow}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.8}
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <ArrowLeft size={18} color={Colors.text.inverse} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Analytics</Text>
-          <View style={styles.headerRight}>
-            <BarChart3 size={18} color={Colors.text.inverse} />
-          </View>
-        </View>
         <Text style={styles.headerSubtitle}>
           Posts, event engagement, and profile growth insights
         </Text>
@@ -202,7 +204,14 @@ export default function ProfileAnalyticsScreen() {
         ) : (
           <>
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Time Window</Text>
+              <View style={styles.sectionTitleRow}>
+                <Text style={[styles.sectionTitle, styles.sectionTitleInRow]}>
+                  Time Window
+                </Text>
+                {fetching && !refreshing ? (
+                  <ActivityIndicator size="small" color={Colors.primary} />
+                ) : null}
+              </View>
               <View style={styles.periodRow}>
                 {PERIOD_OPTIONS.map((option) => (
                   <TouchableOpacity
@@ -227,6 +236,8 @@ export default function ProfileAnalyticsScreen() {
               </View>
             </View>
 
+            {/* Dim (don't unmount) the dashboard while a refetch is in flight. */}
+            <View style={fetching ? styles.contentFetching : null}>
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Posts</Text>
               <View style={styles.kpiGrid}>
@@ -301,14 +312,19 @@ export default function ProfileAnalyticsScreen() {
                     <View style={styles.trendBars}>
                       {data.trend.slice(-10).map((point) => (
                         <View key={point.date} style={styles.trendBarWrap}>
+                          <Text style={styles.trendBarValue}>
+                            {formatNumber(point.views)}
+                          </Text>
                           <View
                             style={[
                               styles.trendBar,
                               {
-                                height: Math.max(
-                                  8,
-                                  trendMax > 0 ? (point.views / trendMax) * 84 : 8
-                                ),
+                                // Zero stays visibly zero (a hairline nub on the
+                                // axis) instead of an 8pt bar that fakes data.
+                                height:
+                                  point.views === 0
+                                    ? 2
+                                    : Math.max(8, (point.views / trendMax) * 84),
                               },
                             ]}
                           />
@@ -322,6 +338,7 @@ export default function ProfileAnalyticsScreen() {
                 )}
               </View>
             </View>
+            </View>
           </>
         )}
       </ScrollView>
@@ -329,24 +346,64 @@ export default function ProfileAnalyticsScreen() {
   );
 }
 
+/** Illustrative bar heights for the locked-state sample chart. */
+const SAMPLE_TREND = [18, 34, 26, 48, 38, 64, 52];
+const SAMPLE_TREND_MAX = Math.max(...SAMPLE_TREND);
+
 function LockedAnalytics({ planName }: { planName: string }) {
   return (
-    <View style={styles.lockedWrap}>
-      <View style={styles.lockedIcon}>
-        <Crown size={24} color={Colors.accent} />
-      </View>
-      <Text style={styles.lockedTitle}>Premium analytics is locked</Text>
-      <Text style={styles.lockedDescription}>
-        Activate a premium subscription to access business analytics for posts, events, and profile performance.
-      </Text>
-      <TouchableOpacity
-        style={styles.lockedButton}
-        onPress={() => router.push('/premium/plans' as never)}
-        activeOpacity={0.85}
+    <View style={styles.lockedTeaserWrap}>
+      {/* Sample dashboard behind the overlay — decorative, hidden from a11y. */}
+      <View
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
       >
-        <Text style={styles.lockedButtonText}>Upgrade to Premium</Text>
-      </TouchableOpacity>
-      <Text style={styles.lockedFootnote}>Current plan: {planName}</Text>
+        <View style={styles.sampleBadge}>
+          <Text style={styles.sampleBadgeText}>Sample data</Text>
+        </View>
+        <View style={styles.kpiGrid}>
+          <KpiCard icon={<Eye size={16} color={Colors.secondary} />} label="Views" value="1.2K" />
+          <KpiCard icon={<Heart size={16} color={Colors.secondary} />} label="Saves" value="248" />
+          <KpiCard icon={<Users size={16} color={Colors.secondary} />} label="RSVPs" value="86" />
+          <KpiCard icon={<TrendingUp size={16} color={Colors.secondary} />} label="Engagement" value="27.8%" />
+        </View>
+        <View style={[styles.card, styles.sampleChartCard]}>
+          <View style={styles.trendBars}>
+            {SAMPLE_TREND.map((value, index) => (
+              <View key={index} style={styles.trendBarWrap}>
+                <View
+                  style={[
+                    styles.trendBar,
+                    { height: (value / SAMPLE_TREND_MAX) * 84 },
+                  ]}
+                />
+              </View>
+            ))}
+          </View>
+          <Text style={styles.trendCaption}>Engagement trend (sample)</Text>
+        </View>
+      </View>
+
+      <View style={styles.lockedOverlay}>
+        <View style={styles.lockedCard}>
+          <View style={styles.lockedIcon}>
+            <Crown size={24} color={Colors.premium} />
+          </View>
+          <Text style={styles.lockedTitle}>Unlock analytics for your business</Text>
+          <Text style={styles.lockedDescription}>
+            Upgrade to premium to see real views, saves, RSVPs, and follower
+            growth for your posts and profile.
+          </Text>
+          <TouchableOpacity
+            style={styles.lockedButton}
+            onPress={() => router.push('/premium/plans' as never)}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.lockedButtonText}>Upgrade to Premium</Text>
+          </TouchableOpacity>
+          <Text style={styles.lockedFootnote}>Current plan: {planName}</Text>
+        </View>
+      </View>
     </View>
   );
 }
@@ -444,44 +501,16 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
     paddingBottom: Spacing.lg,
     borderBottomLeftRadius: 28,
     borderBottomRightRadius: 28,
     marginBottom: Spacing.md,
   },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: Spacing.sm,
-  },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.16)',
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    marginRight: 36,
-    color: Colors.text.inverse,
-    fontSize: Typography.sizes.xl,
-    fontFamily: Typography.displayFontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-  },
-  headerRight: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.16)',
-  },
   headerSubtitle: {
-    color: 'rgba(255,255,255,0.85)',
+    color: alpha(Colors.white, 0.85),
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
     lineHeight: 20,
   },
   section: {
@@ -498,6 +527,20 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
     marginLeft: 2,
   },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+    marginLeft: 2,
+  },
+  sectionTitleInRow: {
+    marginBottom: 0,
+    marginLeft: 0,
+  },
+  contentFetching: {
+    opacity: 0.6,
+  },
   periodRow: {
     flexDirection: 'row',
     gap: Spacing.sm,
@@ -512,8 +555,8 @@ const styles = StyleSheet.create({
     borderColor: Colors.border.light,
   },
   periodChipActive: {
-    backgroundColor: 'rgba(196,92,62,0.12)',
-    borderColor: 'rgba(196,92,62,0.35)',
+    backgroundColor: Colors.primarySoft,
+    borderColor: alpha(Colors.primary, 0.35),
   },
   periodChipText: {
     color: Colors.text.secondary,
@@ -533,7 +576,7 @@ const styles = StyleSheet.create({
   },
   kpiCard: {
     width: '48.5%',
-    backgroundColor: Colors.background.primary,
+    backgroundColor: Colors.surface,
     borderRadius: BorderRadius.lg,
     padding: Spacing.md,
     borderWidth: 1,
@@ -563,7 +606,7 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.medium,
   },
   card: {
-    backgroundColor: Colors.background.primary,
+    backgroundColor: Colors.surface,
     borderRadius: BorderRadius.lg,
     borderWidth: 1,
     borderColor: Colors.border.light,
@@ -591,6 +634,7 @@ const styles = StyleSheet.create({
   topEventMeta: {
     marginTop: 3,
     fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
   },
   topEventPill: {
@@ -611,7 +655,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
-    height: 100,
+    // 84pt max bar + value label + top padding.
+    height: 112,
+    // Baseline axis the bars sit on; zero bars read as zero against it.
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border.medium,
   },
   trendBarWrap: {
     flex: 1,
@@ -624,16 +672,25 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 6,
     backgroundColor: Colors.primary,
   },
+  trendBarValue: {
+    marginBottom: 2,
+    fontSize: 10,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.text.tertiary,
+  },
   trendCaption: {
     paddingHorizontal: Spacing.md,
     paddingBottom: Spacing.md,
     paddingTop: Spacing.xs,
     fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
   },
   emptyInlineText: {
     padding: Spacing.md,
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
   },
   loadingWrap: {
@@ -642,15 +699,47 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: Spacing.sm,
+    fontFamily: Typography.fontFamily,
     color: Colors.text.secondary,
   },
-  lockedWrap: {
+  lockedTeaserWrap: {
     marginHorizontal: Spacing.lg,
-    marginTop: Spacing.xl,
+    marginTop: Spacing.lg,
+  },
+  sampleBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: Spacing.xs,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.background.primary,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+    marginBottom: Spacing.sm,
+  },
+  sampleBadgeText: {
+    fontSize: 10,
+    color: Colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    fontFamily: Typography.fontFamilies.semibold,
+  },
+  sampleChartCard: {
+    marginTop: Spacing.sm,
+  },
+  lockedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: alpha(Colors.surface, 0.7),
+    borderRadius: BorderRadius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: Spacing.md,
+  },
+  lockedCard: {
     borderRadius: BorderRadius.xl,
     padding: Spacing.xl,
-    backgroundColor: Colors.background.primary,
+    backgroundColor: Colors.surface,
     alignItems: 'center',
+    alignSelf: 'stretch',
     borderWidth: 1,
     borderColor: Colors.border.light,
     ...Shadows.md,
@@ -661,7 +750,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: alpha(Colors.accent, 0.15),
+    backgroundColor: Colors.premiumSoft,
     marginBottom: Spacing.md,
   },
   lockedTitle: {
@@ -699,7 +788,7 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.lg,
     marginTop: Spacing.xl,
     borderRadius: BorderRadius.lg,
-    backgroundColor: Colors.background.primary,
+    backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border.light,
     padding: Spacing.lg,
@@ -716,6 +805,7 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
     lineHeight: 20,
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
   },
   emptyStateButton: {
     marginTop: Spacing.md,

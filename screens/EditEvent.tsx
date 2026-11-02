@@ -8,16 +8,17 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import DateTimePicker, {
   DateTimePickerAndroid,
 } from '@react-native-community/datetimepicker';
 import { Repeat, ChevronRight, MapPin } from 'lucide-react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '@/contexts/AppContext';
 import { usePremium } from '@/contexts/PremiumContext';
 import { Input } from '@/components/Input';
+import { Button } from '@/components/ui/Button';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import {
@@ -33,13 +34,48 @@ import { categoriesService } from '@/services/categories';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { Category, EventPhoto } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { withShiftedEnd } from '@/utils/eventDatetime';
 
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
 const MAX_EVENT_DATE = new Date();
 MAX_EVENT_DATE.setFullYear(MAX_EVENT_DATE.getFullYear() + 10);
 
+const TITLE_MAX = 100;
+const DESCRIPTION_MAX = 2000;
+
+type EventFormData = {
+  title: string;
+  description: string;
+  categoryId: string;
+  startDatetime: Date;
+  endDatetime: Date;
+  address: string;
+  lat: number;
+  lng: number;
+  images: ImageAsset[];
+  recurrence: RecurrenceOption;
+  maxAttendees: string;
+};
+
+/** Serialize the form fields that count as "changes" for the unsaved guard. */
+const snapshotOf = (f: EventFormData) =>
+  JSON.stringify({
+    title: f.title,
+    description: f.description,
+    categoryId: f.categoryId,
+    start: f.startDatetime.getTime(),
+    end: f.endDatetime.getTime(),
+    address: f.address,
+    lat: f.lat,
+    lng: f.lng,
+    images: f.images.map((img) => img.uri),
+    recurrence: f.recurrence,
+    maxAttendees: f.maxAttendees,
+  });
+
 export default function EditEvent() {
   const { id } = useLocalSearchParams<{ id: string }>();
+  const insets = useSafeAreaInsets();
   const { userBusiness } = useApp();
   const { currentPlan } = usePremium();
   const [loading, setLoading] = useState(true);
@@ -73,6 +109,26 @@ export default function EditEvent() {
   const originalHadCap = useRef(false);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  /** Snapshot of the loaded values, used to detect unsaved changes on back. */
+  const initialSnapshot = useRef<string | null>(null);
+  const isDirty =
+    initialSnapshot.current != null && snapshotOf(formData) !== initialSnapshot.current;
+
+  const handleBack = () => {
+    if (!isDirty) {
+      router.back();
+      return;
+    }
+    notifyConfirm({
+      title: 'Discard changes?',
+      message: 'You have unsaved changes. Go back and lose them?',
+      confirmLabel: 'Discard',
+      cancelLabel: 'Keep editing',
+      destructive: true,
+      onConfirm: () => router.back(),
+    });
+  };
 
   useEffect(() => {
     categoriesService.getAllCategories().then(setCategories);
@@ -123,7 +179,7 @@ export default function EditEvent() {
         originalHadCap.current =
           (e as { max_attendees?: number | null }).max_attendees != null;
 
-        setFormData({
+        const loaded = {
           title: e.title,
           description: e.description,
           categoryId: e.category_id,
@@ -139,7 +195,9 @@ export default function EditEvent() {
             (e as { max_attendees?: number | null }).max_attendees != null
               ? String((e as { max_attendees?: number | null }).max_attendees)
               : '',
-        });
+        };
+        setFormData(loaded);
+        initialSnapshot.current = snapshotOf(loaded);
       } catch {
         notify.error('Failed to load event');
         router.back();
@@ -155,7 +213,7 @@ export default function EditEvent() {
       const updateField = (d: Date) =>
         setFormData((f) =>
           field === 'start'
-            ? { ...f, startDatetime: d }
+            ? withShiftedEnd(f, d)
             : { ...f, endDatetime: d }
         );
 
@@ -165,16 +223,32 @@ export default function EditEvent() {
         // Don't clamp events whose (unchanged) start is already in the past.
         minimumDate: currentDate.getTime() >= Date.now() ? new Date() : undefined,
         maximumDate: MAX_EVENT_DATE,
-        onChange: (_, dateResult) => {
-          if (dateResult) {
-            DateTimePickerAndroid.open({
-              value: dateResult,
-              mode: 'time',
-              onChange: (_, timeResult) => {
-                if (timeResult) updateField(timeResult);
-              },
-            });
-          }
+        onChange: (dateEvent, dateResult) => {
+          if (dateEvent.type !== 'set' || !dateResult) return;
+          // Commit the chosen date immediately (keeping the previous time) so
+          // cancelling the time step doesn't discard the date.
+          const withNewDate = new Date(currentDate);
+          withNewDate.setFullYear(
+            dateResult.getFullYear(),
+            dateResult.getMonth(),
+            dateResult.getDate()
+          );
+          updateField(withNewDate);
+          DateTimePickerAndroid.open({
+            value: withNewDate,
+            mode: 'time',
+            onChange: (timeEvent, timeResult) => {
+              if (timeEvent.type !== 'set' || !timeResult) return;
+              const combined = new Date(withNewDate);
+              combined.setHours(
+                timeResult.getHours(),
+                timeResult.getMinutes(),
+                0,
+                0
+              );
+              updateField(combined);
+            },
+          });
         },
       });
     },
@@ -357,24 +431,9 @@ export default function EditEvent() {
     >
       <ScreenHeader
         title="Edit Event"
+        onBack={handleBack}
         backgroundColor={Colors.surface}
         style={styles.headerBorder}
-        right={
-          <TouchableOpacity
-            style={styles.saveHeaderButton}
-            onPress={handleSubmit}
-            disabled={saving}
-            accessibilityRole="button"
-            accessibilityLabel="Save event"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color={Colors.primary} />
-            ) : (
-              <Text style={styles.saveHeaderText}>Save</Text>
-            )}
-          </TouchableOpacity>
-        }
       />
 
       <ScrollView
@@ -387,6 +446,7 @@ export default function EditEvent() {
           value={formData.title}
           onChangeText={(t) => setFormData((f) => ({ ...f, title: t }))}
           placeholder="Event name"
+          maxLength={TITLE_MAX}
           error={errors.title}
         />
 
@@ -397,8 +457,14 @@ export default function EditEvent() {
           placeholder="Describe your event"
           multiline
           numberOfLines={4}
+          maxLength={DESCRIPTION_MAX}
           style={styles.textArea}
           error={errors.description}
+          rightAdornment={
+            <Text style={styles.charCounter}>
+              {formData.description.length}/{DESCRIPTION_MAX}
+            </Text>
+          }
         />
 
         <Text style={styles.label}>Category</Text>
@@ -458,10 +524,18 @@ export default function EditEvent() {
             }
             maximumDate={MAX_EVENT_DATE}
             onChange={(_, d) => {
-              setShowStartPicker(false);
-              if (d) setFormData((f) => ({ ...f, startDatetime: d }));
+              if (d) setFormData((f) => withShiftedEnd(f, d));
             }}
           />
+        )}
+        {Platform.OS !== 'android' && showStartPicker && (
+          <TouchableOpacity
+            style={styles.pickerDoneButton}
+            onPress={() => setShowStartPicker(false)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.pickerDoneText}>Done</Text>
+          </TouchableOpacity>
         )}
         {errors.startDatetime && (
           <Text style={styles.errorText}>{errors.startDatetime}</Text>
@@ -489,10 +563,18 @@ export default function EditEvent() {
             display="spinner"
             maximumDate={MAX_EVENT_DATE}
             onChange={(_, d) => {
-              setShowEndPicker(false);
               if (d) setFormData((f) => ({ ...f, endDatetime: d }));
             }}
           />
+        )}
+        {Platform.OS !== 'android' && showEndPicker && (
+          <TouchableOpacity
+            style={styles.pickerDoneButton}
+            onPress={() => setShowEndPicker(false)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.pickerDoneText}>Done</Text>
+          </TouchableOpacity>
         )}
         {errors.endDatetime && (
           <Text style={styles.errorText}>{errors.endDatetime}</Text>
@@ -522,9 +604,13 @@ export default function EditEvent() {
             <View style={styles.recurrenceTextWrap}>
               <Text style={styles.dateButtonText}>
                 {getRecurrenceLabel(formData.recurrence)}
-                {userBusiness?.subscription_tier !== 'premium' && ' (Premium)'}
               </Text>
             </View>
+            {userBusiness?.subscription_tier !== 'premium' && (
+              <View style={styles.premiumBadge}>
+                <Text style={styles.premiumBadgeText}>Premium</Text>
+              </View>
+            )}
             <ChevronRight size={18} color={Colors.text.tertiary} />
           </View>
         </TouchableOpacity>
@@ -586,11 +672,6 @@ export default function EditEvent() {
                 : 'Tap to set venue on map'}
             </Text>
           </View>
-          {!!formData.address?.trim() && (
-            <Text style={styles.addressCoords}>
-              {formData.lat.toFixed(4)}, {formData.lng.toFixed(4)}
-            </Text>
-          )}
         </TouchableOpacity>
         <RecurrencePicker
           ref={recurrencePickerRef}
@@ -598,6 +679,17 @@ export default function EditEvent() {
           onSelect={(v) => setFormData((f) => ({ ...f, recurrence: v }))}
         />
       </ScrollView>
+
+      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, Spacing.md) }]}>
+        <Button
+          label="Save changes"
+          onPress={handleSubmit}
+          gradient
+          size="lg"
+          fullWidth
+          loading={saving}
+        />
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -616,23 +708,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border.light,
   },
-  saveHeaderButton: {
-    padding: Spacing.sm,
-    minWidth: 60,
-    alignItems: 'flex-end',
-  },
-  saveHeaderText: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.primary,
-  },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    padding: Spacing.xl,
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.xl,
     paddingBottom: Spacing.xxl,
+  },
+  footer: {
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.sm,
+    backgroundColor: Colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border.light,
   },
   label: {
     fontSize: Typography.sizes.sm,
@@ -644,6 +733,10 @@ const styles = StyleSheet.create({
   textArea: {
     minHeight: 100,
     textAlignVertical: 'top',
+  },
+  charCounter: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.text.tertiary,
   },
   categoriesScroll: {
     marginBottom: Spacing.md,
@@ -667,6 +760,7 @@ const styles = StyleSheet.create({
   },
   categoryChipText: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.regular,
     color: Colors.text.primary,
   },
   categoryChipTextSelected: {
@@ -675,8 +769,7 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.semibold,
   },
   dateButton: {
-    borderWidth: 1,
-    borderColor: Colors.border.light,
+    backgroundColor: Colors.background.secondary,
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm + 4,
@@ -684,7 +777,23 @@ const styles = StyleSheet.create({
   },
   dateButtonText: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.regular,
     color: Colors.text.primary,
+  },
+  pickerDoneButton: {
+    alignSelf: 'center',
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: 10,
+    backgroundColor: Colors.primarySoft,
+    borderRadius: BorderRadius.md,
+    marginTop: Spacing.xs,
+    marginBottom: Spacing.sm,
+  },
+  pickerDoneText: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.primary,
   },
   recurrenceRow: {
     flexDirection: 'row',
@@ -694,24 +803,36 @@ const styles = StyleSheet.create({
   recurrenceTextWrap: {
     flex: 1,
   },
+  premiumBadge: {
+    backgroundColor: Colors.premiumSoft,
+    borderRadius: BorderRadius.round,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.xs / 2,
+  },
+  premiumBadgeText: {
+    fontSize: Typography.sizes.xxs,
+    fontFamily: Typography.labelFontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.premium,
+  },
   errorText: {
     fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamilies.regular,
     color: Colors.error,
     marginTop: -Spacing.sm,
     marginBottom: Spacing.sm,
   },
   tapHint: {
     fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.regular,
     color: Colors.text.secondary,
     marginBottom: Spacing.sm,
   },
   addressTouchable: {
-    borderWidth: 1,
-    borderColor: Colors.border.light,
+    backgroundColor: Colors.background.secondary,
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm + 4,
-    backgroundColor: Colors.background.primary,
     marginBottom: Spacing.md,
   },
   addressTouchableRow: {
@@ -721,16 +842,11 @@ const styles = StyleSheet.create({
   },
   addressTouchableText: {
     fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.regular,
     color: Colors.text.primary,
     flex: 1,
   },
   addressPlaceholder: {
     color: Colors.text.tertiary,
-  },
-  addressCoords: {
-    fontSize: Typography.sizes.xs,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.tertiary,
-    marginTop: 4,
   },
 });

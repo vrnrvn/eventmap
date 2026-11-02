@@ -51,19 +51,28 @@ export function ReviewCard({ review, isOwner, onRespond, onReport, canReport }: 
         <View style={styles.meta}>
           <Text style={styles.name}>{review.profile?.name || 'User'}</Text>
           <View style={styles.ratingRow}>
-            {Array.from({ length: 5 }).map((_, i) => (
-              <Star
-                key={i}
-                size={14}
-                color={i < review.rating ? Colors.warning : Colors.border.light}
-                fill={i < review.rating ? Colors.warning : 'transparent'}
-              />
-            ))}
+            <View
+              style={styles.starsRow}
+              accessible
+              accessibilityLabel={`${review.rating} out of 5 stars`}
+            >
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Star
+                  key={i}
+                  size={14}
+                  color={i < review.rating ? Colors.warning : Colors.border.medium}
+                  fill={i < review.rating ? Colors.warning : 'transparent'}
+                />
+              ))}
+            </View>
             <Text style={styles.date}>{formatDate(review.created_at)}</Text>
             {canReport && onReport && (
               <TouchableOpacity
                 style={styles.reportLink}
                 onPress={() => onReport(review.id)}
+                accessibilityRole="button"
+                accessibilityLabel="Report review"
+                hitSlop={{ top: 14, bottom: 14, left: 8, right: 8 }}
               >
                 <Text style={styles.reportLinkText}>Report</Text>
               </TouchableOpacity>
@@ -90,6 +99,7 @@ export function ReviewCard({ review, isOwner, onRespond, onReport, canReport }: 
               placeholderTextColor={Colors.text.tertiary}
               multiline
               editable={!saving}
+              accessibilityLabel="Business response"
             />
             <View style={styles.responseActions}>
               <TouchableOpacity
@@ -99,6 +109,9 @@ export function ReviewCard({ review, isOwner, onRespond, onReport, canReport }: 
                   setResponseText(review.business_response || '');
                 }}
                 disabled={saving}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel"
+                hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
               >
                 <Text style={styles.cancelText}>Cancel</Text>
               </TouchableOpacity>
@@ -106,6 +119,9 @@ export function ReviewCard({ review, isOwner, onRespond, onReport, canReport }: 
                 style={[styles.submitBtn, !responseText.trim() && styles.submitBtnDisabled]}
                 onPress={handleSubmitResponse}
                 disabled={saving || !responseText.trim()}
+                accessibilityRole="button"
+                accessibilityLabel="Post response"
+                hitSlop={{ top: 10, bottom: 10 }}
               >
                 <Text style={styles.submitText}>{saving ? 'Posting…' : 'Post Response'}</Text>
               </TouchableOpacity>
@@ -115,6 +131,9 @@ export function ReviewCard({ review, isOwner, onRespond, onReport, canReport }: 
           <TouchableOpacity
             style={styles.respondBtn}
             onPress={() => setEditing(true)}
+            accessibilityRole="button"
+            accessibilityLabel={review.business_response ? 'Edit response' : 'Respond to review'}
+            hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
           >
             <Text style={styles.respondBtnText}>
               {review.business_response ? 'Edit response' : 'Respond'}
@@ -128,7 +147,7 @@ export function ReviewCard({ review, isOwner, onRespond, onReport, canReport }: 
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: Colors.background.secondary,
+    backgroundColor: Colors.surface,
     borderRadius: 12,
     padding: Spacing.md,
     marginBottom: Spacing.sm,
@@ -154,6 +173,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     marginTop: 2,
+  },
+  starsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   date: {
     fontSize: Typography.sizes.xs,
@@ -207,7 +231,7 @@ const styles = StyleSheet.create({
     borderTopColor: Colors.border.light,
   },
   input: {
-    backgroundColor: Colors.background.primary,
+    backgroundColor: Colors.background.secondary,
     borderRadius: 8,
     padding: Spacing.sm,
     fontSize: Typography.sizes.sm,

@@ -18,16 +18,16 @@ import { businessesService } from '@/services/businesses';
 import { confirmAction } from '@/utils/confirm';
 import { notify } from '@/utils/notify';
 import { Button } from '@/components/ui/Button';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { EventListItem, formatEventDate } from '@/components/EventListItem';
 import { Event } from '@/types/database';
-import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import {
   ArrowLeft,
   BarChart3,
-  Calendar,
   Megaphone,
   Pencil,
-  Trash2,
+  CalendarX,
   PlusCircle,
   CalendarDays,
   Briefcase,
@@ -35,21 +35,6 @@ import {
   Clock,
   FileText,
 } from 'lucide-react-native';
-
-const Palette = {
-  gradientStart: Colors.primary,
-  gradientEnd: Colors.accent,
-  cardBg: Colors.background.primary,
-  surfaceMuted: Colors.background.primary,
-  accentSoft: Colors.primarySoft,
-  textOnGradient: Colors.text.inverse,
-  textOnGradientMuted: alpha(Colors.surface, 0.75),
-  separator: Colors.border.light,
-  badge: Colors.primary,
-  editSoft: Colors.primarySoft,
-  deleteSoft: Colors.errorSoft,
-  deleteColor: Colors.error,
-};
 
 const PAGE_SIZE = 30;
 
@@ -62,6 +47,7 @@ export default function MyEvents() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   const loadInitial = useCallback(async () => {
     if (!userBusiness) {
@@ -78,8 +64,10 @@ export default function MyEvents() {
       setEvents(data);
       setOffset(data.length);
       setHasMore(data.length >= PAGE_SIZE);
+      setLoadError(false);
     } catch {
       setEvents([]);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -114,8 +102,10 @@ export default function MyEvents() {
       setEvents(data);
       setOffset(data.length);
       setHasMore(data.length >= PAGE_SIZE);
+      setLoadError(false);
     } catch {
       setEvents([]);
+      setLoadError(true);
     } finally {
       setRefreshing(false);
     }
@@ -212,7 +202,7 @@ export default function MyEvents() {
                   accessibilityRole="button"
                   accessibilityLabel={`Edit ${item.title}`}
                 >
-                  <Pencil size={14} color={Palette.gradientStart} />
+                  <Pencil size={14} color={Colors.primary} />
                   <Text style={styles.editBtnText}>Edit</Text>
                 </TouchableOpacity>
 
@@ -225,7 +215,7 @@ export default function MyEvents() {
                     accessibilityLabel={`Notify followers about ${item.title}`}
                     hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                   >
-                    <Megaphone size={14} color={Palette.gradientStart} />
+                    <Megaphone size={14} color={Colors.primary} />
                   </TouchableOpacity>
                 )}
 
@@ -239,7 +229,7 @@ export default function MyEvents() {
                   accessibilityLabel={`View insights for ${item.title}`}
                   hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                 >
-                  <BarChart3 size={14} color={Palette.gradientStart} />
+                  <BarChart3 size={14} color={Colors.primary} />
                 </TouchableOpacity>
 
                 {!cancelled && (
@@ -250,7 +240,7 @@ export default function MyEvents() {
                     accessibilityRole="button"
                     accessibilityLabel={`Cancel ${item.title}`}
                   >
-                    <Trash2 size={14} color={Palette.deleteColor} />
+                    <CalendarX size={14} color={Colors.error} />
                     <Text style={styles.deleteBtnText}>Cancel</Text>
                   </TouchableOpacity>
                 )}
@@ -274,13 +264,13 @@ export default function MyEvents() {
           activeOpacity={0.85}
         >
           <LinearGradient
-            colors={[Palette.gradientStart, Palette.gradientEnd]}
+            colors={[Colors.primary, Colors.secondary]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={styles.createCardGradient}
           >
             <View style={styles.createCardIcon}>
-              <PlusCircle size={20} color={Palette.gradientStart} />
+              <PlusCircle size={20} color={Colors.primary} />
             </View>
             <View style={styles.createCardContent}>
               <Text style={styles.createCardTitle}>Create New Event</Text>
@@ -296,16 +286,26 @@ export default function MyEvents() {
   );
 
   const ListEmpty = useCallback(
-    () =>
-      !loading && !refreshing ? (
+    () => {
+      if (loading || refreshing) return null;
+      if (loadError) {
+        return (
+          <ErrorState
+            title="Couldn't load your events"
+            onRetry={loadInitial}
+            style={styles.errorState}
+          />
+        );
+      }
+      return (
         <View style={styles.emptyContainer}>
           <View style={styles.emptyIconWrap}>
-            <FileText size={36} color={Palette.gradientStart} />
+            <FileText size={36} color={Colors.primary} />
           </View>
           <Text style={styles.emptyTitle}>No Events Yet</Text>
           <Text style={styles.emptySubtitle}>
             {hasBusiness
-              ? 'Create your first event to start reaching\nyour local community.'
+              ? 'Create your first event to start reaching your local community.'
               : 'You need a business profile to create and manage events.'}
           </Text>
           {hasBusiness && (
@@ -313,20 +313,21 @@ export default function MyEvents() {
               label="Create Event"
               onPress={() => router.push('/(tabs)/create' as never)}
               variant="ghost"
-              icon={<PlusCircle size={16} color={Palette.gradientStart} />}
+              icon={<PlusCircle size={16} color={Colors.primary} />}
               style={styles.emptyCta}
             />
           )}
         </View>
-      ) : null,
-    [loading, refreshing, hasBusiness]
+      );
+    },
+    [loading, refreshing, hasBusiness, loadError, loadInitial]
   );
 
   const ListFooter = useCallback(
     () =>
       loadingMore ? (
         <View style={styles.footerLoader}>
-          <ActivityIndicator size="small" color={Palette.gradientStart} />
+          <ActivityIndicator size="small" color={Colors.primary} />
           <Text style={styles.footerLoaderText}>Loading more…</Text>
         </View>
       ) : null,
@@ -350,7 +351,7 @@ export default function MyEvents() {
           </TouchableOpacity>
           <View style={styles.headerCenter}>
             <View style={styles.headerIconWrap}>
-              <CalendarDays size={18} color={Palette.gradientStart} />
+              <CalendarDays size={18} color={Colors.primary} />
             </View>
             <Text style={styles.headerTitle}>My Events</Text>
           </View>
@@ -359,18 +360,18 @@ export default function MyEvents() {
 
         <View style={styles.noBizContainer}>
           <View style={styles.noBizIconWrap}>
-            <Briefcase size={36} color={Palette.gradientStart} />
+            <Briefcase size={36} color={Colors.primary} />
           </View>
           <Text style={styles.noBizTitle}>Business Required</Text>
           <Text style={styles.noBizSubtitle}>
-            Create a business profile to start{'\n'}managing your events.
+            Create a business profile to start managing your events.
           </Text>
           <Button
             label="Create Business"
             onPress={() => router.push('/business/onboarding' as never)}
             size="lg"
             gradient
-            icon={<ChevronRight size={18} color="#fff" />}
+            icon={<ChevronRight size={18} color={Colors.white} />}
           />
         </View>
       </View>
@@ -394,7 +395,7 @@ export default function MyEvents() {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <View style={styles.headerIconWrap}>
-            <CalendarDays size={18} color={Palette.gradientStart} />
+            <CalendarDays size={18} color={Colors.primary} />
           </View>
           <View>
             <Text style={styles.headerTitle}>My Events</Text>
@@ -409,16 +410,20 @@ export default function MyEvents() {
       </View>
 
       {loading ? (
-        <View style={styles.noBizContainer}>
-          <View style={styles.loadingIconWrap}>
-            <CalendarDays size={28} color={Palette.gradientStart} />
-          </View>
-          <ActivityIndicator
-            size="large"
-            color={Palette.gradientStart}
-            style={{ marginTop: 20 }}
-          />
-          <Text style={styles.loadingText}>Loading your events…</Text>
+        <View
+          style={styles.skeletonList}
+          accessibilityLabel="Loading your events"
+          accessibilityState={{ busy: true }}
+        >
+          {[0, 1, 2].map((i) => (
+            <View key={i} style={styles.skeletonCard}>
+              <View style={styles.skeletonThumb} />
+              <View style={styles.skeletonLines}>
+                <View style={styles.skeletonBar} />
+                <View style={[styles.skeletonBar, styles.skeletonBarShort]} />
+              </View>
+            </View>
+          ))}
         </View>
       ) : (
         <FlatList
@@ -440,8 +445,8 @@ export default function MyEvents() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={handleRefresh}
-              colors={[Palette.gradientStart]}
-              tintColor={Palette.gradientStart}
+              colors={[Colors.primary]}
+              tintColor={Colors.primary}
             />
           }
           initialNumToRender={15}
@@ -459,7 +464,7 @@ export default function MyEvents() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Palette.surfaceMuted,
+    backgroundColor: Colors.background.primary,
   },
 
   /* ── Header ── */
@@ -467,17 +472,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: Spacing.md,
     paddingVertical: 14,
-    backgroundColor: Palette.cardBg,
+    backgroundColor: Colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Palette.separator,
+    borderBottomColor: Colors.border.light,
   },
   backBtn: {
     width: 40,
     height: 40,
-    borderRadius: 12,
-    backgroundColor: Palette.surfaceMuted,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.background.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -489,8 +494,8 @@ const styles = StyleSheet.create({
   headerIconWrap: {
     width: 42,
     height: 42,
-    borderRadius: 12,
-    backgroundColor: Palette.accentSoft,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -510,21 +515,40 @@ const styles = StyleSheet.create({
     width: 40,
   },
 
-  /* ── Loading ── */
-  loadingIconWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
-    backgroundColor: Palette.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
+  /* ── Loading skeleton (mirrors EventListItem) ── */
+  skeletonList: {
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.md + Spacing.xs,
   },
-  loadingText: {
-    marginTop: 16,
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-    color: Colors.text.secondary,
+  skeletonCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+    padding: Spacing.md,
+    marginBottom: 12,
+  },
+  skeletonThumb: {
+    width: 58,
+    height: 58,
+    borderRadius: BorderRadius.md + 2,
+    backgroundColor: Colors.background.tertiary,
+  },
+  skeletonLines: {
+    flex: 1,
+    gap: Spacing.sm,
+  },
+  skeletonBar: {
+    height: 12,
+    width: '70%',
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.background.tertiary,
+  },
+  skeletonBarShort: {
+    width: '45%',
   },
 
   /* ── List ── */
@@ -538,12 +562,12 @@ const styles = StyleSheet.create({
 
   /* ── Create card ── */
   createCardWrap: {
-    borderRadius: 18,
+    borderRadius: BorderRadius.lg,
     overflow: 'hidden',
     marginBottom: 20,
     ...Platform.select({
       ios: {
-        shadowColor: Palette.gradientStart,
+        shadowColor: Colors.primary,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
         shadowRadius: 12,
@@ -560,8 +584,8 @@ const styles = StyleSheet.create({
   createCardIcon: {
     width: 42,
     height: 42,
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.white,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
@@ -573,12 +597,12 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamilies.bold,
     fontWeight: Typography.weights.bold,
-    color: Palette.textOnGradient,
+    color: Colors.text.inverse,
   },
   createCardSubtitle: {
     fontSize: Typography.sizes.xs,
     fontFamily: Typography.fontFamily,
-    color: Palette.textOnGradientMuted,
+    color: alpha(Colors.surface, 0.75),
     marginTop: 2,
   },
 
@@ -595,22 +619,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: Palette.editSoft,
+    minHeight: 44,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.primarySoft,
   },
   editBtnText: {
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: Palette.gradientStart,
+    color: Colors.primary,
   },
   iconActionBtn: {
-    width: 40,
+    width: 44,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: Palette.editSoft,
+    minHeight: 44,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.primarySoft,
   },
   deleteBtn: {
     flex: 1,
@@ -619,14 +645,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: Palette.deleteSoft,
+    minHeight: 44,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.errorSoft,
   },
   deleteBtnText: {
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
-    color: Palette.deleteColor,
+    color: Colors.error,
+  },
+
+  /* ── Error state ── */
+  errorState: {
+    flex: 1,
   },
 
   /* ── Empty state ── */
@@ -639,8 +671,8 @@ const styles = StyleSheet.create({
   emptyIconWrap: {
     width: 80,
     height: 80,
-    borderRadius: 24,
-    backgroundColor: Palette.accentSoft,
+    borderRadius: BorderRadius.xl,
+    backgroundColor: Colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
@@ -661,7 +693,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   emptyCta: {
-    backgroundColor: Palette.accentSoft,
+    backgroundColor: Colors.primarySoft,
   },
 
   /* ── Footer loader ── */
@@ -689,8 +721,8 @@ const styles = StyleSheet.create({
   noBizIconWrap: {
     width: 80,
     height: 80,
-    borderRadius: 24,
-    backgroundColor: Palette.accentSoft,
+    borderRadius: BorderRadius.xl,
+    backgroundColor: Colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24,
@@ -709,23 +741,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 28,
-  },
-  noBizCta: {
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  noBizCtaGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 15,
-    paddingHorizontal: 32,
-  },
-  noBizCtaText: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: '#FFFFFF',
   },
 });

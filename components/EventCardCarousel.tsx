@@ -10,17 +10,28 @@ import { Colors } from '@/constants/theme';
 import { EventmapCalendar } from '@/components/icons/EventmapIcons';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CARD_WIDTH = SCREEN_WIDTH - 32;
+const DEFAULT_CARD_WIDTH = SCREEN_WIDTH - 32;
 const DEFAULT_IMAGE_HEIGHT = 180;
 
 type EventCardCarouselProps = {
   imageUrls: string[];
   imageHeight?: number;
+  /** Available width for the carousel (defaults to screen width minus 32). */
+  width?: number;
   /** Optional: subtle skew on images for editorial feel (e.g. alternating cards) */
   applySkew?: boolean;
 };
 
-export function EventCardCarousel({ imageUrls, imageHeight = DEFAULT_IMAGE_HEIGHT, applySkew = false }: EventCardCarouselProps) {
+export function EventCardCarousel({
+  imageUrls,
+  imageHeight = DEFAULT_IMAGE_HEIGHT,
+  width = DEFAULT_CARD_WIDTH,
+  applySkew = false,
+}: EventCardCarouselProps) {
+  // A zero/negative width (e.g. measured before layout) would make
+  // snapToInterval invalid natively and collapse the scale interpolation's
+  // input range to [0, 0, 0].
+  const safeWidth = width > 0 ? width : DEFAULT_CARD_WIDTH;
   const scrollX = useSharedValue(0);
 
   const scrollHandler = useAnimatedScrollHandler({
@@ -33,11 +44,11 @@ export function EventCardCarousel({ imageUrls, imageHeight = DEFAULT_IMAGE_HEIGH
   const isPlaceholder = images.length === 1 && !images[0];
 
   return (
-    <View style={[styles.container, { height: imageHeight }]}>
+    <View style={[styles.container, { width: safeWidth, height: imageHeight }]}>
       <Animated.ScrollView
         horizontal
         pagingEnabled={images.length > 1}
-        snapToInterval={CARD_WIDTH}
+        snapToInterval={safeWidth}
         snapToAlignment="start"
         decelerationRate="fast"
         showsHorizontalScrollIndicator={false}
@@ -52,6 +63,7 @@ export function EventCardCarousel({ imageUrls, imageHeight = DEFAULT_IMAGE_HEIGH
             scrollX={scrollX}
             isPlaceholder={isPlaceholder}
             imageHeight={imageHeight}
+            cardWidth={safeWidth}
             applySkew={applySkew}
           />
         ))}
@@ -66,6 +78,7 @@ function CarouselImage({
   scrollX,
   isPlaceholder,
   imageHeight = DEFAULT_IMAGE_HEIGHT,
+  cardWidth = DEFAULT_CARD_WIDTH,
   applySkew = false,
 }: {
   uri: string;
@@ -73,13 +86,14 @@ function CarouselImage({
   scrollX: ReturnType<typeof useSharedValue<number>>;
   isPlaceholder: boolean;
   imageHeight?: number;
+  cardWidth?: number;
   applySkew?: boolean;
 }) {
   const animatedStyle = useAnimatedStyle(() => {
     const inputRange = [
-      (index - 1) * CARD_WIDTH,
-      index * CARD_WIDTH,
-      (index + 1) * CARD_WIDTH,
+      (index - 1) * cardWidth,
+      index * cardWidth,
+      (index + 1) * cardWidth,
     ];
     const scale = interpolate(
       scrollX.value,
@@ -92,7 +106,7 @@ function CarouselImage({
   });
 
   return (
-    <Animated.View style={[styles.imageWrapper, { width: CARD_WIDTH, height: imageHeight }, animatedStyle]}>
+    <Animated.View style={[styles.imageWrapper, { width: cardWidth, height: imageHeight }, animatedStyle]}>
       {uri && !isPlaceholder ? (
         <Image source={{ uri }} style={styles.image} resizeMode="cover" />
       ) : (
@@ -106,7 +120,7 @@ function CarouselImage({
 
 const styles = StyleSheet.create({
   container: {
-    width: CARD_WIDTH,
+    width: DEFAULT_CARD_WIDTH,
     height: DEFAULT_IMAGE_HEIGHT,
   },
   imageWrapper: {

@@ -18,6 +18,7 @@ import { RankedEvent } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { isEventInProgress } from '@/utils/eventStatus';
 import { Button } from '@/components/ui/Button';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { EventListItem, formatEventDate } from '@/components/EventListItem';
 import {
   ArrowLeft,
@@ -103,7 +104,7 @@ export default function JoinedEvents() {
         // 'interested' and 'past' carry no chat badges.
       } catch {
         if (seq !== requestSeq.current[key]) return;
-        setError('Could not load your events. Pull to retry.');
+        setError('Could not load your events.');
         patchTab(key, { loaded: true, loadingMore: false, hasMore: false });
       }
     },
@@ -177,17 +178,38 @@ export default function JoinedEvents() {
 
   const renderEmpty = () => {
     if (!current.loaded) {
+      // Static skeleton rows mirroring EventListItem's shape.
       return (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={Colors.primary} />
+        <View
+          style={styles.skeletonList}
+          accessibilityLabel="Loading events"
+          accessibilityState={{ busy: true }}
+        >
+          {[0, 1, 2].map((i) => (
+            <View key={i} style={styles.skeletonCard}>
+              <View style={styles.skeletonThumb} />
+              <View style={styles.skeletonLines}>
+                <View style={styles.skeletonBar} />
+                <View style={[styles.skeletonBar, styles.skeletonBarShort]} />
+              </View>
+            </View>
+          ))}
         </View>
       );
     }
     if (error) {
       return (
-        <View style={styles.center}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
+        <ErrorState
+          title="Couldn't load your events"
+          message={error}
+          onRetry={() => {
+            // Re-enter the skeleton state so the retry gives visible feedback.
+            setError(null);
+            patchTab(scope, { loaded: false });
+            void loadPage(scope, 0);
+          }}
+          style={styles.center}
+        />
       );
     }
     return (
@@ -255,6 +277,7 @@ export default function JoinedEvents() {
               activeOpacity={0.85}
               accessibilityRole="tab"
               accessibilityState={{ selected: active }}
+              hitSlop={{ top: 6, bottom: 6 }}
             >
               <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
                 {key === 'upcoming' ? 'Going' : key === 'interested' ? 'Interested' : 'Attended'}
@@ -402,8 +425,41 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
-    paddingVertical: 48,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.xxl,
+  },
+  /* ── Loading skeleton (mirrors EventListItem) ── */
+  skeletonList: {
+    gap: 10,
+  },
+  skeletonCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+    padding: Spacing.md,
+  },
+  skeletonThumb: {
+    width: 58,
+    height: 58,
+    borderRadius: BorderRadius.md + 2,
+    backgroundColor: Colors.background.tertiary,
+  },
+  skeletonLines: {
+    flex: 1,
+    gap: Spacing.sm,
+  },
+  skeletonBar: {
+    height: 12,
+    width: '70%',
+    borderRadius: BorderRadius.sm,
+    backgroundColor: Colors.background.tertiary,
+  },
+  skeletonBarShort: {
+    width: '45%',
   },
   emptyIcon: {
     width: 56,
@@ -429,11 +485,6 @@ const styles = StyleSheet.create({
   },
   emptyButton: {
     marginTop: 18,
-  },
-  errorText: {
-    fontSize: Typography.sizes.sm,
-    color: Colors.error,
-    textAlign: 'center',
   },
   footerSpinner: {
     paddingVertical: Spacing.md,

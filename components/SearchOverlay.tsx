@@ -18,7 +18,7 @@ import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { X } from 'lucide-react-native';
-import { EventmapSearch, EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
+import { EventmapSearch, EventmapMapPin } from '@/components/icons/EventmapIcons';
 import { useSearch, type SearchLocation } from '@/contexts/SearchContext';
 import { geocodingService } from '@/services/geocoding';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
@@ -167,6 +167,12 @@ export function SearchOverlay({
 
   const summaryLabel = location?.label ?? 'Add location';
 
+  const activeDatePreset: 'any' | 'today' | 'week' = !dateRange
+    ? 'any'
+    : dateRange.start.toDateString() === dateRange.end.toDateString()
+      ? 'today'
+      : 'week';
+
   return (
     <Modal
       visible={visible}
@@ -219,6 +225,7 @@ export function SearchOverlay({
                     returnKeyType="search"
                     autoCorrect={false}
                     onSubmitEditing={handleSearchPress}
+                    accessibilityLabel="Keyword"
                   />
                   {keyword.length > 0 ? (
                     <TouchableOpacity
@@ -260,6 +267,8 @@ export function SearchOverlay({
                             style={styles.resultItem}
                             onPress={() => handleSuggestionSelect(item)}
                             activeOpacity={0.7}
+                            accessibilityRole="button"
+                            accessibilityLabel={secondary ? `${primary}, ${secondary}` : primary}
                           >
                             <View style={styles.resultIcon}>
                               <EventmapMapPin size={20} color={Colors.text.secondary} />
@@ -288,6 +297,8 @@ export function SearchOverlay({
               <TouchableOpacity
                 style={styles.summaryRow}
                 onPress={() => setCurrentStep('where')}
+                accessibilityRole="button"
+                accessibilityLabel={`${summaryLabel}, change location`}
               >
                 <EventmapMapPin size={20} color={Colors.text.tertiary} />
                 <Text style={styles.summaryLabel} numberOfLines={1}>
@@ -298,25 +309,34 @@ export function SearchOverlay({
                 <Text style={styles.whenHint}>Filter events by date (applies to Discover list & map).</Text>
                 <View style={styles.dateChipRow}>
                   <TouchableOpacity
-                    style={[styles.dateChip, !dateRange && styles.dateChipActive]}
+                    style={[styles.dateChip, activeDatePreset === 'any' && styles.dateChipActive]}
                     onPress={() => applyDatePreset('any')}
                     activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: activeDatePreset === 'any' }}
+                    hitSlop={{ top: 6, bottom: 6 }}
                   >
-                    <Text style={[styles.dateChipText, !dateRange && styles.dateChipTextActive]}>Any time</Text>
+                    <Text style={[styles.dateChipText, activeDatePreset === 'any' && styles.dateChipTextActive]}>Any time</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={styles.dateChip}
+                    style={[styles.dateChip, activeDatePreset === 'today' && styles.dateChipActive]}
                     onPress={() => applyDatePreset('today')}
                     activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: activeDatePreset === 'today' }}
+                    hitSlop={{ top: 6, bottom: 6 }}
                   >
-                    <Text style={styles.dateChipText}>Today</Text>
+                    <Text style={[styles.dateChipText, activeDatePreset === 'today' && styles.dateChipTextActive]}>Today</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={styles.dateChip}
+                    style={[styles.dateChip, activeDatePreset === 'week' && styles.dateChipActive]}
                     onPress={() => applyDatePreset('week')}
                     activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: activeDatePreset === 'week' }}
+                    hitSlop={{ top: 6, bottom: 6 }}
                   >
-                    <Text style={styles.dateChipText}>Next 7 days</Text>
+                    <Text style={[styles.dateChipText, activeDatePreset === 'week' && styles.dateChipTextActive]}>Next 7 days</Text>
                   </TouchableOpacity>
                 </View>
                 {dateRange ? (
@@ -334,7 +354,13 @@ export function SearchOverlay({
 
         <View style={[styles.footer, { paddingBottom: insets.bottom + Spacing.md }]}>
           {(hasSelection || keyword.trim().length > 0) && (
-            <TouchableOpacity onPress={handleClearAll} style={styles.clearButton}>
+            <TouchableOpacity
+              onPress={handleClearAll}
+              style={styles.clearButton}
+              accessibilityRole="button"
+              accessibilityLabel="Clear all filters"
+              hitSlop={{ top: 6, bottom: 6, left: 8, right: 8 }}
+            >
               <Text style={styles.clearText}>Clear all</Text>
             </TouchableOpacity>
           )}
@@ -342,6 +368,8 @@ export function SearchOverlay({
             style={styles.searchButton}
             onPress={handleSearchPress}
             activeOpacity={0.9}
+            accessibilityRole="button"
+            accessibilityLabel="Search"
           >
             <EventmapSearch size={20} color={Colors.text.inverse} />
             <Text style={styles.searchButtonText}>Search</Text>

@@ -98,6 +98,10 @@ export const profilesService = {
       data: { publicUrl },
     } = supabase.storage.from('avatars').getPublicUrl(data.path);
 
-    return publicUrl;
+    // The avatar lives at a fixed per-user path (upsert overwrites in place),
+    // so the bare public URL never changes between uploads and clients keep
+    // showing the cached old image. A version query makes each upload produce
+    // a distinct URL without orphaning storage files.
+    return `${publicUrl}?v=${Date.now()}`;
   },
 };
