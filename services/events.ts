@@ -1,15 +1,21 @@
+import { Platform } from 'react-native';
 import { supabase } from './supabase';
-import { RankedEvent, EventDetails, Event } from '@/types/database';
+import { RankedEvent, EventDetails, Event, EventLink } from '@/types/database';
 import { FilterOptions } from '@/types/app';
 import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
 
 export const eventsService = {
-  async getRankedEvents(
+  /**
+   * One page of ranked events around a point. `hasMore` is inferred from a
+   * full page; callers stop paging when a short page comes back.
+   */
+  async getRankedEventsPage(
     userLat: number,
     userLng: number,
-    filters: Partial<FilterOptions> = {}
-  ): Promise<RankedEvent[]> {
+    filters: Partial<FilterOptions> = {},
+    page: { limit: number; offset: number }
+  ): Promise<{ items: RankedEvent[]; hasMore: boolean }> {
     const { data, error } = await supabase.rpc('get_ranked_events', {
       user_lat: userLat,
       user_lng: userLng,
@@ -18,56 +24,12 @@ export const eventsService = {
       start_date: filters.startDate?.toISOString(),
       end_date: filters.endDate?.toISOString(),
       search_query: filters.searchQuery || undefined,
-      result_limit: 100,
-    });
-
-    if (error) throw error;
-    return (data || []) as RankedEvent[];
-  },
-
-  /**
-   * Paged variant of getRankedEvents backed by the p_offset parameter added in
-   * 20261030110000. While that migration is unapplied the 9-arg signature
-   * doesn't exist (PostgREST reports PGRST202 / Postgres 42883 because params
-   * are part of the signature), so this falls back to the legacy no-offset
-   * call with the pre-pagination limit of 100 — identical to today's single
-   * fetch — and reports hasMore=false so callers don't keep paging.
-   */
-  async getRankedEventsPage(
-    userLat: number,
-    userLng: number,
-    filters: Partial<FilterOptions> = {},
-    page: { limit: number; offset: number }
-  ): Promise<{ items: RankedEvent[]; hasMore: boolean }> {
-    const baseParams = {
-      user_lat: userLat,
-      user_lng: userLng,
-      radius_km: filters.radiusKm || 50,
-      category_ids: filters.categories?.length ? filters.categories : undefined,
-      start_date: filters.startDate?.toISOString(),
-      end_date: filters.endDate?.toISOString(),
-      search_query: filters.searchQuery || undefined,
-    };
-    const { data, error } = await (supabase as any).rpc('get_ranked_events', {
-      ...baseParams,
       result_limit: page.limit,
       p_offset: page.offset,
     });
-    if (!error) {
-      const items = (data || []) as RankedEvent[];
-      return { items, hasMore: items.length >= page.limit };
-    }
-    // TODO: remove fallback once 20261030110000 is applied.
-    if (error.code === '42883' || error.code === 'PGRST202') {
-      if (page.offset > 0) return { items: [], hasMore: false };
-      const { data: legacyData, error: legacyError } = await supabase.rpc(
-        'get_ranked_events',
-        { ...baseParams, result_limit: 100 }
-      );
-      if (legacyError) throw legacyError;
-      return { items: (legacyData || []) as RankedEvent[], hasMore: false };
-    }
-    throw error;
+    if (error) throw error;
+    const items = (data || []) as RankedEvent[];
+    return { items, hasMore: items.length >= page.limit };
   },
 
   async getEventDetails(eventId: string): Promise<EventDetails | null> {
@@ -80,7 +42,7 @@ export const eventsService = {
   },
 
   async trackEventView(eventId: string): Promise<void> {
-    const { error } = await (supabase as any).rpc('track_event_view', {
+    const { error } = await supabase.rpc('track_event_view', {
       event_uuid: eventId,
     });
     if (error) {
@@ -140,20 +102,14 @@ export const eventsService = {
   /**
    * Soft-cancels an event via the cancel_event RPC (20261030106000): keeps the
    * row, sets status='cancelled' and notifies going/interested attendees.
-   * While that migration is unapplied the RPC doesn't exist, so this falls
-   * back to the legacy hard delete (identical to today's behavior).
+   * Never falls back to a hard delete — if the RPC is missing the call fails
+   * loudly rather than silently destroying RSVPs and chat history.
    */
   async cancelEvent(eventId: string): Promise<void> {
-    const { error } = await (supabase as any).rpc('cancel_event', {
+    const { error } = await supabase.rpc('cancel_event', {
       p_event_id: eventId,
     });
-    if (!error) return;
-    // TODO: remove fallback once 20261030106000 is applied
-    if (error.code === '42883' || error.code === 'PGRST202') {
-      await this.deleteEvent(eventId);
-      return;
-    }
-    throw error;
+    if (error) throw error;
   },
 
   async deleteEvent(eventId: string): Promise<void> {
@@ -162,31 +118,77 @@ export const eventsService = {
     if (error) throw error;
   },
 
+  /**
+   * A host's (or venue page's) events.
+   *
+   *  - `upcoming`: active events that haven't ended, soonest first. Recurring
+   *    series are included regardless of their first start; callers that
+   *    need the series' own end date to be honoured filter with
+   *    `hasEventEnded`, which mirrors the server's `event_has_ended`.
+   *  - `past`: cancelled events plus anything whose (first) end has passed,
+   *    most recent first. Ongoing recurring series also match and should be
+   *    dropped by the caller with `hasEventEnded`.
+   *  - `all` (default): everything, oldest first (legacy ordering).
+   *
+   * Visibility is still governed by RLS: visitors only see active events
+   * whose end hasn't passed; owners see their full history.
+   */
   async getBusinessEvents(
     businessId: string,
-    opts?: { limit?: number; offset?: number }
+    opts?: { limit?: number; offset?: number; scope?: 'upcoming' | 'past' | 'all' }
   ): Promise<Event[]> {
     const limit = opts?.limit ?? 50;
     const offset = opts?.offset ?? 0;
+    const scope = opts?.scope ?? 'all';
+    const nowIso = new Date().toISOString();
 
-    let query = supabase
-      .from('events')
-      .select('*')
-      .eq('business_id', businessId)
-      .order('start_datetime', { ascending: true })
-      .range(offset, offset + limit - 1);
+    let query = supabase.from('events').select('*').eq('business_id', businessId);
 
-    const { data, error } = await query;
+    if (scope === 'upcoming') {
+      query = query
+        .eq('status', 'active')
+        .or(`end_datetime.gt.${nowIso},is_recurring.eq.true`)
+        .order('start_datetime', { ascending: true });
+    } else if (scope === 'past') {
+      // Includes active recurring series whose first end has passed; callers
+      // decide with hasEventEnded whether the series itself is over (an
+      // ongoing one belongs in 'upcoming', a finished one here).
+      query = query
+        .or(`status.eq.cancelled,end_datetime.lte.${nowIso}`)
+        .order('start_datetime', { ascending: false });
+    } else {
+      query = query.order('start_datetime', { ascending: true });
+    }
+
+    const { data, error } = await query.range(offset, offset + limit - 1);
 
     if (error) throw error;
     return (data || []) as Event[];
   },
 
-  async getBusinessEventsCount(businessId: string): Promise<number> {
-    const { count, error } = await supabase
+  /**
+   * Row count for a business's events. `scope: 'upcoming'` counts only active
+   * events that haven't ended — what the venue page's "Upcoming" stat means.
+   * (Recurring series whose own end date passed are still counted here; the
+   * server can't evaluate that in a PostgREST filter. Rare enough to accept
+   * rather than fetch every row just to count them.)
+   */
+  async getBusinessEventsCount(
+    businessId: string,
+    opts?: { scope?: 'upcoming' | 'all' }
+  ): Promise<number> {
+    let query = supabase
       .from('events')
       .select('*', { count: 'exact', head: true })
       .eq('business_id', businessId);
+
+    if (opts?.scope === 'upcoming') {
+      query = query
+        .eq('status', 'active')
+        .or(`end_datetime.gt.${new Date().toISOString()},is_recurring.eq.true`);
+    }
+
+    const { count, error } = await query;
 
     if (error) throw error;
     return count ?? 0;
@@ -208,6 +210,63 @@ export const eventsService = {
     if (error) throw error;
   },
 
+  async getEventLinks(eventId: string): Promise<EventLink[]> {
+    const { data, error } = await supabase
+      .from('event_links')
+      .select('*')
+      .eq('event_id', eventId)
+      .order('sort_order', { ascending: true });
+
+    if (error) throw error;
+    return (data || []) as EventLink[];
+  },
+
+  /**
+   * Replaces an event's links with `links` (order = sort_order). Rows are
+   * diffed rather than wiped and re-inserted so unchanged links keep their id
+   * and created_at. Returns false when some change failed, so the caller can
+   * warn without treating the whole save as broken.
+   */
+  async syncEventLinks(
+    eventId: string,
+    links: { id?: string; label: string | null; url: string }[]
+  ): Promise<boolean> {
+    const existing = await this.getEventLinks(eventId);
+    const keptIds = new Set(links.map((l) => l.id).filter(Boolean) as string[]);
+    let allOk = true;
+
+    for (const row of existing) {
+      if (keptIds.has(row.id)) continue;
+      try {
+        await this.deleteEventLink(row.id);
+      } catch {
+        allOk = false;
+      }
+    }
+
+    for (const [index, link] of links.entries()) {
+      const previous = link.id ? existing.find((row) => row.id === link.id) : undefined;
+      try {
+        if (!previous) {
+          await this.addEventLink(eventId, link.label, link.url, index);
+        } else if (
+          previous.label !== link.label ||
+          previous.url !== link.url ||
+          previous.sort_order !== index
+        ) {
+          const { error } = await supabase
+            .from('event_links')
+            .update({ label: link.label, url: link.url, sort_order: index })
+            .eq('id', link.id!);
+          if (error) throw error;
+        }
+      } catch {
+        allOk = false;
+      }
+    }
+    return allOk;
+  },
+
   async deleteEventLink(linkId: string): Promise<void> {
     const { error } = await supabase
       .from('event_links')
@@ -227,6 +286,15 @@ export const eventsService = {
       image_url: imageUrl,
       sort_order: sortOrder,
     });
+
+    if (error) throw error;
+  },
+
+  async updateEventPhotoOrder(photoId: string, sortOrder: number): Promise<void> {
+    const { error } = await supabase
+      .from('event_photos')
+      .update({ sort_order: sortOrder })
+      .eq('id', photoId);
 
     if (error) throw error;
   },
@@ -255,22 +323,25 @@ export const eventsService = {
       .substring(7)}.${fileExt}`;
     // Paths are prefixed with the uploader's user id: the storage policies
     // (20261030102000) scope INSERT/UPDATE/DELETE to the caller's own folder.
-    // This layout is also accepted by the pre-migration policies, so it is
-    // safe to ship before the migration is applied.
     const filePath = `${user.id}/${folder}/${fileName}`;
+    const contentType = file.type || 'image/jpeg';
 
-    // Read file as base64 using the legacy expo-file-system API
-    const base64 = await FileSystem.readAsStringAsync(file.uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-
-    // Convert base64 to ArrayBuffer for Supabase upload
-    const arrayBuffer = decode(base64);
+    // expo-file-system/legacy has no web implementation (readAsStringAsync is
+    // an unavailable stub there), so on web the picker's blob:/data: URI is
+    // fetched straight into a Blob. Native keeps the base64 → ArrayBuffer path.
+    const body: Blob | ArrayBuffer =
+      Platform.OS === 'web'
+        ? await (await fetch(file.uri)).blob()
+        : decode(
+            await FileSystem.readAsStringAsync(file.uri, {
+              encoding: FileSystem.EncodingType.Base64,
+            })
+          );
 
     const { data, error } = await supabase.storage
       .from('event-images')
-      .upload(filePath, arrayBuffer, {
-        contentType: file.type || 'image/jpeg',
+      .upload(filePath, body, {
+        contentType,
         upsert: false,
       });
 

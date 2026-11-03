@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Linking,
-  Dimensions,
+  useWindowDimensions,
   RefreshControl,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -20,6 +20,7 @@ import { profilesService } from '@/services/profiles';
 import { socialService } from '@/services/social';
 import { Profile, RankedEvent } from '@/types/database';
 import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { formatEventDate } from '@/utils/formatEventWhen';
 import { Avatar } from '@/components/Avatar';
 import { EventCardCarousel } from '@/components/EventCardCarousel';
 import { CategoryIcon } from '@/components/CategoryIcon';
@@ -28,19 +29,10 @@ import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { FacebookIcon, InstagramIcon } from '@/components/icons/BrandIcons';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const EVENT_CARD_WIDTH = SCREEN_WIDTH * 0.7;
+/** Share of the window each horizontal event card occupies. */
+const EVENT_CARD_WIDTH_RATIO = 0.7;
 
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  // en-US to match date formatting across the rest of the app.
-  return d.toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: d.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined,
-  });
-}
+const formatDate = (iso: string) => formatEventDate(iso);
 
 function buildInstagramUrl(handle: string): string {
   const clean = handle.replace(/^@/, '').trim();
@@ -57,6 +49,8 @@ function buildFacebookUrl(handle: string): string {
 }
 
 export default function UserProfile() {
+  const { width: windowWidth } = useWindowDimensions();
+  const EVENT_CARD_WIDTH = windowWidth * EVENT_CARD_WIDTH_RATIO;
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const { user, profile: currentUserProfile } = useAuth();
@@ -404,11 +398,11 @@ export default function UserProfile() {
               {upcomingEvents.map((event) => (
                 <TouchableOpacity
                   key={event.id}
-                  style={styles.eventCard}
+                  style={[styles.eventCard, { width: EVENT_CARD_WIDTH }]}
                   onPress={() => router.push(`/event/${event.id}` as any)}
                   activeOpacity={0.9}
                   accessibilityRole="button"
-                  accessibilityLabel={`${event.title}, ${formatDate(event.start_datetime)}`}
+                  accessibilityLabel={`${event.title}, ${formatDate(event.next_start_datetime || event.start_datetime)}`}
                 >
                   <EventCardCarousel
                     imageUrls={event.cover_image_url ? [event.cover_image_url] : []}
@@ -421,7 +415,7 @@ export default function UserProfile() {
                     <View style={styles.eventMeta}>
                       <EventmapCalendar size={14} color={Colors.text.secondary} />
                       <Text style={styles.eventMetaText}>
-                        {formatDate(event.start_datetime)}
+                        {formatDate(event.next_start_datetime || event.start_datetime)}
                       </Text>
                     </View>
                     <View style={[styles.categoryBadge, { backgroundColor: `${getCategoryIconColor(event.category_slug)}18` }]}>
@@ -546,7 +540,6 @@ const styles = StyleSheet.create({
     paddingRight: Spacing.xl,
   },
   eventCard: {
-    width: EVENT_CARD_WIDTH,
     borderRadius: BorderRadius.lg,
     overflow: 'hidden',
     backgroundColor: Colors.background.secondary,

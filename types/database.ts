@@ -108,9 +108,15 @@ export type Event = {
   cover_image_url: string | null;
   is_recurring?: boolean;
   recurrence_pattern?: RecurrencePattern | null;
+  /** 'active' | 'cancelled' (20261030106000). */
+  status?: EventStatus;
+  /** Going-capacity cap; null/undefined = unlimited (20261030108000). */
+  max_attendees?: number | null;
   created_at: string;
   updated_at: string;
 };
+
+export type EventStatus = 'active' | 'cancelled';
 
 export type EventLink = {
   id: string;
@@ -226,9 +232,11 @@ export type RankedEvent = Omit<Event, 'updated_at'> & {
   /** Set by get_user_saved_events. */
   has_ended?: boolean;
   saved_at?: string;
-  /** Viewer fields added by 20261030114000; undefined until that migration is applied. */
+  /** Viewer fields added by 20261030114000. */
   user_rsvp?: RsvpStatus | null;
   user_saved?: boolean;
+  /** Set by the attendance RPCs once 20261102100000 is applied. */
+  status?: EventStatus;
 };
 
 export type EventDetails = {
@@ -242,6 +250,11 @@ export type EventDetails = {
   user_rsvp: RsvpStatus | null;
   user_saved: boolean;
   user_following_business: boolean;
+  /**
+   * Present once migration 20261102160000 is applied. `position` is the
+   * viewer's 1-based place in line, or 0/null when not on the waitlist.
+   */
+  waitlist?: { count: number; position: number | null; notified_at: string | null };
 };
 
 export type { Database } from './supabase.generated';

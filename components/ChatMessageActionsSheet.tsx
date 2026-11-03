@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Copy, Flag, RotateCcw, ShieldOff, Trash2, Undo2, X } from 'lucide-react-native';
+import { Copy, Flag, RotateCcw, ShieldOff, Trash2, Undo2, UserMinus, UserRound, X } from 'lucide-react-native';
 import {
   CHAT_BLOCK_DURATIONS,
   CHAT_REPORT_REASONS,
@@ -23,6 +23,8 @@ export type ChatMessageActionsTarget = {
   deletedBySender: boolean;
   /** Viewer is the event host or an admin: may delete any message / block senders. */
   canModerate: boolean;
+  /** The viewer has globally blocked this sender. */
+  senderBlocked: boolean;
 };
 
 type Props = {
@@ -35,6 +37,12 @@ type Props = {
   onBlockUser: (target: ChatMessageActionsTarget, durationMinutes: number | null) => void;
   onRetry: (target: ChatMessageActionsTarget) => void;
   onDiscard: (target: ChatMessageActionsTarget) => void;
+  /** Open the sender's public profile. */
+  onViewProfile: (target: ChatMessageActionsTarget) => void;
+  /** Global (account-level) block, as opposed to the host's chat removal. */
+  onToggleGlobalBlock: (target: ChatMessageActionsTarget) => void;
+  /** Report the person rather than this one message. */
+  onReportUser: (target: ChatMessageActionsTarget) => void;
 };
 
 type ConfirmStep = 'delete' | 'report' | 'block' | null;
@@ -53,6 +61,9 @@ export function ChatMessageActionsSheet({
   onBlockUser,
   onRetry,
   onDiscard,
+  onViewProfile,
+  onToggleGlobalBlock,
+  onReportUser,
 }: Props) {
   const insets = useSafeAreaInsets();
   const [confirm, setConfirm] = useState<ConfirmStep>(null);
@@ -219,8 +230,33 @@ export function ChatMessageActionsSheet({
     return (
       <View>
         <ActionRow icon={<Copy size={20} color={Colors.text.primary} />} label="Copy text" onPress={() => run(onCopy)} />
+        {/* Previously the only way to reach a participant was to leave the
+            chat and find them in the attendee list. */}
+        {!target.mine ? (
+          <ActionRow
+            icon={<UserRound size={20} color={Colors.text.primary} />}
+            label={`View ${target.senderName}'s profile`}
+            onPress={() => run(onViewProfile)}
+          />
+        ) : null}
+        {!target.mine ? (
+          <ActionRow
+            icon={<UserMinus size={20} color={target.senderBlocked ? Colors.text.primary : Colors.error} />}
+            label={target.senderBlocked ? `Unblock ${target.senderName}` : `Block ${target.senderName}`}
+            destructive={!target.senderBlocked}
+            onPress={() => run(onToggleGlobalBlock)}
+          />
+        ) : null}
         {!target.mine ? (
           <ActionRow icon={<Flag size={20} color={Colors.error} />} label="Report message" destructive onPress={() => setConfirm('report')} />
+        ) : null}
+        {!target.mine ? (
+          <ActionRow
+            icon={<Flag size={20} color={Colors.error} />}
+            label={`Report ${target.senderName}`}
+            destructive
+            onPress={() => run(onReportUser)}
+          />
         ) : null}
         {(target.mine && !target.sending) || (!target.mine && target.canModerate) ? (
           <ActionRow

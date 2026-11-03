@@ -5,21 +5,19 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   Image,
   Linking,
-  Platform,
   FlatList,
-  Dimensions,
-  Share,
+  useWindowDimensions,
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
+import { useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/hooks/queryKeys';
 import { useApp } from '@/contexts/AppContext';
 import { eventsService } from '@/services/events';
-import { supabase } from '@/services/supabase';
 import { eventChatService } from '@/services/eventChat';
 import { socialService } from '@/services/social';
 import { reviewsService, type ReviewWithProfile } from '@/services/reviews';
@@ -58,22 +56,47 @@ import {
   MessageCircle,
   Bookmark,
   BookmarkCheck,
+  Ban,
 } from 'lucide-react-native';
+import {
+  classifyRsvpError,
+  rsvpErrorMessage,
+  rsvpErrorNeedsRefresh,
+} from '@/utils/rsvpErrors';
 import { EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView } from '@/components/GoogleMapView';
 import { DeferredMount } from '@/components/DeferredMount';
 import { complaintsService } from '@/services/complaints';
 import { getNextOccurrences, getRecurrenceLabel } from '@/utils/recurrence';
 import { hasEventEnded, isEventInProgress } from '@/utils/eventStatus';
-import { getEventWebUrl, getGoogleCalendarEventUrl, shareEventIcs } from '@/utils/eventShare';
+import { timeZoneLabel } from '@/utils/formatEventWhen';
+import {
+  buildRecurrenceRule,
+  getEventWebUrl,
+  getGoogleCalendarEventUrl,
+  shareEventIcs,
+  shareEventLink,
+} from '@/utils/eventShare';
+import * as Clipboard from 'expo-clipboard';
+import { ReportReasonSheet } from '@/components/ReportReasonSheet';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function EventDetail() {
   const insets = useSafeAreaInsets();
+  // Hero paging and the cover width must follow the live window: a
+  // module-level Dimensions.get() broke the pager on rotation and on web
+  // window resize.
+  const { width: windowWidth } = useWindowDimensions();
+  // Times render in the viewer's own zone; say which one.
+  const tzLabel = useMemo(() => timeZoneLabel(), []);
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user, isBanned } = useAuth();
   const { userBusiness } = useApp();
+  const queryClient = useQueryClient();
+  // Joined / Saved lists are React Query caches; tell them this event changed
+  // so they refetch instead of showing stale rows when the user goes back.
+  const invalidateLists = () =>
+    void queryClient.invalidateQueries({ queryKey: queryKeys.attendanceLists() });
   const [details, setDetails] = useState<EventDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -92,6 +115,8 @@ export default function EventDetail() {
   const hasLoadedRef = useRef(false);
   const [chatPreview, setChatPreview] = useState<EventChatMessageWithSender | null>(null);
   const [chatUnread, setChatUnread] = useState(0);
+  const [reportSheetOpen, setReportSheetOpen] = useState(false);
+  const [togglingFollow, setTogglingFollow] = useState(false);
 
   const isOwner = !!(userBusiness && details?.event.business_id === userBusiness.id);
   const chatIsOpen = details?.user_rsvp === 'going' && (details?.rsvp_count ?? 0) >= 2;
@@ -196,15 +221,15 @@ export default function EventDetail() {
   );
 
   // Keep the attendee count (and the chat-unlock state derived from it) fresh
-  // while the screen is open. The 20s focus-scoped poll is the PRIMARY
-  // mechanism today: `rsvps` is NOT in the supabase_realtime publication
-  // (only event_chat_messages is — 20260301000000), so the postgres_changes
-  // subscription below subscribes fine but never receives events pre-publication.
+  // while the screen is open, via a 20s focus-scoped poll.
   //
-  // Upgrade path (zero client work needed): once a migration runs
-  // `ALTER PUBLICATION supabase_realtime ADD TABLE rsvps`, the subscription
-  // starts firing and attendance updates become near-instant (1s debounce);
-  // the poll then only serves as a fallback. Tracked in docs/ISSUES.md.
+  // A postgres_changes subscription on `rsvps` can't replace this: realtime
+  // applies the subscriber's RLS and the only rsvps SELECT policy is
+  // `auth.uid() = user_id`, so it would only ever report the viewer's own
+  // RSVP. The prepared migration 20261102130000 adds a public
+  // `event_rsvp_counts` table (maintained by trigger, in the publication);
+  // once applied, subscribe to it here with filter `event_id=eq.<id>` and
+  // call refetchCount on each change, keeping the poll as fallback.
   useFocusEffect(
     useCallback(() => {
       if (!id) return;
@@ -213,38 +238,24 @@ export default function EventDetail() {
           const data = await eventsService.getEventDetails(id);
           if (!data) return;
           setDetails((d) => {
-            if (!d || d.rsvp_count === data.rsvp_count) return d;
-            // Merge only the count: the user's own RSVP state may have an
-            // optimistic local update in flight.
-            return { ...d, rsvp_count: data.rsvp_count };
+            if (!d) return d;
+            const nextStatus = data.event.status ?? 'active';
+            const prevStatus = d.event.status ?? 'active';
+            if (d.rsvp_count === data.rsvp_count && prevStatus === nextStatus) return d;
+            // Merge only the count and lifecycle status: the user's own RSVP
+            // state may have an optimistic local update in flight.
+            return {
+              ...d,
+              rsvp_count: data.rsvp_count,
+              event: { ...d.event, status: nextStatus },
+            };
           });
         } catch {
-          // Transient failure; next tick / next realtime event retries.
+          // Transient failure; the next tick retries.
         }
       };
       const timer = setInterval(refetchCount, 20000);
-      // Realtime-ready subscription: coalesce bursts of RSVP changes into one
-      // refetch at most every second.
-      let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-      const channel = supabase
-        .channel(`event-rsvps:${id}`)
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'rsvps', filter: `event_id=eq.${id}` },
-          () => {
-            if (debounceTimer) return;
-            debounceTimer = setTimeout(() => {
-              debounceTimer = null;
-              void refetchCount();
-            }, 1000);
-          }
-        )
-        .subscribe();
-      return () => {
-        clearInterval(timer);
-        if (debounceTimer) clearTimeout(debounceTimer);
-        supabase.removeChannel(channel);
-      };
+      return () => clearInterval(timer);
     }, [id])
   );
 
@@ -297,13 +308,19 @@ export default function EventDetail() {
       notify.error('Your account has been suspended. Please contact support.');
       return;
     }
+    if (details?.event.status === 'cancelled') {
+      notify.error('This event was cancelled, so it can no longer be joined.');
+      return;
+    }
     if (details && hasEventEnded(details.event)) {
       notify.error('This event is over, so it can no longer be joined.');
       return;
     }
+    if (saving) return;
     setSaving(true);
     try {
       await socialService.createOrUpdateRsvp(id, status);
+      invalidateLists();
       setDetails((d) =>
         d
           ? {
@@ -324,10 +341,19 @@ export default function EventDetail() {
       void loadAttendees();
       setAttendeesRefresh((n) => n + 1);
     } catch (err: unknown) {
-      if (err instanceof Error && err.message === 'EVENT_FULL') {
-        notify.error('This event has reached its maximum number of attendees.');
-      } else {
-        notify.error('Failed to update RSVP');
+      const code = classifyRsvpError(err);
+      notify.error(rsvpErrorMessage(code));
+      if (rsvpErrorNeedsRefresh(code)) {
+        // The event changed under the user (filled up, cancelled, ended or
+        // deleted): reload so the screen reflects its real state instead of
+        // keeping a stale Join button.
+        try {
+          const fresh = await eventsService.getEventDetails(id);
+          setDetails(fresh);
+          if (fresh) void loadAttendees();
+        } catch {
+          // Keep what we have; the focus refetch will retry.
+        }
       }
     } finally {
       setSaving(false);
@@ -339,6 +365,7 @@ export default function EventDetail() {
     setSaving(true);
     try {
       await socialService.deleteRsvp(id);
+      invalidateLists();
       setDetails((d) =>
         d
           ? {
@@ -353,6 +380,74 @@ export default function EventDetail() {
       setAttendeesRefresh((n) => n + 1);
     } catch {
       notify.error('Failed to remove RSVP');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleJoinWaitlist = async () => {
+    if (!user || !id || saving) return;
+    setSaving(true);
+    try {
+      const position = await socialService.joinWaitlist(id);
+      setDetails((d) =>
+        d
+          ? {
+              ...d,
+              waitlist: {
+                count: (d.waitlist?.count ?? 0) + (d.waitlist?.position ? 0 : 1),
+                position,
+                notified_at: d.waitlist?.notified_at ?? null,
+              },
+            }
+          : d
+      );
+      notify.success(`You're #${position} on the waitlist. We'll tell you when a spot opens.`);
+    } catch (err: unknown) {
+      // The service wraps RPC failures in RsvpError, so classify by code —
+      // the raw SQL hint only survives in err.cause.
+      const code = classifyRsvpError(err);
+      if (code === 'SPOT_AVAILABLE') {
+        // Someone left between render and tap: just join.
+        notify.success('A spot is free — joining you now.');
+        setSaving(false);
+        await handleRsvp('going');
+        return;
+      }
+      notify.error(rsvpErrorMessage(code));
+      if (rsvpErrorNeedsRefresh(code)) {
+        try {
+          const fresh = await eventsService.getEventDetails(id);
+          setDetails(fresh);
+        } catch {
+          // Focus refetch will retry.
+        }
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLeaveWaitlist = async () => {
+    if (!user || !id || saving) return;
+    setSaving(true);
+    try {
+      await socialService.leaveWaitlist(id);
+      setDetails((d) =>
+        d && d.waitlist
+          ? {
+              ...d,
+              waitlist: {
+                count: Math.max(0, d.waitlist.count - 1),
+                position: null,
+                notified_at: null,
+              },
+            }
+          : d
+      );
+      notify.success('Removed from the waitlist.');
+    } catch {
+      notify.error('Could not leave the waitlist. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -383,6 +478,7 @@ export default function EventDetail() {
     try {
       if (wasSaved) await socialService.unsaveEvent(id);
       else await socialService.saveEvent(id);
+      invalidateLists();
     } catch {
       setDetails((d) =>
         d ? { ...d, user_saved: wasSaved, save_count: Math.max(0, d.save_count + (wasSaved ? 1 : -1)) } : d
@@ -404,9 +500,11 @@ export default function EventDetail() {
       destructive: true,
       onConfirm: async () => {
         try {
-          // Pre-apply (20261030106000) this falls back to a hard delete.
           await eventsService.cancelEvent(id);
-          router.back();
+          // Stay on the page: the owner sees the cancelled state immediately
+          // (banner, actions hidden) instead of being bounced to the list.
+          setDetails((d) => (d ? { ...d, event: { ...d.event, status: 'cancelled' } } : d));
+          notify.success('Event cancelled. Attendees have been notified.');
         } catch {
           notify.error('Failed to cancel event');
         }
@@ -416,39 +514,83 @@ export default function EventDetail() {
 
   const handleShareEvent = async () => {
     if (!id || !details) return;
-    const url = getEventWebUrl(id);
-    const title = details.event.title;
     try {
-      await Share.share(
-        Platform.OS === 'ios'
-          ? { title, url }
-          : { title, message: `${title}\n${url}` }
-      );
+      const outcome = await shareEventLink({
+        title: details.event.title,
+        url: getEventWebUrl(id),
+        copyToClipboard: (text) => Clipboard.setStringAsync(text).then(() => {}),
+      });
+      // Desktop browsers mostly lack navigator.share, so the link is copied
+      // instead — say so, otherwise the button looks broken.
+      if (outcome === 'copied') notify.success('Event link copied to clipboard.');
     } catch {
-      // dismissed
+      notify.error('Could not share this event.');
     }
+  };
+
+  const handleToggleFollow = async () => {
+    if (!user || !details || togglingFollow) return;
+    const wasFollowing = details.user_following_business;
+    setTogglingFollow(true);
+    setDetails((d) => (d ? { ...d, user_following_business: !wasFollowing } : d));
+    try {
+      if (wasFollowing) await socialService.unfollowBusiness(details.business.id);
+      else await socialService.followBusiness(details.business.id);
+    } catch {
+      setDetails((d) => (d ? { ...d, user_following_business: wasFollowing } : d));
+      notify.error(wasFollowing ? 'Could not unfollow this organizer.' : 'Could not follow this organizer.');
+    } finally {
+      setTogglingFollow(false);
+    }
+  };
+
+  /**
+   * Calendar exports use the occurrence the header is showing (a weekly event
+   * that started months ago would otherwise export a past date) and carry an
+   * RRULE so repeating events import as a series.
+   */
+  const calendarTimes = () => {
+    if (!details) return null;
+    const start = displayStartIso;
+    const durationMs =
+      new Date(details.event.end_datetime).getTime() -
+      new Date(details.event.start_datetime).getTime();
+    const end = new Date(
+      new Date(start).getTime() + (durationMs > 0 ? durationMs : 60 * 60 * 1000)
+    ).toISOString();
+    return {
+      start,
+      end,
+      recurrence: buildRecurrenceRule(details.event.recurrence_pattern, details.event.is_recurring),
+    };
   };
 
   const handleOpenCalendar = () => {
     if (!details) return;
+    const times = calendarTimes();
+    if (!times) return;
     const url = getGoogleCalendarEventUrl({
       title: details.event.title,
-      startIso: details.event.start_datetime,
-      endIso: details.event.end_datetime,
+      startIso: times.start,
+      endIso: times.end,
       address: details.event.address,
       details: `${getEventWebUrl(details.event.id)}\n\nHosted by ${details.business.name}`,
+      recurrence: times.recurrence,
     });
-    Linking.openURL(url);
+    void Linking.openURL(url).catch(() => notify.error('Could not open Google Calendar.'));
   };
 
   const handleShareIcs = async () => {
     if (!details) return;
+    const times = calendarTimes();
+    if (!times) return;
     try {
       await shareEventIcs({
         id: details.event.id,
         title: details.event.title,
-        startIso: details.event.start_datetime,
-        endIso: details.event.end_datetime,
+        startIso: times.start,
+        endIso: times.end,
+        recurrence: times.recurrence,
         address: details.event.address,
         description: [
           details.event.description?.trim(),
@@ -469,53 +611,17 @@ export default function EventDetail() {
       notify.success(
         'Report received. We typically review reports within about 48 hours.'
       );
-    } catch {
+    } catch (err: unknown) {
+      // Unique violation = already reported (once the dedupe index exists).
+      if ((err as { code?: string })?.code === '23505') {
+        notify.success("You've already reported this event. It's in the queue.");
+        return;
+      }
       notify.error('Failed to submit report. Please try again.');
     }
   };
 
-  const handleReportEvent = () => {
-    if (Platform.OS === 'web') {
-      // Alert.alert with buttons is a no-op in browsers. notifyConfirm only
-      // supports two buttons, so chain the two most important reasons:
-      // confirm picks the reason, cancel moves to the next question.
-      notifyConfirm({
-        title: 'Report this event',
-        message: 'Is this event spam or misleading?',
-        confirmLabel: 'Report as spam',
-        onConfirm: () => void submitEventReport('Spam or misleading'),
-        onCancel: () => {
-          notifyConfirm({
-            title: 'Report this event',
-            message: 'Is this a safety concern?',
-            confirmLabel: 'Report safety concern',
-            cancelLabel: 'Never mind',
-            destructive: true,
-            onConfirm: () => void submitEventReport('Safety concern'),
-          });
-        },
-      });
-      return;
-    }
-    // Native: Alert.alert supports the full 4-option picker that notifyConfirm
-    // (2 buttons) cannot express.
-    Alert.alert('Report this event', 'What best describes the issue?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Spam or misleading',
-        onPress: () => void submitEventReport('Spam or misleading'),
-      },
-      {
-        text: 'Safety concern',
-        style: 'destructive',
-        onPress: () => void submitEventReport('Safety concern'),
-      },
-      {
-        text: 'Other',
-        onPress: () => void submitEventReport('Other'),
-      },
-    ]);
-  };
+  const handleReportEvent = () => setReportSheetOpen(true);
 
   const formatDate = (dateString: string) =>
     new Date(dateString).toLocaleDateString('en-US', {
@@ -632,17 +738,21 @@ export default function EventDetail() {
   const venueLat = Number.isFinite(event.lat) ? event.lat : business.lat;
   const venueLng = Number.isFinite(event.lng) ? event.lng : business.lng;
   const canOpenEventChat = details.user_rsvp === 'going' && details.rsvp_count >= 2;
-  const shouldShowEventChatPrompt = details.user_rsvp === 'going';
   const hasJoinedEvent = details.user_rsvp === 'going';
   const eventEnded = hasEventEnded(event);
-  const eventLive = isEventInProgress(event);
-  // Tolerant capacity check: events.max_attendees only exists once
-  // 20261030108000 is applied. Pre-apply the field is absent (null here), so
-  // the UI is identical to today.
-  const maxAttendees =
-    (event as { max_attendees?: number | null }).max_attendees ?? null;
+  const eventCancelled = event.status === 'cancelled';
+  // "Closed" = no RSVP changes possible, for whichever reason.
+  const eventClosed = eventEnded || eventCancelled;
+  const eventLive = !eventCancelled && isEventInProgress(event);
+  const maxAttendees = event.max_attendees ?? null;
   const eventFull =
     maxAttendees != null && details.rsvp_count >= maxAttendees && !hasJoinedEvent;
+  // Waitlist exists only once migration 20261102160000 is applied (the RPC
+  // then returns a `waitlist` key); before that the full state stays a plain
+  // disabled button.
+  const waitlist = details.waitlist;
+  const onWaitlist = !!waitlist && (waitlist.position ?? 0) > 0;
+  const canWaitlist = !!user && !!waitlist && eventFull && !eventClosed;
   // Recurring events that already started show their next occurrence in the
   // header; everything else shows the scheduled start.
   const displayStartIso = (() => {
@@ -710,7 +820,7 @@ export default function EventDetail() {
               pagingEnabled
               showsHorizontalScrollIndicator={false}
               onMomentumScrollEnd={(e) => {
-                const page = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                const page = Math.round(e.nativeEvent.contentOffset.x / windowWidth);
                 setPhotoIndex(Math.max(0, Math.min(page, allPhotoUrls.length - 1)));
               }}
               keyExtractor={(_, i) => `photo-${i}`}
@@ -726,7 +836,7 @@ export default function EventDetail() {
                 >
                   <Image
                     source={{ uri: item }}
-                    style={styles.coverImage}
+                    style={[styles.coverImage, { width: windowWidth }]}
                     resizeMode="cover"
                   />
                 </TouchableOpacity>
@@ -768,6 +878,21 @@ export default function EventDetail() {
         />
 
         <View style={styles.contentCard}>
+          {eventCancelled ? (
+            <View style={styles.cancelledNotice} accessibilityRole="alert">
+              <Ban size={18} color={Colors.error} />
+              <View style={styles.cancelledNoticeBody}>
+                <Text style={styles.cancelledNoticeTitle}>This event was cancelled</Text>
+                <Text style={styles.cancelledNoticeText}>
+                  {isOwner
+                    ? 'You cancelled this event. Everyone who was going or interested has been notified.'
+                    : hasJoinedEvent || details.user_rsvp === 'interested'
+                      ? 'The organizer cancelled it. Your RSVP no longer applies.'
+                      : 'The organizer cancelled it, so it can no longer be joined.'}
+                </Text>
+              </View>
+            </View>
+          ) : null}
           <View style={styles.quickInfoSection}>
             <View style={styles.metaRow}>
               <View style={styles.metaIconWrap}>
@@ -779,7 +904,13 @@ export default function EventDetail() {
                 </Text>
                 <Text style={styles.metaValue}>
                   {formatDate(displayStartIso)}
-                  {eventLive ? '  ·  Happening now' : eventEnded ? '  ·  Ended' : ''}
+                  {eventCancelled
+                    ? '  ·  Cancelled'
+                    : eventLive
+                      ? '  ·  Happening now'
+                      : eventEnded
+                        ? '  ·  Ended'
+                        : ''}
                 </Text>
               </View>
             </View>
@@ -789,7 +920,10 @@ export default function EventDetail() {
               </View>
               <View style={styles.metaBody}>
                 <Text style={styles.metaLabel}>Time</Text>
-                <Text style={styles.metaValue}>{formatTimeRange(displayStartIso, event.end_datetime, event.start_datetime)}</Text>
+                <Text style={styles.metaValue}>
+                  {formatTimeRange(displayStartIso, event.end_datetime, event.start_datetime)}
+                  {tzLabel ? ` (${tzLabel})` : ''}
+                </Text>
               </View>
             </View>
             {event.address && (
@@ -805,6 +939,7 @@ export default function EventDetail() {
             )}
           </View>
 
+          {!eventCancelled ? (
           <View style={styles.calendarRow}>
             <View style={styles.metaIconWrap}>
               <CalendarPlus size={18} color={Colors.primary} />
@@ -835,6 +970,7 @@ export default function EventDetail() {
               </View>
             </View>
           </View>
+          ) : null}
 
           <TouchableOpacity
             style={styles.attendeesSection}
@@ -877,7 +1013,10 @@ export default function EventDetail() {
             </View>
           </TouchableOpacity>
 
-          {shouldShowEventChatPrompt && (
+          {/* Shown to every signed-in attendee, not just those already going:
+              the chat is a reason to join, so it shouldn't be invisible until
+              after you RSVP. */}
+          {user && !isOwner && !eventCancelled && !eventEnded && (
             <TouchableOpacity
               style={[styles.chatPromptRow, !canOpenEventChat && styles.chatPromptRowDisabled]}
               onPress={() => {
@@ -889,7 +1028,11 @@ export default function EventDetail() {
               disabled={!canOpenEventChat}
               accessibilityRole="button"
               accessibilityLabel={
-                canOpenEventChat ? 'Open event chat' : 'Event chat, unlocks when 2 people are going'
+                canOpenEventChat
+                  ? 'Open event chat'
+                  : hasJoinedEvent
+                    ? 'Event chat, unlocks when 2 people are going'
+                    : 'Event chat, join the event to unlock'
               }
             >
               <View style={styles.chatIconWrap}>
@@ -917,7 +1060,9 @@ export default function EventDetail() {
                     ? chatPreview
                       ? `${chatPreview.sender?.name ?? 'Someone'}: ${chatPreview.body}`
                       : 'Chat with everyone going'
-                    : 'Unlocks when 2 people are going'}
+                    : hasJoinedEvent
+                      ? 'Unlocks when 2 people are going'
+                      : 'Join the event to unlock the chat'}
                 </Text>
               </View>
               <ChevronRight
@@ -966,7 +1111,35 @@ export default function EventDetail() {
               </Text>
               <Text style={styles.hostBusinessHint}>View business profile</Text>
             </View>
-            <ChevronRight size={22} color={Colors.text.tertiary} />
+            {/* get_event_details already returns user_following_business; this
+                saves a trip to the venue page just to follow. */}
+            {user && !isOwner ? (
+              <TouchableOpacity
+                style={[styles.followChip, details.user_following_business && styles.followChipActive]}
+                onPress={handleToggleFollow}
+                disabled={togglingFollow}
+                activeOpacity={0.8}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: details.user_following_business }}
+                accessibilityLabel={
+                  details.user_following_business
+                    ? `Unfollow ${business.name}`
+                    : `Follow ${business.name}`
+                }
+              >
+                <Text
+                  style={[
+                    styles.followChipText,
+                    details.user_following_business && styles.followChipTextActive,
+                  ]}
+                >
+                  {details.user_following_business ? 'Following' : 'Follow'}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <ChevronRight size={22} color={Colors.text.tertiary} />
+            )}
           </TouchableOpacity>
 
           <View style={styles.descriptionSection}>
@@ -1058,7 +1231,7 @@ export default function EventDetail() {
             </View>
           )}
 
-          {user && !isOwner && eventEnded && (
+          {user && !isOwner && eventEnded && !eventCancelled && (
             <View style={styles.endedNotice}>
               <Clock3 size={16} color={Colors.text.secondary} />
               <Text style={styles.endedNoticeText}>
@@ -1081,22 +1254,26 @@ export default function EventDetail() {
                 <TrendingUp size={20} color={Colors.primary} />
                 <Text style={styles.insightsBannerText}>Reach, saves & RSVPs</Text>
               </TouchableOpacity>
-              <View style={styles.ownerActions}>
-                <Button
-                  label="Edit Event"
-                  variant="secondary"
-                  onPress={() => router.push(`/business/edit-event/${event.id}` as any)}
-                  icon={<Pencil size={18} color={Colors.primary} />}
-                  style={styles.ownerActionBtn}
-                />
-                <Button
-                  label="Cancel Event"
-                  variant="destructive"
-                  onPress={handleCancelEvent}
-                  icon={<Trash2 size={18} color="#FFFFFF" />}
-                  style={styles.ownerActionBtn}
-                />
-              </View>
+              {/* A cancelled event is read-only for the host too: no Edit or
+                  second Cancel. Insights above stay available. */}
+              {!eventCancelled ? (
+                <View style={styles.ownerActions}>
+                  <Button
+                    label="Edit Event"
+                    variant="secondary"
+                    onPress={() => router.push(`/business/edit-event/${event.id}` as any)}
+                    icon={<Pencil size={18} color={Colors.primary} />}
+                    style={styles.ownerActionBtn}
+                  />
+                  <Button
+                    label="Cancel Event"
+                    variant="destructive"
+                    onPress={handleCancelEvent}
+                    icon={<Trash2 size={18} color="#FFFFFF" />}
+                    style={styles.ownerActionBtn}
+                  />
+                </View>
+              ) : null}
             </>
           )}
 
@@ -1172,8 +1349,12 @@ export default function EventDetail() {
                               notify.success(
                                 'Your report has been submitted. We typically review within about 48 hours.'
                               );
-                            } catch {
-                              notify.error('Failed to submit report.');
+                            } catch (err: unknown) {
+                              if ((err as { code?: string })?.code === '23505') {
+                                notify.success("You've already reported this. It's in the queue.");
+                              } else {
+                                notify.error('Failed to submit report.');
+                              }
                             }
                           },
                         });
@@ -1200,11 +1381,12 @@ export default function EventDetail() {
               style={[
                 styles.joinButton,
                 hasJoinedEvent && styles.joinButtonJoined,
-                (eventEnded || eventFull) && styles.joinButtonEnded,
+                (eventClosed || (eventFull && !canWaitlist)) && styles.joinButtonEnded,
+                canWaitlist && onWaitlist && styles.joinButtonWaitlisted,
               ]}
               onPress={() => {
                 if (!user) {
-                  if (eventEnded || eventFull) return;
+                  if (eventClosed || eventFull) return;
                   // Send signed-out users to login with a return path to this event.
                   router.push({
                     pathname: '/(auth)/login',
@@ -1212,29 +1394,47 @@ export default function EventDetail() {
                   });
                   return;
                 }
-                if (saving || hasJoinedEvent || eventEnded || eventFull) return;
+                if (canWaitlist) {
+                  if (onWaitlist) handleLeaveWaitlist();
+                  else handleJoinWaitlist();
+                  return;
+                }
+                if (saving || hasJoinedEvent || eventClosed || eventFull) return;
                 handleRsvp('going');
               }}
               disabled={
                 user
-                  ? saving || hasJoinedEvent || eventEnded || eventFull
-                  : eventEnded || eventFull
+                  ? saving || hasJoinedEvent || eventClosed || (eventFull && !canWaitlist)
+                  : eventClosed || eventFull
               }
               activeOpacity={0.9}
               accessibilityRole="button"
               accessibilityState={{
                 disabled: user
-                  ? saving || hasJoinedEvent || eventEnded || eventFull
-                  : eventEnded || eventFull,
+                  ? saving || hasJoinedEvent || eventClosed || (eventFull && !canWaitlist)
+                  : eventClosed || eventFull,
               }}
+              accessibilityLabel={
+                canWaitlist
+                  ? onWaitlist
+                    ? `You're number ${waitlist?.position} on the waitlist. Leave waitlist`
+                    : 'Event full. Join the waitlist'
+                  : undefined
+              }
             >
               <Text style={styles.joinButtonText}>
-                {eventEnded
+                {eventCancelled
+                  ? 'Event cancelled'
+                  : eventEnded
                   ? hasJoinedEvent
                     ? 'You attended'
                     : 'Event ended'
                   : eventFull
-                    ? 'Event full'
+                    ? canWaitlist
+                      ? onWaitlist
+                        ? `On waitlist · #${waitlist?.position} · tap to leave`
+                        : 'Event full · Join waitlist'
+                      : 'Event full'
                     : !user
                       ? 'Sign in to join'
                       : hasJoinedEvent
@@ -1243,7 +1443,7 @@ export default function EventDetail() {
                           ? `Join Event (${details.rsvp_count} / ${maxAttendees})`
                           : 'Join Event'}
               </Text>
-              {eventEnded || eventFull ? null : hasJoinedEvent ? (
+              {eventClosed || (eventFull && !canWaitlist) ? null : hasJoinedEvent ? (
                 <Text style={styles.joinArrow}>✓</Text>
               ) : (
                 <ArrowRight size={22} color={Colors.white} />
@@ -1252,7 +1452,7 @@ export default function EventDetail() {
 
             {/* One secondary control replaces the old Going / Interested / Remove row:
                 star = mark or unmark interest, "Leave" = drop a "going" RSVP. */}
-            {user && !eventEnded ? (
+            {user && !eventClosed ? (
               hasJoinedEvent ? (
                 <TouchableOpacity
                   style={styles.secondaryActionButton}
@@ -1289,11 +1489,15 @@ export default function EventDetail() {
               )
             ) : null}
           </View>
-          {user && !eventEnded && !hasJoinedEvent ? (
+          {user && !eventClosed && !hasJoinedEvent ? (
             <Text style={styles.bottomActionHint}>
-              {details.user_rsvp === 'interested'
-                ? 'Marked as interested. Join to unlock the event chat.'
-                : 'Not sure yet? Tap the star to keep an eye on it.'}
+              {canWaitlist
+                ? onWaitlist
+                  ? `We'll notify you the moment a spot opens. ${waitlist?.count ?? 0} waiting.`
+                  : `${waitlist?.count ?? 0} ${waitlist?.count === 1 ? 'person is' : 'people are'} waiting. You'll be notified when a spot opens.`
+                : details.user_rsvp === 'interested'
+                  ? 'Marked as interested. Join to unlock the event chat.'
+                  : 'Not sure yet? Tap the star to keep an eye on it.'}
             </Text>
           ) : null}
         </View>
@@ -1301,6 +1505,12 @@ export default function EventDetail() {
       {id && (
         <AttendeesBottomSheet ref={attendeesSheetRef} eventId={id} refreshToken={attendeesRefresh} />
       )}
+      <ReportReasonSheet
+        visible={reportSheetOpen}
+        title="Report this event"
+        onClose={() => setReportSheetOpen(false)}
+        onSubmit={(reason) => void submitEventReport(reason)}
+      />
     </View>
   );
 }
@@ -1411,7 +1621,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   coverImage: {
-    width: SCREEN_WIDTH,
     height: 480,
     backgroundColor: Colors.background.secondary,
   },
@@ -1833,6 +2042,28 @@ const styles = StyleSheet.create({
   ownerActionBtn: {
     flex: 1,
   },
+  followChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    minHeight: 36,
+    justifyContent: 'center',
+    borderRadius: BorderRadius.round,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primarySoft,
+  },
+  followChipActive: {
+    backgroundColor: Colors.primary,
+  },
+  followChipText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+  },
+  followChipTextActive: {
+    color: Colors.white,
+  },
   reportEventRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1946,6 +2177,37 @@ const styles = StyleSheet.create({
   },
   joinButtonEnded: {
     backgroundColor: Colors.text.tertiary,
+  },
+  joinButtonWaitlisted: {
+    backgroundColor: Colors.warningText,
+  },
+  cancelledNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    marginBottom: Spacing.lg,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    borderColor: alpha(Colors.error, 0.25),
+    backgroundColor: Colors.errorSoft,
+  },
+  cancelledNoticeBody: {
+    flex: 1,
+    gap: 2,
+  },
+  cancelledNoticeTitle: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.error,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
+  },
+  cancelledNoticeText: {
+    fontSize: Typography.sizes.sm,
+    lineHeight: 20,
+    color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.medium,
   },
   endedNotice: {
     flexDirection: 'row',

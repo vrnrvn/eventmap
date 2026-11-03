@@ -20,6 +20,9 @@ import {
 } from '@/utils/notify';
 
 const TOAST_DURATION_MS = 3000;
+// Actionable toasts stay longer: the user has to read, decide and reach the
+// button before it disappears.
+const TOAST_ACTION_DURATION_MS = 7000;
 
 function ToastItem({ toast, onDone }: { toast: ToastPayload; onDone: (id: number) => void }) {
   const opacity = useRef(new Animated.Value(0)).current;
@@ -36,9 +39,12 @@ function ToastItem({ toast, onDone }: { toast: ToastPayload; onDone: (id: number
 
   useEffect(() => {
     Animated.timing(opacity, { toValue: 1, duration: 180, useNativeDriver: true }).start();
-    const timer = setTimeout(dismiss, TOAST_DURATION_MS);
+    const timer = setTimeout(
+      dismiss,
+      toast.action ? TOAST_ACTION_DURATION_MS : TOAST_DURATION_MS
+    );
     return () => clearTimeout(timer);
-  }, [opacity, dismiss]);
+  }, [opacity, dismiss, toast.action]);
 
   const isError = toast.kind === 'error';
   return (
@@ -60,6 +66,20 @@ function ToastItem({ toast, onDone }: { toast: ToastPayload; onDone: (id: number
         <Text style={styles.toastText} numberOfLines={3}>
           {toast.message}
         </Text>
+        {toast.action ? (
+          <TouchableOpacity
+            style={styles.toastAction}
+            onPress={() => {
+              toast.action?.onPress();
+              dismiss();
+            }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel={toast.action.label}
+          >
+            <Text style={styles.toastActionText}>{toast.action.label}</Text>
+          </TouchableOpacity>
+        ) : null}
       </Pressable>
     </Animated.View>
   );
@@ -162,6 +182,19 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'android' ? { elevation: 24 } : null),
     gap: Spacing.sm,
     paddingHorizontal: Spacing.lg,
+  },
+  toastAction: {
+    minHeight: 32,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.sm,
+    marginLeft: Spacing.xs,
+    borderRadius: BorderRadius.round,
+  },
+  toastActionText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.bold,
+    fontWeight: Typography.weights.bold,
   },
   toast: {
     flexDirection: 'row',

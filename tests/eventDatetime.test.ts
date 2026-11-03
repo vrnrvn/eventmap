@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_DURATION_MS, withShiftedEnd } from '@/utils/eventDatetime';
+import {
+  DEFAULT_DURATION_MS,
+  fromDateTimeLocalValue,
+  toDateTimeLocalValue,
+  withShiftedEnd,
+} from '@/utils/eventDatetime';
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -126,5 +131,32 @@ describe('withShiftedEnd', () => {
     expect(input.startDatetime.getTime()).toBe(start.getTime());
     expect(input.endDatetime.getTime()).toBe(end.getTime());
     expect(next).not.toBe(input);
+  });
+});
+
+describe('datetime-local round trip', () => {
+  it('formats a local Date as YYYY-MM-DDTHH:mm with zero padding', () => {
+    const d = new Date(2026, 0, 5, 9, 7, 30); // Jan 5 2026 09:07:30 local
+    expect(toDateTimeLocalValue(d)).toBe('2026-01-05T09:07');
+  });
+
+  it('parses the formatted value back to the same minute in local time', () => {
+    const d = new Date(2026, 10, 23, 18, 45, 0);
+    const parsed = fromDateTimeLocalValue(toDateTimeLocalValue(d));
+    expect(parsed).not.toBeNull();
+    expect(parsed!.getTime()).toBe(d.getTime());
+  });
+
+  it('accepts an optional seconds component', () => {
+    const parsed = fromDateTimeLocalValue('2026-03-01T00:00:15');
+    expect(parsed).toEqual(new Date(2026, 2, 1, 0, 0, 15, 0));
+  });
+
+  it('returns null for empty, partial, or non-matching input', () => {
+    expect(fromDateTimeLocalValue('')).toBeNull();
+    expect(fromDateTimeLocalValue('2026-03-01')).toBeNull();
+    expect(fromDateTimeLocalValue('2026-03-01T25:00')).not.toBeNull(); // JS rolls over; still a Date
+    expect(fromDateTimeLocalValue('not a date')).toBeNull();
+    expect(fromDateTimeLocalValue('2026-03-01 10:00')).toBeNull();
   });
 });

@@ -19,9 +19,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { X } from 'lucide-react-native';
 import { EventmapSearch, EventmapMapPin } from '@/components/icons/EventmapIcons';
-import { useSearch, type SearchLocation } from '@/contexts/SearchContext';
+import { useSearch, type SearchDateRange, type SearchLocation } from '@/contexts/SearchContext';
 import { geocodingService } from '@/services/geocoding';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import {
+  DATE_PRESETS,
+  matchDatePreset,
+  type DatePresetKey,
+} from '@/utils/datePresets';
 import { GooglePlacesAutocomplete, parseDescription } from './GooglePlacesAutocomplete';
 import type { AutocompletePrediction } from '@/services/places';
 import { RegionGrid, type RegionItem } from './RegionGrid';
@@ -30,24 +35,16 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-function startOfDay(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-function endOfDay(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(23, 59, 59, 999);
-  return x;
-}
-
 export type SearchStep = 'where' | 'when';
 
 type SearchOverlayProps = {
   visible: boolean;
   onClose: () => void;
-  onSearch: (location: SearchLocation | null, keyword: string) => void;
+  onSearch: (
+    location: SearchLocation | null,
+    keyword: string,
+    dateRange: SearchDateRange | null
+  ) => void;
   userLocation: { lat: number; lng: number } | null;
   initialKeyword?: string;
 };
@@ -60,16 +57,24 @@ export function SearchOverlay({
   initialKeyword = '',
 }: SearchOverlayProps) {
   const insets = useSafeAreaInsets();
-  const { location, setLocation, clearAll, hasSelection, setDateRange, dateRange } = useSearch();
+  const { location, setLocation, dateRange } = useSearch();
   const [currentStep, setCurrentStep] = useState<SearchStep>('where');
   const [whereInput, setWhereInput] = useState('');
   const [keyword, setKeyword] = useState(initialKeyword);
   const [suggestions, setSuggestions] = useState<AutocompletePrediction[]>([]);
+  // Dates are staged locally and committed on Search. Writing straight to
+  // the context made every chip tap refetch Discover behind the modal.
+  const [draftRange, setDraftRange] = useState<SearchDateRange | null>(dateRange);
 
-  // Re-seed the keyword field from the active filter whenever the overlay opens.
+  // Re-seed the fields from the active filters whenever the overlay opens.
   useEffect(() => {
-    if (visible) setKeyword(initialKeyword);
+    if (!visible) return;
+    setKeyword(initialKeyword);
+    setDraftRange(dateRange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, initialKeyword]);
+
+  const hasSelection = location != null || draftRange != null;
 
   const handleLocationSelect = useCallback(
     (result: { label: string; lat: number; lng: number }) => {
@@ -132,34 +137,23 @@ export function SearchOverlay({
   );
 
   const handleSearchPress = useCallback(() => {
-    onSearch(location, keyword.trim());
+    onSearch(location, keyword.trim(), draftRange);
     onClose();
-  }, [location, keyword, onSearch, onClose]);
+  }, [location, keyword, draftRange, onSearch, onClose]);
 
+  // Clears the staged selection; nothing reaches Discover until Search.
   const handleClearAll = useCallback(() => {
-    clearAll();
+    setLocation(null);
+    setDraftRange(null);
     setWhereInput('');
     setKeyword('');
     setCurrentStep('where');
-  }, [clearAll]);
+  }, [setLocation]);
 
-  const applyDatePreset = useCallback(
-    (preset: 'any' | 'today' | 'week') => {
-      if (preset === 'any') {
-        setDateRange(null);
-        return;
-      }
-      const now = new Date();
-      if (preset === 'today') {
-        setDateRange({ start: startOfDay(now), end: endOfDay(now) });
-        return;
-      }
-      const end = new Date(now);
-      end.setDate(end.getDate() + 7);
-      setDateRange({ start: startOfDay(now), end: endOfDay(end) });
-    },
-    [setDateRange]
-  );
+  const applyDatePreset = useCallback((key: DatePresetKey) => {
+    const preset = DATE_PRESETS.find((p) => p.key === key);
+    setDraftRange(preset ? preset.build() : null);
+  }, []);
 
   const handleClose = useCallback(() => {
     onClose();
@@ -167,11 +161,7 @@ export function SearchOverlay({
 
   const summaryLabel = location?.label ?? 'Add location';
 
-  const activeDatePreset: 'any' | 'today' | 'week' = !dateRange
-    ? 'any'
-    : dateRange.start.toDateString() === dateRange.end.toDateString()
-      ? 'today'
-      : 'week';
+  const activeDatePreset = matchDatePreset(draftRange);
 
   return (
     <Modal
@@ -308,42 +298,31 @@ export function SearchOverlay({
               <View style={styles.whenSection}>
                 <Text style={styles.whenHint}>Filter events by date (applies to Discover list & map).</Text>
                 <View style={styles.dateChipRow}>
-                  <TouchableOpacity
-                    style={[styles.dateChip, activeDatePreset === 'any' && styles.dateChipActive]}
-                    onPress={() => applyDatePreset('any')}
-                    activeOpacity={0.85}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: activeDatePreset === 'any' }}
-                    hitSlop={{ top: 6, bottom: 6 }}
-                  >
-                    <Text style={[styles.dateChipText, activeDatePreset === 'any' && styles.dateChipTextActive]}>Any time</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.dateChip, activeDatePreset === 'today' && styles.dateChipActive]}
-                    onPress={() => applyDatePreset('today')}
-                    activeOpacity={0.85}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: activeDatePreset === 'today' }}
-                    hitSlop={{ top: 6, bottom: 6 }}
-                  >
-                    <Text style={[styles.dateChipText, activeDatePreset === 'today' && styles.dateChipTextActive]}>Today</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.dateChip, activeDatePreset === 'week' && styles.dateChipActive]}
-                    onPress={() => applyDatePreset('week')}
-                    activeOpacity={0.85}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: activeDatePreset === 'week' }}
-                    hitSlop={{ top: 6, bottom: 6 }}
-                  >
-                    <Text style={[styles.dateChipText, activeDatePreset === 'week' && styles.dateChipTextActive]}>Next 7 days</Text>
-                  </TouchableOpacity>
+                  {DATE_PRESETS.map((preset) => {
+                    const selected = activeDatePreset === preset.key;
+                    return (
+                      <TouchableOpacity
+                        key={preset.key}
+                        style={[styles.dateChip, selected && styles.dateChipActive]}
+                        onPress={() => applyDatePreset(preset.key)}
+                        activeOpacity={0.85}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        accessibilityLabel={preset.label}
+                        hitSlop={{ top: 6, bottom: 6 }}
+                      >
+                        <Text style={[styles.dateChipText, selected && styles.dateChipTextActive]}>
+                          {preset.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
-                {dateRange ? (
+                {draftRange ? (
                   <Text style={styles.dateRangeSummary}>
-                    {dateRange.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    {draftRange.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                     {' — '}
-                    {dateRange.end.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    {draftRange.end.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                   </Text>
                 ) : null}
               </View>

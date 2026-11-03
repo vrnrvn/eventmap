@@ -677,18 +677,21 @@ export type Database = {
       event_reminder_sent: {
         Row: {
           event_id: string
+          kind: string
           reminder_minutes: number
           sent_at: string
           user_id: string
         }
         Insert: {
           event_id: string
+          kind?: string
           reminder_minutes: number
           sent_at?: string
           user_id: string
         }
         Update: {
           event_id?: string
+          kind?: string
           reminder_minutes?: number
           sent_at?: string
           user_id?: string
@@ -755,8 +758,10 @@ export type Database = {
           is_recurring: boolean
           lat: number
           lng: number
+          max_attendees: number | null
           recurrence_pattern: Json | null
           start_datetime: string
+          status: string
           title: string
           updated_at: string
         }
@@ -772,8 +777,10 @@ export type Database = {
           is_recurring?: boolean
           lat: number
           lng: number
+          max_attendees?: number | null
           recurrence_pattern?: Json | null
           start_datetime: string
+          status?: string
           title: string
           updated_at?: string
         }
@@ -789,8 +796,10 @@ export type Database = {
           is_recurring?: boolean
           lat?: number
           lng?: number
+          max_attendees?: number | null
           recurrence_pattern?: Json | null
           start_datetime?: string
+          status?: string
           title?: string
           updated_at?: string
         }
@@ -1224,6 +1233,39 @@ export type Database = {
           },
         ]
       }
+      user_blocks: {
+        Row: {
+          blocked_id: string
+          blocker_id: string
+          created_at: string
+        }
+        Insert: {
+          blocked_id: string
+          blocker_id: string
+          created_at?: string
+        }
+        Update: {
+          blocked_id?: string
+          blocker_id?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_blocks_blocked_id_fkey"
+            columns: ["blocked_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_blocks_blocker_id_fkey"
+            columns: ["blocker_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_push_tokens: {
         Row: {
           app_ownership: string | null
@@ -1268,6 +1310,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      activate_premium_simulation: {
+        Args: { p_business_id: string; p_interval: string }
+        Returns: undefined
+      }
       admin_ban_user: {
         Args: { p_reason?: string; p_user_id: string }
         Returns: undefined
@@ -1334,24 +1380,29 @@ export type Database = {
         Args: { p_business_id: string; p_is_premium: boolean }
         Returns: undefined
       }
+      admin_set_business_verified: {
+        Args: { p_business_id: string; p_verified: boolean }
+        Returns: undefined
+      }
       admin_unban_user: { Args: { p_user_id: string }; Returns: undefined }
-      block_event_chat_user:
-        | {
-            Args: { p_event_id: string; p_reason?: string; p_user_id: string }
-            Returns: undefined
-          }
-        | {
-            Args: {
-              p_duration_minutes?: number
-              p_event_id: string
-              p_reason?: string
-              p_user_id: string
-            }
-            Returns: undefined
-          }
+      block_event_chat_user: {
+        Args: {
+          p_duration_minutes?: number
+          p_event_id: string
+          p_reason?: string
+          p_user_id: string
+        }
+        Returns: undefined
+      }
       calculate_distance: {
         Args: { lat1: number; lat2: number; lng1: number; lng2: number }
         Returns: number
+      }
+      can_view_user_events: { Args: { target_user: string }; Returns: boolean }
+      cancel_event: { Args: { p_event_id: string }; Returns: undefined }
+      cancel_premium_simulation: {
+        Args: { p_business_id: string }
+        Returns: undefined
       }
       check_event_creation_limit: {
         Args: { business_uuid: string }
@@ -1379,6 +1430,7 @@ export type Database = {
         Args: { p_message_id: string }
         Returns: boolean
       }
+      delete_own_account: { Args: never; Returns: undefined }
       dismiss_event_chat_reports: {
         Args: { p_message_id: string }
         Returns: number
@@ -1387,12 +1439,25 @@ export type Database = {
         Args: { p_name?: string; p_user_id: string }
         Returns: undefined
       }
+      event_has_ended: {
+        Args: {
+          p_end_datetime: string
+          p_is_recurring: boolean
+          p_recurrence_pattern: Json
+        }
+        Returns: boolean
+      }
+      event_is_open_for_rsvp: { Args: { p_event_id: string }; Returns: boolean }
+      event_next_occurrence: {
+        Args: {
+          p_is_recurring: boolean
+          p_recurrence_pattern: Json
+          p_start_datetime: string
+        }
+        Returns: string
+      }
       get_business_analytics: {
         Args: { business_uuid: string; days?: number }
-        Returns: Json
-      }
-      get_event_attendees_public: {
-        Args: { event_uuid: string }
         Returns: Json
       }
       get_event_attendees_page: {
@@ -1400,8 +1465,12 @@ export type Database = {
           event_uuid: string
           p_limit?: number
           p_offset?: number
-          p_search?: string | null
+          p_search?: string
         }
+        Returns: Json
+      }
+      get_event_attendees_public: {
+        Args: { event_uuid: string }
         Returns: Json
       }
       get_event_chat_messages: {
@@ -1475,10 +1544,13 @@ export type Database = {
         }[]
       }
       get_event_details: { Args: { event_uuid: string }; Returns: Json }
+      get_profiles_display: { Args: { user_ids: string[] }; Returns: Json }
+      get_public_profile: { Args: { user_id_param: string }; Returns: Json }
       get_ranked_events: {
         Args: {
           category_ids?: string[]
           end_date?: string
+          p_offset?: number
           radius_km?: number
           result_limit?: number
           search_query?: string
@@ -1509,7 +1581,13 @@ export type Database = {
           save_count: number
           start_datetime: string
           title: string
+          user_rsvp: string
+          user_saved: boolean
         }[]
+      }
+      get_user_attendance_counts: {
+        Args: { user_id_param: string }
+        Returns: Json
       }
       get_user_business: {
         Args: never
@@ -1534,54 +1612,45 @@ export type Database = {
           verified: boolean
         }[]
       }
-      get_user_upcoming_events: {
-        Args: { user_id_param: string }
-        Returns: Json
-      }
       get_user_going_events: {
         Args: {
-          user_id_param: string
-          p_scope?: string
           p_limit?: number
           p_offset?: number
+          p_scope?: string
+          user_id_param: string
         }
         Returns: Json
+      }
+      get_user_past_event_count: {
+        Args: { user_id_param: string }
+        Returns: number
       }
       get_user_past_events: {
         Args: {
-          user_id_param: string
           result_limit?: number
           result_offset?: number
+          user_id_param: string
         }
-        Returns: Json
-      }
-      get_user_attendance_counts: {
-        Args: { user_id_param: string }
         Returns: Json
       }
       get_user_saved_events: {
         Args: { p_limit?: number; p_offset?: number }
         Returns: Json
       }
-      get_public_profile: {
+      get_user_upcoming_events: {
         Args: { user_id_param: string }
         Returns: Json
       }
-      get_profiles_display: {
-        Args: { user_ids: string[] }
-        Returns: Json
-      }
-      can_view_user_events: { Args: { target_user: string }; Returns: boolean }
-      event_has_ended: {
-        Args: {
-          p_end_datetime: string
-          p_is_recurring: boolean
-          p_recurrence_pattern: Json
-        }
-        Returns: boolean
-      }
       is_admin_user: { Args: never; Returns: boolean }
+      join_event_with_capacity: {
+        Args: { p_event_id: string; p_status: string }
+        Returns: undefined
+      }
       mark_event_chat_read: { Args: { p_event_id: string }; Returns: undefined }
+      notify_followers_about_event: {
+        Args: { p_event_id: string }
+        Returns: number
+      }
       reset_monthly_event_counter: {
         Args: { business_uuid: string }
         Returns: undefined
@@ -1632,6 +1701,10 @@ export type Database = {
           }
       user_can_access_event_chat: {
         Args: { event_uuid: string }
+        Returns: boolean
+      }
+      user_can_review_business: {
+        Args: { p_business_id: string }
         Returns: boolean
       }
       user_is_banned: { Args: { p_user_id: string }; Returns: boolean }

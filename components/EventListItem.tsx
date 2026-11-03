@@ -42,19 +42,7 @@ const badgeTones = {
   neutral: { bg: Colors.background.secondary, fg: Colors.text.tertiary },
 } as const;
 
-/** Shared date formatting for event list rows (device locale). */
-export function formatEventDate(value: string): string {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: d.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined,
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
+export { formatEventDate } from '@/utils/formatEventWhen';
 
 /**
  * Unified event row used by MyEvents, SavedEvents and JoinedEvents.

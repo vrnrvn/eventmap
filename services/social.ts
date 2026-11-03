@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { RsvpError, classifyRsvpError } from '@/utils/rsvpErrors';
 import {
   RsvpStatus,
   Rsvp,
@@ -32,6 +33,19 @@ function throwBlockError(error: { code?: string }): never {
 
 export type GoingEventsScope = 'upcoming' | 'past' | 'interested';
 
+/**
+ * RPCs shipped in prepared-but-unapplied migrations aren't in the generated
+ * types yet. The screens only call these when get_event_details advertises
+ * the feature, so a missing function is never reached in practice.
+ */
+const untypedRpc = (fn: string, args: Record<string, unknown>) =>
+  (
+    supabase.rpc as unknown as (
+      f: string,
+      a: Record<string, unknown>
+    ) => Promise<{ data: unknown; error: { message?: string; code?: string } | null }>
+  )(fn, args);
+
 export type AttendanceCounts = {
   upcoming: number;
   attended: number;
@@ -49,34 +63,27 @@ export const socialService = {
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user) throw new Error('Not authenticated');
+    if (!user) throw new RsvpError('NOT_AUTHENTICATED');
 
     // Capacity-aware join (20261030108000): the RPC locks the event row and
-    // rejects with EVENT_FULL when max_attendees is reached.
-    const { error: rpcError } = await (supabase as any).rpc(
-      'join_event_with_capacity',
-      { p_event_id: eventId, p_status: status }
-    );
-    if (!rpcError) return;
-    if (typeof rpcError.message === 'string' && rpcError.message.includes('EVENT_FULL')) {
-      throw new Error('EVENT_FULL');
-    }
-    if (rpcError.code !== '42883' && rpcError.code !== 'PGRST202') {
-      throw rpcError;
-    }
-    // TODO: remove fallback once 20261030108000 is applied
-    // (RPC missing pre-apply: keep today's plain upsert behavior.)
-    const { error } = await supabase.from('rsvps').upsert(
-      {
-        user_id: user.id,
-        event_id: eventId,
-        status,
-      },
-      {
-        onConflict: 'user_id,event_id',
-      }
-    );
+    // enforces ban / cancelled / ended / capacity server-side. Every failure
+    // is surfaced as a typed RsvpError so screens can show specific copy.
+    const { error } = await supabase.rpc('join_event_with_capacity', {
+      p_event_id: eventId,
+      p_status: status,
+    });
+    if (error) throw new RsvpError(classifyRsvpError(error), error);
+  },
 
+  /** Join the waitlist of a full event; resolves to the 1-based position. */
+  async joinWaitlist(eventId: string): Promise<number> {
+    const { data, error } = await untypedRpc('join_event_waitlist', { p_event_id: eventId });
+    if (error) throw new RsvpError(classifyRsvpError(error), error);
+    return typeof data === 'number' ? data : 0;
+  },
+
+  async leaveWaitlist(eventId: string): Promise<void> {
+    const { error } = await untypedRpc('leave_event_waitlist', { p_event_id: eventId });
     if (error) throw error;
   },
 
@@ -121,7 +128,7 @@ export const socialService = {
       event_uuid: eventId,
       p_limit: opts?.limit ?? 30,
       p_offset: opts?.offset ?? 0,
-      p_search: opts?.search?.trim() ? opts.search.trim() : null,
+      p_search: opts?.search?.trim() ? opts.search.trim() : undefined,
     });
 
     if (error) throw error;
@@ -441,6 +448,47 @@ export const socialService = {
       .eq('blocked_id', blockedUserId);
 
     if (error) throwBlockError(error);
+  },
+
+  /**
+   * Everyone the current user has blocked, newest first, with display names.
+   * Throws BlockingUnavailableError pre-apply.
+   */
+  async getBlockedUsers(): Promise<{ id: string; name: string; avatar_url: string | null }[]> {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return [];
+
+    const { data, error } = await supabase
+      .from('user_blocks')
+      .select('blocked_id, created_at')
+      .eq('blocker_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) throwBlockError(error);
+    const ids = (data ?? []).map((row) => row.blocked_id);
+    if (ids.length === 0) return [];
+
+    // get_profiles_display respects profile privacy and returns a safe
+    // display name for private accounts.
+    const { data: profiles, error: profileError } = await supabase.rpc('get_profiles_display', {
+      user_ids: ids,
+    });
+    if (profileError) throw profileError;
+
+    type DisplayProfile = { id: string; name: string | null; avatar_url: string | null };
+    const byId = new Map(
+      ((profiles as unknown as DisplayProfile[]) ?? []).map((p) => [p.id, p])
+    );
+    return ids.map((id) => {
+      const profile = byId.get(id);
+      return {
+        id,
+        name: profile?.name?.trim() || 'EventMap user',
+        avatar_url: profile?.avatar_url ?? null,
+      };
+    });
   },
 
   /**

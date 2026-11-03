@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Text } from 'react-native';
+import { Text, AppState } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
@@ -28,11 +28,12 @@ import { AuthRedirectHandler } from '@/components/AuthRedirectHandler';
 import { AppProvider } from '@/contexts/AppContext';
 import { SearchProvider } from '@/contexts/SearchContext';
 import { PremiumProvider } from '@/contexts/PremiumContext';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { Typography } from '@/constants/theme';
 import { setupNotificationResponseHandlers } from '@/services/pushNotifications';
+import { markNotificationAsRead } from '@/services/notifications';
 import { router } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { BrandedSplashScreen } from '@/components/BrandedSplashScreen';
@@ -81,6 +82,13 @@ function PushNavigationGate() {
   useEffect(() => {
     const cleanup = setupNotificationResponseHandlers((data) => {
       const path = resolveNotificationPath(data);
+      // dispatch_push_for_notification (20260228110000) ships the row id;
+      // tapping the push is a read, so clear it rather than leaving the tab
+      // badge stale until the user opens the notification centre.
+      const notificationId = data && typeof data.notificationId === 'string' ? data.notificationId : null;
+      if (notificationId) {
+        void markNotificationAsRead(notificationId).catch(() => {});
+      }
       if (canNavigateRef.current) {
         router.push(path as never);
       } else if (!authKnownRef.current) {
@@ -105,10 +113,34 @@ function PushNavigationGate() {
 
 SplashScreen.preventAutoHideAsync();
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Lists stay fresh via focus refetch; a short staleTime avoids a
+      // duplicate request when two screens mount the same query back to back.
+      staleTime: 30_000,
+      retry: 1,
+      refetchOnWindowFocus: true,
+    },
+  },
+});
+
+/**
+ * React Query's "window focus" has no meaning in React Native; feed it the
+ * AppState so queries refetch when the app returns to the foreground.
+ */
+function useReactQueryAppStateFocus() {
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      focusManager.setFocused(state === 'active');
+    });
+    return () => sub.remove();
+  }, []);
+}
 
 export default function RootLayout() {
   useFrameworkReady();
+  useReactQueryAppStateFocus();
   const [showBrandedSplash, setShowBrandedSplash] = useState(true);
 
   const [fontsLoaded, fontError] = useFonts({

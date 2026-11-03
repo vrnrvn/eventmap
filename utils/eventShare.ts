@@ -1,118 +1,50 @@
 import { Linking, Platform, Share } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
+import { buildEventIcs, getEventWebUrl, type IcsEventInput } from '@/utils/eventIcs';
+
+// Re-exported so existing callers keep importing from one place.
+export {
+  buildEventIcs,
+  buildRecurrenceRule,
+  getEventWebUrl,
+  getGoogleCalendarEventUrl,
+  type IcsEventInput,
+} from '@/utils/eventIcs';
 
 /**
- * Universal links / web paths for sharing events (see app/event/[id].tsx).
+ * Shares an event link. `Share.share` maps to `navigator.share` on web, which
+ * most desktop browsers don't implement (and which rejects on dismissal), so
+ * there the link is copied to the clipboard instead.
+ *
+ * Resolves to what happened so callers can show the right confirmation.
  */
-export function getEventWebUrl(eventId: string): string {
-  const base = (process.env.EXPO_PUBLIC_APP_WEB_ORIGIN ?? 'https://eventmap.pro').replace(/\/$/, '');
-  return `${base}/event/${eventId}`;
-}
-
-function padUtcGcal(iso: string): string {
-  const d = new Date(iso);
-  return d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-}
-
-/** Opens Google Calendar “create event” with prefilled fields. */
-export function getGoogleCalendarEventUrl(opts: {
+export async function shareEventLink(opts: {
   title: string;
-  startIso: string;
-  endIso: string;
-  address?: string | null;
-  details?: string;
-}): string {
-  const params = new URLSearchParams({
-    action: 'TEMPLATE',
-    text: opts.title,
-    dates: `${padUtcGcal(opts.startIso)}/${padUtcGcal(opts.endIso)}`,
-  });
-  if (opts.address) params.set('location', opts.address);
-  if (opts.details) params.set('details', opts.details);
-  return `https://calendar.google.com/calendar/render?${params.toString()}`;
-}
+  url: string;
+  /** Injected by the caller (expo-clipboard) to keep this module RN-only. */
+  copyToClipboard: (text: string) => Promise<void>;
+}): Promise<'shared' | 'copied' | 'dismissed'> {
+  const { title, url, copyToClipboard } = opts;
 
-export type IcsEventInput = {
-  /** Event id — used for the UID and the file name. */
-  id: string;
-  title: string;
-  startIso: string;
-  endIso: string;
-  address?: string | null;
-  description?: string;
-};
-
-/** RFC 5545 TEXT escaping: backslash, semicolon, comma, newlines. */
-function escapeIcsText(value: string): string {
-  return value
-    .replace(/\\/g, '\\\\')
-    .replace(/;/g, '\\;')
-    .replace(/,/g, '\\,')
-    .replace(/\r\n|\r|\n/g, '\\n');
-}
-
-/** UTF-8 octet count for a code point (RFC 3629). */
-function utf8Octets(codePoint: number): number {
-  if (codePoint < 0x80) return 1;
-  if (codePoint < 0x800) return 2;
-  if (codePoint < 0x10000) return 3;
-  return 4;
-}
-
-/**
- * RFC 5545 content lines must stay within 75 octets (not UTF-16 units);
- * continuation lines start with a space that counts toward the limit.
- * Folds between code points only — slicing by code units could split a
- * surrogate pair, which encodes to invalid UTF-8 in the written file.
- */
-function foldIcsLine(line: string): string {
-  const parts: string[] = [];
-  let current = '';
-  let octets = 0;
-  for (const ch of line) {
-    const chOctets = utf8Octets(ch.codePointAt(0) ?? 0);
-    if (octets + chOctets > 75) {
-      parts.push(current);
-      current = ' ';
-      octets = 1;
+  if (Platform.OS === 'web') {
+    const nav = typeof navigator !== 'undefined' ? navigator : undefined;
+    if (nav && typeof nav.share === 'function') {
+      try {
+        await nav.share({ title, url });
+        return 'shared';
+      } catch {
+        // User dismissed, or the browser refused (e.g. non-secure context):
+        // fall through to the clipboard so the action still does something.
+      }
     }
-    current += ch;
-    octets += chOctets;
+    await copyToClipboard(url);
+    return 'copied';
   }
-  if (current.length > 0 || parts.length === 0) parts.push(current);
-  return parts.join('\r\n');
-}
 
-/**
- * Minimal valid single-event ICS. Dates are emitted in UTC basic format
- * (YYYYMMDDTHHMMSSZ); an invalid/missing end falls back to start + 1 hour.
- */
-export function buildEventIcs(input: IcsEventInput): string {
-  const start = new Date(input.startIso);
-  if (Number.isNaN(start.getTime())) {
-    throw new Error('Invalid event start date');
-  }
-  let end = new Date(input.endIso);
-  if (Number.isNaN(end.getTime()) || end.getTime() <= start.getTime()) {
-    end = new Date(start.getTime() + 60 * 60 * 1000);
-  }
-  const lines = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//EventMap//EventMap//EN',
-    'CALSCALE:GREGORIAN',
-    'METHOD:PUBLISH',
-    'BEGIN:VEVENT',
-    `UID:event-${input.id}@eventmap.pro`,
-    `DTSTAMP:${padUtcGcal(new Date().toISOString())}`,
-    `DTSTART:${padUtcGcal(start.toISOString())}`,
-    `DTEND:${padUtcGcal(end.toISOString())}`,
-    `SUMMARY:${escapeIcsText(input.title)}`,
-  ];
-  if (input.description) lines.push(`DESCRIPTION:${escapeIcsText(input.description)}`);
-  if (input.address) lines.push(`LOCATION:${escapeIcsText(input.address)}`);
-  lines.push(`URL:${getEventWebUrl(input.id)}`, 'END:VEVENT', 'END:VCALENDAR');
-  return lines.map(foldIcsLine).join('\r\n') + '\r\n';
+  const result = await Share.share(
+    Platform.OS === 'ios' ? { title, url } : { title, message: `${title}\n${url}` }
+  );
+  return result.action === Share.dismissedAction ? 'dismissed' : 'shared';
 }
 
 /**

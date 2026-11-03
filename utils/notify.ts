@@ -2,10 +2,17 @@ import { Alert, Platform } from 'react-native';
 
 export type ToastKind = 'success' | 'error';
 
+export type ToastAction = {
+  label: string;
+  onPress: () => void;
+};
+
 export type ToastPayload = {
   id: number;
   kind: ToastKind;
   message: string;
+  /** Optional inline action (e.g. Undo). Extends the toast's lifetime. */
+  action?: ToastAction;
 };
 
 export type ConfirmPayload = {
@@ -41,8 +48,8 @@ export function registerNotifyHost(onToast: ToastListener, onConfirm: ConfirmLis
   };
 }
 
-function emitToast(kind: ToastKind, message: string) {
-  const toast: ToastPayload = { id: nextId++, kind, message };
+function emitToast(kind: ToastKind, message: string, action?: ToastAction) {
+  const toast: ToastPayload = { id: nextId++, kind, message, action };
   if (toastListener) toastListener(toast);
   else pendingToasts.push(toast);
 }
@@ -53,6 +60,18 @@ export const notify = {
   },
   error(message: string) {
     emitToast('error', message);
+  },
+  /**
+   * Success toast with an inline action. Preferred over a confirm dialog for
+   * reversible actions: the user isn't interrupted, and a mistake costs one
+   * tap instead of two.
+   */
+  withAction(message: string, action: ToastAction) {
+    emitToast('success', message, action);
+  },
+  /** Shorthand for the common "X removed · Undo" pattern. */
+  undo(message: string, onUndo: () => void) {
+    emitToast('success', message, { label: 'Undo', onPress: onUndo });
   },
 };
 

@@ -20,6 +20,9 @@ import { eventsService } from '@/services/events';
 import { socialService } from '@/services/social';
 import { reviewsService, type ReviewWithProfile } from '@/services/reviews';
 import { Business, Event } from '@/types/database';
+import { hasEventEnded } from '@/utils/eventStatus';
+import { getNextOccurrences } from '@/utils/recurrence';
+import { formatEventDate } from '@/utils/formatEventWhen';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { Avatar } from '@/components/Avatar';
 import { CategoryIcon } from '@/components/CategoryIcon';
@@ -74,6 +77,8 @@ export default function BusinessDetail() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [links, setLinks] = useState<Array<{ id: string; label: string | null; url: string }>>([]);
   const [events, setEvents] = useState<Event[]>([]);
+  // Real count: the list is capped at 10, so events.length under-reported.
+  const [upcomingCount, setUpcomingCount] = useState<number | null>(null);
   const [reviews, setReviews] = useState<ReviewWithProfile[]>([]);
   const [averageRating, setAverageRating] = useState({ average: 0, count: 0 });
   const [followerCount, setFollowerCount] = useState(0);
@@ -88,11 +93,13 @@ export default function BusinessDetail() {
   const load = useCallback(async () => {
     if (!id) return;
     try {
-      const [biz, photosData, linksData, eventsData, avg, count, isFollowingResult] = await Promise.all([
+      const [biz, photosData, linksData, eventsData, upcomingCount, avg, count, isFollowingResult] =
+        await Promise.all([
         businessesService.getBusiness(id),
         businessesService.getBusinessPhotos(id).catch(() => []),
         businessesService.getBusinessLinks(id).catch(() => []),
-        eventsService.getBusinessEvents(id, { limit: 10 }),
+        eventsService.getBusinessEvents(id, { limit: 10, scope: 'upcoming' }),
+        eventsService.getBusinessEventsCount(id, { scope: 'upcoming' }).catch(() => null),
         reviewsService.getAverageRatingAndCount(id),
         businessesService.getFollowerCount(id),
         user ? socialService.isFollowingBusiness(id) : Promise.resolve(false),
@@ -100,7 +107,9 @@ export default function BusinessDetail() {
       setBusiness(biz || null);
       setPhotos(photosData.map((p) => p.image_url));
       setLinks(linksData);
-      setEvents(eventsData);
+      // Ended recurring series come back from the upcoming query; drop them.
+      setEvents(eventsData.filter((e) => !hasEventEnded(e)));
+      setUpcomingCount(upcomingCount);
       setAverageRating(avg);
       setFollowerCount(count);
       setFollowing(isFollowingResult);
@@ -153,15 +162,13 @@ export default function BusinessDetail() {
     load();
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  };
+  /** Recurring series display their next occurrence, not the first one. */
+  const nextStartOf = (event: Event) =>
+    event.is_recurring
+      ? (getNextOccurrences(event, 1)[0]?.toISOString() ?? event.start_datetime)
+      : event.start_datetime;
+
+  const formatDate = (dateString: string) => formatEventDate(dateString);
 
   if (loading && !business) {
     return (
@@ -224,8 +231,12 @@ export default function BusinessDetail() {
                     try {
                       await complaintsService.createComplaint('business', id);
                       notify.success('Your report has been submitted.');
-                    } catch {
-                      notify.error('Failed to submit report.');
+                    } catch (err: unknown) {
+                      if ((err as { code?: string })?.code === '23505') {
+                        notify.success("You've already reported this. It's in the queue.");
+                      } else {
+                        notify.error('Failed to submit report.');
+                      }
                     }
                   },
                 });
@@ -301,8 +312,8 @@ export default function BusinessDetail() {
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>{events.length}</Text>
-              <Text style={styles.statLabel}>Event{events.length !== 1 ? 's' : ''}</Text>
+              <Text style={styles.statValue}>{upcomingCount ?? events.length}</Text>
+              <Text style={styles.statLabel}>Upcoming</Text>
             </View>
           </View>
         </View>
@@ -318,14 +329,17 @@ export default function BusinessDetail() {
                 onPress={() => router.push(`/event/${event.id}` as never)}
                 activeOpacity={0.8}
                 accessibilityRole="button"
-                accessibilityLabel={`${event.title}, ${formatDate(event.start_datetime)}`}
+                accessibilityLabel={`${event.title}, ${formatDate(nextStartOf(event))}`}
               >
                 <Calendar size={20} color={Colors.primary} />
                 <View style={styles.eventInfo}>
                   <Text style={styles.eventTitle} numberOfLines={2}>
                     {event.title}
                   </Text>
-                  <Text style={styles.eventDate}>{formatDate(event.start_datetime)}</Text>
+                  <Text style={styles.eventDate}>
+                    {formatDate(nextStartOf(event))}
+                    {event.is_recurring ? ' · repeats' : ''}
+                  </Text>
                 </View>
                 <Text style={styles.viewEvent}>View</Text>
               </TouchableOpacity>
@@ -491,8 +505,12 @@ export default function BusinessDetail() {
                           try {
                             await complaintsService.createComplaint('review', reviewId);
                             notify.success('Your report has been submitted.');
-                          } catch {
-                            notify.error('Failed to submit report.');
+                          } catch (err: unknown) {
+                            if ((err as { code?: string })?.code === '23505') {
+                              notify.success("You've already reported this. It's in the queue.");
+                            } else {
+                              notify.error('Failed to submit report.');
+                            }
                           }
                         },
                       });

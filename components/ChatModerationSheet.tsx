@@ -189,7 +189,7 @@ export function ChatModerationSheet({
               <View style={styles.controlText}>
                 <Text style={styles.controlTitle}>Lock chat</Text>
                 <Text style={styles.controlDesc}>
-                  {locked ? 'Only you can post right now.' : 'Attendees can post.'}
+                  {locked ? 'Attendees can read but not post.' : 'Attendees can post.'}
                 </Text>
               </View>
               <Switch

@@ -14,6 +14,12 @@ export type RecurrencePickerHandle = {
 type RecurrencePickerProps = {
   selectedValue: RecurrenceOption;
   onSelect: (value: RecurrenceOption) => void;
+  /**
+   * When true only "None" is selectable. Used for hosts whose premium has
+   * lapsed: they may still turn recurrence off on an existing series (the
+   * DB trigger allows it) but not pick a new pattern.
+   */
+  noneOnly?: boolean;
 };
 
 function getLabel(value: RecurrenceOption): string {
@@ -27,7 +33,7 @@ function getLabel(value: RecurrenceOption): string {
 }
 
 export const RecurrencePicker = forwardRef<RecurrencePickerHandle, RecurrencePickerProps>(
-  function RecurrencePicker({ selectedValue, onSelect }, ref) {
+  function RecurrencePicker({ selectedValue, onSelect, noneOnly = false }, ref) {
     const bottomSheetRef = useRef<BottomSheetModal>(null);
 
     useImperativeHandle(ref, () => ({
@@ -51,6 +57,11 @@ export const RecurrencePicker = forwardRef<RecurrencePickerHandle, RecurrencePic
             <View>
               <View style={styles.header}>
                 <Text style={styles.title}>Repeat</Text>
+                {noneOnly ? (
+                  <Text style={styles.subtitle}>
+                    Recurring events need Premium. You can still turn repeating off.
+                  </Text>
+                ) : null}
               </View>
               <View style={styles.options}>
             {RECURRENCE_OPTIONS.map((opt) => {
@@ -61,22 +72,25 @@ export const RecurrencePicker = forwardRef<RecurrencePickerHandle, RecurrencePic
                   opt.value.frequency === selectedValue.frequency &&
                   opt.value.interval === selectedValue.interval)
             );
+            const disabled = noneOnly && opt.value !== null;
             return (
               <TouchableOpacity
                 key={opt.label}
-                style={[styles.option, isSelected && styles.optionSelected]}
+                style={[styles.option, isSelected && styles.optionSelected, disabled && styles.optionDisabled]}
                 onPress={() => {
+                  if (disabled) return;
                   onSelect(opt.value);
                   requestAnimationFrame(() => {
                     bottomSheetRef.current?.dismiss();
                   });
                 }}
+                disabled={disabled}
                 activeOpacity={0.7}
                 accessibilityRole="button"
                 accessibilityLabel={`Repeat ${opt.label}`}
-                accessibilityState={{ selected: isSelected }}
+                accessibilityState={{ selected: isSelected, disabled }}
               >
-                <Text style={[styles.optionText, isSelected && styles.optionTextSelected]}>
+                <Text style={[styles.optionText, isSelected && styles.optionTextSelected, disabled && styles.optionTextDisabled]}>
                   {opt.label}
                 </Text>
                 {isSelected ? <Check size={18} color={Colors.primary} /> : null}
@@ -111,9 +125,21 @@ const styles = StyleSheet.create({
     fontWeight: Typography.weights.semibold,
     color: Colors.text.primary,
   },
+  subtitle: {
+    marginTop: Spacing.xs,
+    fontSize: Typography.sizes.sm,
+    color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.regular,
+  },
   options: {
     paddingHorizontal: Spacing.xl,
     paddingBottom: Spacing.xl,
+  },
+  optionDisabled: {
+    opacity: 0.45,
+  },
+  optionTextDisabled: {
+    color: Colors.text.tertiary,
   },
   option: {
     flexDirection: 'row',

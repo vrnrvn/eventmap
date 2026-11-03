@@ -46,3 +46,46 @@ export function isInBounds(lat: number, lng: number, bounds: MapBounds): boolean
   }
   return lng >= bounds.sw.lng && lng <= bounds.ne.lng;
 }
+
+/** Bounding box of a set of points, or null when the set is empty. */
+export function boundsOfPoints(points: LatLng[]): MapBounds | null {
+  if (points.length === 0) return null;
+  let minLat = points[0].lat;
+  let maxLat = points[0].lat;
+  let minLng = points[0].lng;
+  let maxLng = points[0].lng;
+  for (const p of points) {
+    if (p.lat < minLat) minLat = p.lat;
+    if (p.lat > maxLat) maxLat = p.lat;
+    if (p.lng < minLng) minLng = p.lng;
+    if (p.lng > maxLng) maxLng = p.lng;
+  }
+  return { ne: { lat: maxLat, lng: maxLng }, sw: { lat: minLat, lng: minLng } };
+}
+
+/** Midpoint of a set of points, or null when the set is empty. */
+export function centroidOf(points: LatLng[]): LatLng | null {
+  const bounds = boundsOfPoints(points);
+  if (!bounds) return null;
+  return {
+    lat: (bounds.ne.lat + bounds.sw.lat) / 2,
+    lng: (bounds.ne.lng + bounds.sw.lng) / 2,
+  };
+}
+
+/**
+ * Zoom level at which a lat/lng span comfortably fits the viewport. The whole
+ * world (360° of longitude) fits at zoom 0 and each level halves the span, so
+ * log2 gives the fit; one level is subtracted for padding. Clamped to a sane
+ * range so a single point doesn't request maximum zoom.
+ */
+export function zoomForPoints(points: LatLng[], fallbackZoom = 12): number {
+  const bounds = boundsOfPoints(points);
+  if (!bounds) return fallbackZoom;
+  const latSpan = bounds.ne.lat - bounds.sw.lat;
+  const lngSpan = bounds.ne.lng - bounds.sw.lng;
+  const span = Math.max(latSpan, lngSpan);
+  if (!Number.isFinite(span) || span <= 0) return fallbackZoom;
+  const zoom = Math.log2(360 / span) - 1;
+  return Math.min(15, Math.max(2, Math.round(zoom)));
+}

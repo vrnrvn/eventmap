@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,8 @@ import { Button } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { EventListItem, formatEventDate } from '@/components/EventListItem';
 import { Event } from '@/types/database';
+import { hasEventEnded, isEventInProgress } from '@/utils/eventStatus';
+import { getNextOccurrences } from '@/utils/recurrence';
 import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import {
   ArrowLeft,
@@ -38,9 +40,24 @@ import {
 
 const PAGE_SIZE = 30;
 
+type Scope = 'upcoming' | 'past';
+
+/**
+ * A recurring series whose own end date has passed comes back from the
+ * `upcoming` query (the server can't evaluate recurrence end dates in a
+ * PostgREST filter); it belongs with the past ones.
+ */
+const partitionUpcoming = (rows: Event[]) => {
+  const live: Event[] = [];
+  const endedSeries: Event[] = [];
+  for (const e of rows) (hasEventEnded(e) ? endedSeries : live).push(e);
+  return { live, endedSeries };
+};
+
 export default function MyEvents() {
   const insets = useSafeAreaInsets();
   const { hasBusiness, userBusiness } = useApp();
+  const [scope, setScope] = useState<Scope>('upcoming');
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -48,79 +65,111 @@ export default function MyEvents() {
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const hasLoadedRef = useRef(false);
+  // Ignore responses from a superseded load (tab switched mid-flight).
+  const requestSeq = useRef(0);
 
-  const loadInitial = useCallback(async () => {
-    if (!userBusiness) {
-      setEvents([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const data = await eventsService.getBusinessEvents(userBusiness.id, {
+  const fetchPage = useCallback(
+    async (businessId: string, which: Scope, pageOffset: number) => {
+      const rows = await eventsService.getBusinessEvents(businessId, {
         limit: PAGE_SIZE,
-        offset: 0,
+        offset: pageOffset,
+        scope: which,
       });
-      setEvents(data);
-      setOffset(data.length);
-      setHasMore(data.length >= PAGE_SIZE);
-      setLoadError(false);
-    } catch {
-      setEvents([]);
-      setLoadError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, [userBusiness?.id]);
+      if (which === 'upcoming') {
+        // A recurring series whose own end date passed still matches the
+        // upcoming query (the server can't evaluate it); it belongs in Past.
+        return { rows: partitionUpcoming(rows).live, fetched: rows.length };
+      }
+      // Past: the query also returns ongoing recurring series (their first
+      // occurrence has ended); keep only cancelled or genuinely finished ones.
+      return {
+        rows: rows.filter((e) => e.status === 'cancelled' || hasEventEnded(e)),
+        fetched: rows.length,
+      };
+    },
+    []
+  );
+
+  /** First page for the current tab. `silent` keeps the list visible. */
+  const loadInitial = useCallback(
+    async (silent = false) => {
+      if (!userBusiness) {
+        setEvents([]);
+        setLoading(false);
+        return;
+      }
+      const seq = ++requestSeq.current;
+      if (!silent) setLoading(true);
+      try {
+        const { rows, fetched } = await fetchPage(userBusiness.id, scope, 0);
+        if (seq !== requestSeq.current) return;
+        setEvents(rows);
+        setOffset(fetched);
+        setHasMore(fetched >= PAGE_SIZE);
+        setLoadError(false);
+        hasLoadedRef.current = true;
+      } catch {
+        if (seq !== requestSeq.current) return;
+        setEvents([]);
+        setLoadError(true);
+      } finally {
+        if (seq === requestSeq.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    },
+    [userBusiness?.id, scope, fetchPage]
+  );
 
   const loadMore = useCallback(async () => {
-    if (!userBusiness || loadingMore || !hasMore) return;
+    if (!userBusiness || loadingMore || !hasMore || loading) return;
     setLoadingMore(true);
+    const seq = requestSeq.current;
     try {
-      const data = await eventsService.getBusinessEvents(userBusiness.id, {
-        limit: PAGE_SIZE,
-        offset,
+      const { rows, fetched } = await fetchPage(userBusiness.id, scope, offset);
+      if (seq !== requestSeq.current) return;
+      setEvents((prev) => {
+        const seen = new Set(prev.map((e) => e.id));
+        return [...prev, ...rows.filter((e) => !seen.has(e.id))];
       });
-      setEvents((prev) => [...prev, ...data]);
-      setOffset((o) => o + data.length);
-      setHasMore(data.length >= PAGE_SIZE);
+      setOffset((o) => o + fetched);
+      setHasMore(fetched >= PAGE_SIZE);
     } catch {
       setHasMore(false);
     } finally {
       setLoadingMore(false);
     }
-  }, [userBusiness?.id, offset, loadingMore, hasMore]);
+  }, [userBusiness?.id, scope, offset, loadingMore, hasMore, loading, fetchPage]);
 
   const handleRefresh = useCallback(async () => {
     if (!userBusiness) return;
     setRefreshing(true);
-    try {
-      const data = await eventsService.getBusinessEvents(userBusiness.id, {
-        limit: PAGE_SIZE,
-        offset: 0,
-      });
-      setEvents(data);
-      setOffset(data.length);
-      setHasMore(data.length >= PAGE_SIZE);
-      setLoadError(false);
-    } catch {
-      setEvents([]);
-      setLoadError(true);
-    } finally {
-      setRefreshing(false);
-    }
-  }, [userBusiness?.id]);
+    await loadInitial(true);
+  }, [userBusiness?.id, loadInitial]);
 
+  // Coming back from Edit / Insights / the event page refreshes quietly;
+  // only the very first visit (and a tab switch) shows the skeleton.
   useFocusEffect(
     useCallback(() => {
       if (hasBusiness && userBusiness) {
-        loadInitial();
+        void loadInitial(hasLoadedRef.current);
       } else {
         setEvents([]);
         setLoading(false);
       }
-    }, [hasBusiness, userBusiness?.id])
+    }, [hasBusiness, userBusiness?.id, loadInitial])
   );
+
+  const switchScope = (next: Scope) => {
+    if (next === scope) return;
+    hasLoadedRef.current = false;
+    setEvents([]);
+    setOffset(0);
+    setHasMore(true);
+    setScope(next);
+  };
 
   const handleCancelEvent = useCallback(
     async (event: Event) => {
@@ -135,7 +184,8 @@ export default function MyEvents() {
         // Pre-apply (20261030106000) this hard-deletes; post-apply it soft-
         // cancels and keeps the row, so reload instead of filtering locally.
         await eventsService.cancelEvent(event.id);
-        await loadInitial();
+        notify.success('Event cancelled. Attendees have been notified.');
+        await loadInitial(true);
       } catch {
         notify.error('Failed to cancel event');
       }
@@ -153,58 +203,58 @@ export default function MyEvents() {
     try {
       await businessesService.notifyFollowersAboutEvent(event.id);
       notify.success('Followers notified.');
-    } catch (err: unknown) {
-      const code = (err as { code?: string })?.code;
-      // RPC ships with migration 20261030112000; tolerate it being unapplied.
-      if (code === '42883' || code === 'PGRST202') {
-        notify.error('Not enabled on this server yet.');
-      } else {
-        notify.error('Failed to notify followers');
-      }
+    } catch {
+      notify.error('Failed to notify followers');
     }
   }, []);
 
-  const isUpcoming = (dateString: string) =>
-    new Date(dateString).getTime() > Date.now();
-
   const renderItem = useCallback(
     ({ item }: { item: Event }) => {
-      const upcoming = isUpcoming(item.start_datetime);
-      // Tolerant check: events.status only exists once 20261030106000 is
-      // applied (rows arrive via select('*')); absent field = active.
-      const cancelled =
-        (item as Event & { status?: string }).status === 'cancelled';
+      const cancelled = item.status === 'cancelled';
+      const ended = !cancelled && hasEventEnded(item);
+      const live = !cancelled && !ended && isEventInProgress(item);
+      // Recurring series: show the next occurrence, not the first one.
+      const nextStart =
+        item.is_recurring && !ended && !cancelled
+          ? (getNextOccurrences(item, 1)[0]?.toISOString() ?? item.start_datetime)
+          : item.start_datetime;
+      const badge = cancelled
+        ? { label: 'Cancelled', tone: 'danger' as const }
+        : live
+          ? { label: 'LIVE', tone: 'success' as const }
+          : ended
+            ? { label: 'Past', tone: 'neutral' as const }
+            : item.is_recurring
+              ? { label: 'Repeats', tone: 'primary' as const }
+              : { label: 'Upcoming', tone: 'primary' as const };
 
       return (
         <View style={styles.cardSpacing}>
           <EventListItem
             title={item.title}
-            dateLine={formatEventDate(item.start_datetime)}
-            thumbnailUrl={(item as Event & { cover_image_url?: string | null }).cover_image_url}
-            dimmed={cancelled || !upcoming}
-            badge={
-              cancelled
-                ? { label: 'Cancelled', tone: 'danger' }
-                : upcoming
-                  ? { label: 'Upcoming', tone: 'primary' }
-                  : { label: 'Past', tone: 'neutral' }
-            }
+            dateLine={formatEventDate(nextStart)}
+            thumbnailUrl={item.cover_image_url}
+            dimmed={cancelled || ended}
+            badge={badge}
             dateIcon={<Clock size={12} color={Colors.text.tertiary} />}
             onPress={() => router.push(`/event/${item.id}` as never)}
             actions={
               <>
-                <TouchableOpacity
-                  style={styles.editBtn}
-                  onPress={() =>
-                    router.push(`/business/edit-event/${item.id}` as never)
-                  }
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Edit ${item.title}`}
-                >
-                  <Pencil size={14} color={Colors.primary} />
-                  <Text style={styles.editBtnText}>Edit</Text>
-                </TouchableOpacity>
+                {/* Cancelled events are read-only: no Edit, Notify or Cancel. */}
+                {!cancelled && (
+                  <TouchableOpacity
+                    style={styles.editBtn}
+                    onPress={() =>
+                      router.push(`/business/edit-event/${item.id}` as never)
+                    }
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Edit ${item.title}`}
+                  >
+                    <Pencil size={14} color={Colors.primary} />
+                    <Text style={styles.editBtnText}>Edit</Text>
+                  </TouchableOpacity>
+                )}
 
                 {!cancelled && (
                   <TouchableOpacity
@@ -302,13 +352,17 @@ export default function MyEvents() {
           <View style={styles.emptyIconWrap}>
             <FileText size={36} color={Colors.primary} />
           </View>
-          <Text style={styles.emptyTitle}>No Events Yet</Text>
-          <Text style={styles.emptySubtitle}>
-            {hasBusiness
-              ? 'Create your first event to start reaching your local community.'
-              : 'You need a business profile to create and manage events.'}
+          <Text style={styles.emptyTitle}>
+            {scope === 'past' ? 'Nothing here yet' : 'No Upcoming Events'}
           </Text>
-          {hasBusiness && (
+          <Text style={styles.emptySubtitle}>
+            {!hasBusiness
+              ? 'You need a business profile to create and manage events.'
+              : scope === 'past'
+                ? 'Events that have ended or were cancelled will show up here.'
+                : 'Create your next event to start reaching your local community.'}
+          </Text>
+          {hasBusiness && scope === 'upcoming' && (
             <Button
               label="Create Event"
               onPress={() => router.push('/(tabs)/create' as never)}
@@ -320,7 +374,7 @@ export default function MyEvents() {
         </View>
       );
     },
-    [loading, refreshing, hasBusiness, loadError, loadInitial]
+    [loading, refreshing, hasBusiness, loadError, loadInitial, scope]
   );
 
   const ListFooter = useCallback(
@@ -402,11 +456,32 @@ export default function MyEvents() {
             <Text style={styles.headerSubtitle}>
               {loading
                 ? 'Loading…'
-                : `${events.length}${hasMore ? '+' : ''} event${events.length !== 1 ? 's' : ''}`}
+                : `${events.length}${hasMore ? '+' : ''} ${scope === 'upcoming' ? 'upcoming' : 'past or cancelled'}`}
             </Text>
           </View>
         </View>
         <View style={styles.headerSpacer} />
+      </View>
+
+      <View style={styles.segmentRow} accessibilityRole="tablist">
+        {(['upcoming', 'past'] as const).map((tab) => {
+          const active = scope === tab;
+          return (
+            <TouchableOpacity
+              key={tab}
+              style={[styles.segment, active && styles.segmentActive]}
+              onPress={() => switchScope(tab)}
+              activeOpacity={0.8}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={tab === 'upcoming' ? 'Upcoming events' : 'Past and cancelled events'}
+            >
+              <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                {tab === 'upcoming' ? 'Upcoming' : 'Past'}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {loading ? (
@@ -513,6 +588,39 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 40,
+  },
+
+  /* ── Scope tabs ── */
+  segmentRow: {
+    flexDirection: 'row',
+    gap: Spacing.xs,
+    marginHorizontal: Spacing.md,
+    marginTop: Spacing.md,
+    padding: 4,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.background.secondary,
+  },
+  segment: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderRadius: BorderRadius.round,
+  },
+  segmentActive: {
+    backgroundColor: Colors.surface,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  segmentText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.semibold,
+  },
+  segmentTextActive: {
+    color: Colors.primary,
   },
 
   /* ── Loading skeleton (mirrors EventListItem) ── */

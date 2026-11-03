@@ -25,3 +25,32 @@ export const withShiftedEnd = <T extends { startDatetime: Date; endDatetime: Dat
     endDatetime: new Date(newStart.getTime() + safeDuration),
   };
 };
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/**
+ * Format a Date as the local-time string an `<input type="datetime-local">`
+ * expects (`YYYY-MM-DDTHH:mm`). Seconds are dropped.
+ */
+export const toDateTimeLocalValue = (d: Date): string =>
+  `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+
+/**
+ * Parse an `<input type="datetime-local">` value back into a local Date.
+ * Returns null for empty or malformed input (e.g. the user cleared the field).
+ */
+export const fromDateTimeLocalValue = (value: string): Date | null => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  if (!m) return null;
+  const [, y, mo, d, h, mi, s] = m;
+  const date = new Date(
+    Number(y),
+    Number(mo) - 1,
+    Number(d),
+    Number(h),
+    Number(mi),
+    s ? Number(s) : 0,
+    0
+  );
+  return Number.isNaN(date.getTime()) ? null : date;
+};

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,13 @@ import DateTimePicker, {
 } from '@react-native-community/datetimepicker';
 import { Repeat, ChevronRight, MapPin } from 'lucide-react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useNavigation, usePreventRemove } from '@react-navigation/native';
+import { RecurrenceEndRow } from '@/components/RecurrenceEndRow';
+import {
+  EventLinksEditor,
+  normalizeLinkUrl,
+  type EventLinkDraft,
+} from '@/components/EventLinksEditor';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '@/contexts/AppContext';
 import { usePremium } from '@/contexts/PremiumContext';
@@ -21,20 +28,23 @@ import { Input } from '@/components/Input';
 import { Button } from '@/components/ui/Button';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
+import { WebDateTimeInput } from '@/components/WebDateTimeInput';
 import {
   RecurrencePicker,
   getRecurrenceLabel,
   type RecurrencePickerHandle,
 } from '@/components/RecurrencePicker';
-import type { RecurrenceOption } from '@/utils/recurrence';
+import { parseRecurrenceEndDate, type RecurrenceOption } from '@/utils/recurrence';
 import { notify, notifyConfirm } from '@/utils/notify';
+import { confirmAction } from '@/utils/confirm';
 import { eventsService } from '@/services/events';
 import { eventLocationStore } from '@/stores/eventLocationStore';
 import { categoriesService } from '@/services/categories';
 import { CategoryIcon } from '@/components/CategoryIcon';
-import { Category, EventPhoto } from '@/types/database';
+import { Category, Event, EventPhoto } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { withShiftedEnd } from '@/utils/eventDatetime';
+import { timeZoneLabel } from '@/utils/formatEventWhen';
 
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
 const MAX_EVENT_DATE = new Date();
@@ -55,6 +65,7 @@ type EventFormData = {
   images: ImageAsset[];
   recurrence: RecurrenceOption;
   maxAttendees: string;
+  links: EventLinkDraft[];
 };
 
 /** Serialize the form fields that count as "changes" for the unsaved guard. */
@@ -71,6 +82,7 @@ const snapshotOf = (f: EventFormData) =>
     images: f.images.map((img) => img.uri),
     recurrence: f.recurrence,
     maxAttendees: f.maxAttendees,
+    links: f.links.map((link) => `${link.id ?? ''}|${link.label}|${link.url}`),
   });
 
 export default function EditEvent() {
@@ -80,6 +92,7 @@ export default function EditEvent() {
   const { currentPlan } = usePremium();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
@@ -100,13 +113,23 @@ export default function EditEvent() {
     images: [] as ImageAsset[],
     recurrence: null as RecurrenceOption,
     maxAttendees: '',
+    links: [] as EventLinkDraft[],
   });
+  const [linkErrors, setLinkErrors] = useState<Record<number, string>>({});
+  const tzLabel = useMemo(() => timeZoneLabel(), []);
   const recurrencePickerRef = useRef<RecurrencePickerHandle>(null);
   /** Track the original photos loaded from DB to detect removals */
   const originalPhotoIds = useRef<string[]>([]);
+  /** Saved sort_order per existing photo, so only moved ones are rewritten. */
+  const originalPhotoOrder = useRef<Map<string, number>>(new Map());
   /** Original start time, so saves of other fields aren't blocked for past events */
   const originalStartMs = useRef<number | null>(null);
   const originalHadCap = useRef(false);
+  /** The saved row as loaded, so the update only sends fields that changed. */
+  const originalEvent = useRef<Event | null>(null);
+  /** Current "going" count, to warn before edits that notify attendees. */
+  const goingCount = useRef(0);
+  const isPremiumBusiness = userBusiness?.subscription_tier === 'premium';
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -115,20 +138,22 @@ export default function EditEvent() {
   const isDirty =
     initialSnapshot.current != null && snapshotOf(formData) !== initialSnapshot.current;
 
-  const handleBack = () => {
-    if (!isDirty) {
-      router.back();
-      return;
-    }
+  // Unsaved-changes guard for every way off the screen: header back, the
+  // Android hardware back and the iOS swipe gesture all dispatch a remove
+  // action, which this intercepts while the form is dirty.
+  const navigation = useNavigation();
+  usePreventRemove(isDirty && !saving, ({ data }) => {
     notifyConfirm({
       title: 'Discard changes?',
       message: 'You have unsaved changes. Go back and lose them?',
       confirmLabel: 'Discard',
       cancelLabel: 'Keep editing',
       destructive: true,
-      onConfirm: () => router.back(),
+      onConfirm: () => navigation.dispatch(data.action),
     });
-  };
+  });
+
+  const handleBack = () => router.back();
 
   useEffect(() => {
     categoriesService.getAllCategories().then(setCategories);
@@ -163,6 +188,13 @@ export default function EditEvent() {
           return;
         }
         const e = details.event;
+        if (e.status === 'cancelled') {
+          // Cancelled events are read-only; attendees were already told it's
+          // off, so silent edits would only confuse them.
+          notify.error("This event was cancelled and can't be edited.");
+          router.back();
+          return;
+        }
         const existingImages: ImageAsset[] = (details.photos || [])
           .sort((a: EventPhoto, b: EventPhoto) => a.sort_order - b.sort_order)
           .map((p: EventPhoto) => ({
@@ -175,9 +207,13 @@ export default function EditEvent() {
         originalPhotoIds.current = existingImages
           .map((img) => img.photoId)
           .filter(Boolean) as string[];
+        originalPhotoOrder.current = new Map(
+          (details.photos || []).map((p: EventPhoto) => [p.id, p.sort_order])
+        );
         originalStartMs.current = new Date(e.start_datetime).getTime();
-        originalHadCap.current =
-          (e as { max_attendees?: number | null }).max_attendees != null;
+        originalHadCap.current = e.max_attendees != null;
+        originalEvent.current = e;
+        goingCount.current = details.rsvp_count ?? 0;
 
         const loaded = {
           title: e.title,
@@ -190,11 +226,12 @@ export default function EditEvent() {
           lng: e.lng,
           images: existingImages,
           recurrence: e.is_recurring && e.recurrence_pattern ? e.recurrence_pattern : null,
-          // Tolerant: max_attendees only exists once 20261030108000 is applied.
-          maxAttendees:
-            (e as { max_attendees?: number | null }).max_attendees != null
-              ? String((e as { max_attendees?: number | null }).max_attendees)
-              : '',
+          maxAttendees: e.max_attendees != null ? String(e.max_attendees) : '',
+          links: (details.links ?? []).map((link) => ({
+            id: link.id,
+            label: link.label ?? '',
+            url: link.url,
+          })),
         };
         setFormData(loaded);
         initialSnapshot.current = snapshotOf(loaded);
@@ -277,60 +314,124 @@ export default function EditEvent() {
         e.maxAttendees = 'Enter a whole number greater than 0';
       }
     }
+    if (formData.recurrence?.endDate) {
+      const seriesEnd = parseRecurrenceEndDate(formData.recurrence.endDate);
+      const firstDay = new Date(formData.startDatetime);
+      firstDay.setHours(0, 0, 0, 0);
+      if (seriesEnd && seriesEnd < firstDay) {
+        // Server-side event_has_ended would hide the series before it ever ran.
+        e.recurrenceEnd = 'The series end date is before the first event';
+      }
+    }
+    const linkIssues: Record<number, string> = {};
+    formData.links.forEach((link, index) => {
+      if (!link.url.trim() && !link.label.trim()) return;
+      if (!normalizeLinkUrl(link.url)) {
+        linkIssues[index] = 'Enter a web address like example.com/tickets';
+      }
+    });
+    setLinkErrors(linkIssues);
+    if (Object.keys(linkIssues).length > 0) e.links = 'Fix the links below';
     setErrors(e);
     return Object.keys(e).length === 0;
+  };
+
+  /**
+   * Only the fields that actually differ from the loaded row. Sending the
+   * whole row used to trip the "event updated" notification trigger on
+   * every save (timestamp precision, trimmed address), pinging attendees
+   * about edits that changed nothing they care about.
+   */
+  const buildUpdates = (): Partial<Event> => {
+    const original = originalEvent.current;
+    const address = formData.address.trim() || (businessLocation?.address ?? '');
+    const lat = formData.address.trim() ? formData.lat : (businessLocation?.lat ?? formData.lat);
+    const lng = formData.address.trim() ? formData.lng : (businessLocation?.lng ?? formData.lng);
+    const maxAttendeesValue = formData.maxAttendees.trim()
+      ? Number(formData.maxAttendees.trim())
+      : null;
+
+    const candidate: Partial<Event> = {
+      title: formData.title.trim(),
+      description: formData.description.trim(),
+      category_id: formData.categoryId,
+      start_datetime: formData.startDatetime.toISOString(),
+      end_datetime: formData.endDatetime.toISOString(),
+      address,
+      lat,
+      lng,
+      is_recurring: formData.recurrence != null,
+      recurrence_pattern: formData.recurrence ?? null,
+      max_attendees: maxAttendeesValue,
+    };
+    if (!original) return candidate;
+
+    const updates: Partial<Event> = {};
+    const sameInstant = (a: string, b: string) => new Date(a).getTime() === new Date(b).getTime();
+    if (candidate.title !== original.title) updates.title = candidate.title;
+    if (candidate.description !== original.description) updates.description = candidate.description;
+    if (candidate.category_id !== original.category_id) updates.category_id = candidate.category_id;
+    if (!sameInstant(candidate.start_datetime!, original.start_datetime)) {
+      updates.start_datetime = candidate.start_datetime;
+    }
+    if (!sameInstant(candidate.end_datetime!, original.end_datetime)) {
+      updates.end_datetime = candidate.end_datetime;
+    }
+    if (candidate.address !== original.address) updates.address = candidate.address;
+    if (candidate.lat !== original.lat) updates.lat = candidate.lat;
+    if (candidate.lng !== original.lng) updates.lng = candidate.lng;
+    if (candidate.is_recurring !== Boolean(original.is_recurring)) {
+      updates.is_recurring = candidate.is_recurring;
+    }
+    if (JSON.stringify(candidate.recurrence_pattern) !== JSON.stringify(original.recurrence_pattern ?? null)) {
+      updates.recurrence_pattern = candidate.recurrence_pattern;
+    }
+    if ((candidate.max_attendees ?? null) !== (original.max_attendees ?? null)) {
+      updates.max_attendees = candidate.max_attendees;
+    }
+    return updates;
   };
 
   const handleSubmit = async () => {
     if (!validate() || !id) return;
 
-    const address = formData.address.trim() || (businessLocation?.address ?? '');
-    const lat = formData.address.trim() ? formData.lat : (businessLocation?.lat ?? formData.lat);
-    const lng = formData.address.trim() ? formData.lng : (businessLocation?.lng ?? formData.lng);
+    const updates = buildUpdates();
+    const newCap = updates.max_attendees;
+    if (newCap != null && newCap < goingCount.current) {
+      const proceed = await confirmAction({
+        title: 'Cap below current attendance',
+        message: `${goingCount.current} people are already going. Lowering the limit to ${newCap} keeps them in but blocks new joins. Continue?`,
+        confirmLabel: 'Set limit',
+        cancelLabel: 'Keep editing',
+      });
+      if (!proceed) return;
+    }
+
+    // Time or place changes notify every going/interested attendee (DB
+    // trigger). Make sure the host means it before pinging the room.
+    const notifies =
+      'start_datetime' in updates ||
+      'end_datetime' in updates ||
+      'address' in updates ||
+      'lat' in updates ||
+      'lng' in updates;
+    if (notifies && goingCount.current > 0) {
+      const proceed = await confirmAction({
+        title: 'Notify attendees?',
+        message: `Changing the time or location sends an "event updated" notification to everyone who's going or interested (${goingCount.current} going). Save anyway?`,
+        confirmLabel: 'Save and notify',
+        cancelLabel: 'Keep editing',
+      });
+      if (!proceed) return;
+    }
 
     setSaving(true);
     try {
       // Save the event fields FIRST: if this fails, nothing has been uploaded
       // or deleted, so there are no orphans. Photos are handled afterwards
       // and photo failures are non-fatal.
-      const maxAttendeesValue = formData.maxAttendees.trim()
-        ? Number(formData.maxAttendees.trim())
-        : null;
-      const updates: Record<string, unknown> = {
-        title: formData.title.trim(),
-        description: formData.description.trim(),
-        category_id: formData.categoryId,
-        start_datetime: formData.startDatetime.toISOString(),
-        end_datetime: formData.endDatetime.toISOString(),
-        address,
-        lat,
-        lng,
-        is_recurring: formData.recurrence != null,
-        recurrence_pattern: formData.recurrence ?? null,
-      };
-      // Include max_attendees when the user set a value, or when the event
-      // previously had a cap and the field was cleared (send null to remove
-      // it); the column only exists once 20261030108000 is applied.
-      if (maxAttendeesValue != null || originalHadCap.current) {
-        updates.max_attendees = maxAttendeesValue;
-      }
-
-      let capacityUnavailable = false;
-      try {
-        await eventsService.updateEvent(id, updates as never);
-      } catch (updErr: unknown) {
-        const code = (updErr as { code?: string })?.code;
-        // TODO: remove retry once 20261030108000 is applied
-        if (
-          'max_attendees' in updates &&
-          (code === '42703' || code === 'PGRST204')
-        ) {
-          delete updates.max_attendees;
-          await eventsService.updateEvent(id, updates as never);
-          capacityUnavailable = true;
-        } else {
-          throw updErr;
-        }
+      if (Object.keys(updates).length > 0) {
+        await eventsService.updateEvent(id, updates);
       }
 
       // Detect removed photos and delete them (non-fatal)
@@ -350,49 +451,70 @@ export default function EditEvent() {
 
       // Upload + attach new images (no photoId means it's new); keep the
       // successes even if some fail.
+      // Photo order is the list order (position 0 = cover): new photos are
+      // inserted at their position and existing ones that moved get their
+      // sort_order rewritten. Before this, dragging a photo to the front only
+      // changed cover_image_url and the gallery order reverted on reload.
       let photoFailures = 0;
       const uploadedByUri = new Map<string, string>();
-      const existingCount = formData.images.filter((i) => i.photoId).length;
-      for (const img of formData.images) {
-        if (img.photoId) continue;
+      const newImages = formData.images.filter((i) => !i.photoId);
+      let uploadedSoFar = 0;
+      for (const [position, img] of formData.images.entries()) {
+        if (img.photoId) {
+          if (originalPhotoOrder.current.get(img.photoId) !== position) {
+            try {
+              await eventsService.updateEventPhotoOrder(img.photoId, position);
+            } catch {
+              // Non-fatal: order falls back to the saved one.
+            }
+          }
+          continue;
+        }
+        uploadedSoFar += 1;
+        setUploadProgress(`Uploading photo ${uploadedSoFar} of ${newImages.length}…`);
         try {
           const url = await eventsService.uploadEventImage({
             uri: img.uri,
             name: img.name,
             type: img.type,
           });
-          await eventsService.addEventPhoto(
-            id,
-            url,
-            existingCount + uploadedByUri.size
-          );
+          await eventsService.addEventPhoto(id, url, position);
           uploadedByUri.set(img.uri, url);
         } catch {
           photoFailures += 1;
         }
       }
 
-      // Cover image: first image in the list (existing URL or a successful
-      // upload); non-fatal if it can't be written.
-      const firstImage = formData.images[0];
-      const coverImageUrl = firstImage
-        ? firstImage.remoteUrl || uploadedByUri.get(firstImage.uri) || null
-        : null;
+      // Cover image: the first photo in the list that actually has a URL, so
+      // a failed new upload in slot 0 doesn't null out the cover.
+      const coverImageUrl =
+        formData.images
+          .map((img) => img.remoteUrl || uploadedByUri.get(img.uri) || null)
+          .find((url): url is string => !!url) ?? null;
       try {
         await eventsService.updateEvent(id, { cover_image_url: coverImageUrl });
       } catch {
         // Non-fatal.
       }
 
+      let linksFailed = false;
+      try {
+        const linkRows = formData.links.flatMap((link) => {
+          const url = normalizeLinkUrl(link.url);
+          return url ? [{ id: link.id, label: link.label.trim() || null, url }] : [];
+        });
+        linksFailed = !(await eventsService.syncEventLinks(id, linkRows));
+      } catch {
+        linksFailed = true;
+      }
+
       const warnings: string[] = [];
+      if (linksFailed) {
+        warnings.push('some links could not be saved.');
+      }
       if (photoFailures > 0) {
         warnings.push(
           `${photoFailures} photo(s) failed to upload — you can try again by editing the event.`
-        );
-      }
-      if (capacityUnavailable) {
-        warnings.push(
-          'Attendee capacity is not enabled yet, so the limit was not saved.'
         );
       }
       notify.success(
@@ -400,11 +522,15 @@ export default function EditEvent() {
           ? `Event updated, but ${warnings.join(' Also, ')}`
           : 'Event updated.'
       );
+      // Everything is persisted: mark the form clean so the remove guard
+      // doesn't ask about "unsaved changes" on the way out.
+      initialSnapshot.current = snapshotOf(formData);
       router.back();
     } catch (err: unknown) {
       notify.error(err instanceof Error ? err.message : 'Failed to update event');
     } finally {
       setSaving(false);
+      setUploadProgress(null);
     }
   };
 
@@ -499,6 +625,11 @@ export default function EditEvent() {
           <Text style={styles.errorText}>{errors.categoryId}</Text>
         )}
 
+        <Text style={styles.tapHint}>
+          {tzLabel
+            ? `Times are in your device timezone (${tzLabel}).`
+            : 'Times are in your device timezone.'}
+        </Text>
         <Text style={styles.label}>Start</Text>
         <TouchableOpacity
           style={styles.dateButton}
@@ -514,7 +645,20 @@ export default function EditEvent() {
             {formatDateTime(formData.startDatetime)}
           </Text>
         </TouchableOpacity>
-        {Platform.OS !== 'android' && showStartPicker && (
+        {Platform.OS === 'web' && showStartPicker && (
+          <View style={styles.webPickerWrap}>
+            <WebDateTimeInput
+              value={formData.startDatetime}
+              minimumDate={
+                formData.startDatetime.getTime() >= Date.now() ? new Date() : undefined
+              }
+              maximumDate={MAX_EVENT_DATE}
+              accessibilityLabel="Event start date and time"
+              onChange={(d) => setFormData((f) => withShiftedEnd(f, d))}
+            />
+          </View>
+        )}
+        {Platform.OS === 'ios' && showStartPicker && (
           <DateTimePicker
             value={formData.startDatetime}
             mode="datetime"
@@ -556,11 +700,23 @@ export default function EditEvent() {
             {formatDateTime(formData.endDatetime)}
           </Text>
         </TouchableOpacity>
-        {Platform.OS !== 'android' && showEndPicker && (
+        {Platform.OS === 'web' && showEndPicker && (
+          <View style={styles.webPickerWrap}>
+            <WebDateTimeInput
+              value={formData.endDatetime}
+              minimumDate={formData.startDatetime}
+              maximumDate={MAX_EVENT_DATE}
+              accessibilityLabel="Event end date and time"
+              onChange={(d) => setFormData((f) => ({ ...f, endDatetime: d }))}
+            />
+          </View>
+        )}
+        {Platform.OS === 'ios' && showEndPicker && (
           <DateTimePicker
             value={formData.endDatetime}
             mode="datetime"
             display="spinner"
+            minimumDate={formData.startDatetime}
             maximumDate={MAX_EVENT_DATE}
             onChange={(_, d) => {
               if (d) setFormData((f) => ({ ...f, endDatetime: d }));
@@ -585,7 +741,9 @@ export default function EditEvent() {
         <TouchableOpacity
           style={styles.dateButton}
           onPress={() => {
-            if (userBusiness?.subscription_tier !== 'premium') {
+            // A lapsed-premium host can still open the picker to turn an
+            // existing series off (the picker then only enables "None").
+            if (!isPremiumBusiness && formData.recurrence == null) {
               notifyConfirm({
                 title: 'Premium Feature',
                 message:
@@ -606,7 +764,7 @@ export default function EditEvent() {
                 {getRecurrenceLabel(formData.recurrence)}
               </Text>
             </View>
-            {userBusiness?.subscription_tier !== 'premium' && (
+            {!isPremiumBusiness && (
               <View style={styles.premiumBadge}>
                 <Text style={styles.premiumBadgeText}>Premium</Text>
               </View>
@@ -614,6 +772,17 @@ export default function EditEvent() {
             <ChevronRight size={18} color={Colors.text.tertiary} />
           </View>
         </TouchableOpacity>
+        {formData.recurrence ? (
+          <RecurrenceEndRow
+            variant="flat"
+            pattern={formData.recurrence}
+            seriesStart={formData.startDatetime}
+            onChange={(next) => setFormData((f) => ({ ...f, recurrence: next }))}
+          />
+        ) : null}
+        {errors.recurrenceEnd && (
+          <Text style={styles.errorText}>{errors.recurrenceEnd}</Text>
+        )}
 
         <Input
           label="Max attendees (optional)"
@@ -627,6 +796,16 @@ export default function EditEvent() {
           placeholder="Unlimited"
           keyboardType="number-pad"
           error={errors.maxAttendees}
+        />
+
+        <Text style={styles.label}>Links</Text>
+        <EventLinksEditor
+          links={formData.links}
+          errors={linkErrors}
+          onChange={(links) => {
+                  setLinkErrors({});
+                  setFormData((f) => ({ ...f, links }));
+                }}
         />
 
         <Text style={styles.label}>Photos</Text>
@@ -676,13 +855,20 @@ export default function EditEvent() {
         <RecurrencePicker
           ref={recurrencePickerRef}
           selectedValue={formData.recurrence}
-          onSelect={(v) => setFormData((f) => ({ ...f, recurrence: v }))}
+          noneOnly={!isPremiumBusiness}
+          onSelect={(v) =>
+            setFormData((f) => ({
+              ...f,
+              // Changing the cadence keeps any end date already chosen.
+              recurrence: v ? { ...v, ...(f.recurrence?.endDate ? { endDate: f.recurrence.endDate } : {}) } : null,
+            }))
+          }
         />
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, Spacing.md) }]}>
         <Button
-          label="Save changes"
+          label={uploadProgress ?? 'Save changes'}
           onPress={handleSubmit}
           gradient
           size="lg"
@@ -779,6 +965,9 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.md,
     fontFamily: Typography.fontFamilies.regular,
     color: Colors.text.primary,
+  },
+  webPickerWrap: {
+    marginBottom: Spacing.sm,
   },
   pickerDoneButton: {
     alignSelf: 'center',

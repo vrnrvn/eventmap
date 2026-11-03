@@ -191,6 +191,15 @@ export const businessesService = {
     if (error) throw error;
   },
 
+  async updateBusinessPhotoOrder(photoId: string, sortOrder: number): Promise<void> {
+    const { error } = await supabase
+      .from('business_photos')
+      .update({ sort_order: sortOrder })
+      .eq('id', photoId);
+
+    if (error) throw error;
+  },
+
   async deleteBusinessPhoto(photoId: string): Promise<void> {
     const { error } = await supabase
       .from('business_photos')

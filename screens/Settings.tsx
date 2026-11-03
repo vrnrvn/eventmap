@@ -49,6 +49,7 @@ import {
   FileText,
   Bell,
   ChevronRight,
+  UserRoundX,
   MessageCircle,
   KeyRound,
   LogOut,
@@ -166,6 +167,8 @@ export default function SettingsScreen() {
     venuePhotos: [] as ImageAsset[],
   });
   const originalVenuePhotoIds = useRef<string[]>([]);
+  /** Saved sort_order per venue photo, so only moved ones are rewritten. */
+  const originalVenuePhotoOrder = useRef<Map<string, number>>(new Map());
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -251,6 +254,7 @@ export default function SettingsScreen() {
         originalVenuePhotoIds.current = venuePhotos
           .map((img) => img.photoId)
           .filter(Boolean) as string[];
+        originalVenuePhotoOrder.current = new Map(photos.map((p) => [p.id, p.sort_order]));
         const handles = (userBusiness.social_handles as { instagram?: string; facebook?: string } | null) ?? {};
         setBusinessForm({
           name: userBusiness.name ?? '',
@@ -348,20 +352,21 @@ export default function SettingsScreen() {
         await businessesService.deleteBusinessPhoto(pid);
       }
 
-      const uploadedUrls: string[] = [];
-      for (const img of venuePhotos) {
-        if (!img.photoId) {
-          const url = await eventsService.uploadEventImage(
-            { uri: img.uri, name: img.name, type: img.type },
-            'venues'
-          );
-          uploadedUrls.push(url);
+      // List order is the saved order (position 0 = lead photo): new photos
+      // are inserted at their position and existing ones that moved get their
+      // sort_order rewritten, so the drag-to-reorder grid's result persists.
+      for (const [position, img] of venuePhotos.entries()) {
+        if (img.photoId) {
+          if (originalVenuePhotoOrder.current.get(img.photoId) !== position) {
+            await businessesService.updateBusinessPhotoOrder(img.photoId, position);
+          }
+          continue;
         }
-      }
-
-      const existingCount = venuePhotos.filter((i) => i.photoId).length;
-      for (let i = 0; i < uploadedUrls.length; i++) {
-        await businessesService.addBusinessPhoto(userBusiness.id, uploadedUrls[i], existingCount + i);
+        const url = await eventsService.uploadEventImage(
+          { uri: img.uri, name: img.name, type: img.type },
+          'venues'
+        );
+        await businessesService.addBusinessPhoto(userBusiness.id, url, position);
       }
 
       const updatedPhotos = await businessesService.getBusinessPhotos(userBusiness.id);
@@ -377,6 +382,7 @@ export default function SettingsScreen() {
       originalVenuePhotoIds.current = updatedVenuePhotos
         .map((img) => img.photoId)
         .filter(Boolean) as string[];
+      originalVenuePhotoOrder.current = new Map(updatedPhotos.map((p) => [p.id, p.sort_order]));
       setBusinessForm((prev) => ({ ...prev, venuePhotos: updatedVenuePhotos }));
 
       await refreshBusiness();
@@ -1272,6 +1278,27 @@ export default function SettingsScreen() {
                     }
                   />
                 </View>
+                <View style={styles.fieldSeparator} />
+                {/* Unblocking used to require finding the person's profile
+                    again, which is impossible if it's private. */}
+                <TouchableOpacity
+                  style={styles.privacyRow}
+                  onPress={() => router.push('/blocked-users' as never)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel="Blocked users"
+                >
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <UserRoundX size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Blocked users</Text>
+                    <Text style={styles.privacyDesc}>
+                      See everyone you&apos;ve blocked and unblock them
+                    </Text>
+                  </View>
+                  <ChevronRight size={18} color={Colors.text.tertiary} />
+                </TouchableOpacity>
               </View>
 
               {/* ── Notifications Section ── */}

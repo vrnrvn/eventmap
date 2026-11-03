@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useFocusEffect, router } from 'expo-router';
 import {
   View,
@@ -28,6 +28,13 @@ import { Input } from '@/components/Input';
 import { Button } from '@/components/ui/Button';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
+import { WebDateTimeInput } from '@/components/WebDateTimeInput';
+import { RecurrenceEndRow } from '@/components/RecurrenceEndRow';
+import {
+  EventLinksEditor,
+  normalizeLinkUrl,
+  type EventLinkDraft,
+} from '@/components/EventLinksEditor';
 import {
   RecurrencePicker,
   getRecurrenceLabel,
@@ -37,15 +44,28 @@ import { eventsService } from '@/services/events';
 import { categoriesService } from '@/services/categories';
 import { businessesService } from '@/services/businesses';
 import { Category } from '@/types/database';
-import { Colors, Shadows, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { alpha, Colors, Shadows, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { eventLocationStore } from '@/stores/eventLocationStore';
-import type { RecurrenceOption } from '@/utils/recurrence';
+import { parseRecurrenceEndDate, type RecurrenceOption } from '@/utils/recurrence';
 import { notify, notifyConfirm } from '@/utils/notify';
 import { withShiftedEnd } from '@/utils/eventDatetime';
+import { timeZoneLabel } from '@/utils/formatEventWhen';
 
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
 const MAX_EVENT_DATE = new Date();
 MAX_EVENT_DATE.setFullYear(MAX_EVENT_DATE.getFullYear() + 10);
+
+/** Which form section each validation key belongs to (for scroll-to-error). */
+const FIELD_SECTION: Record<string, string> = {
+  title: 'basic',
+  description: 'basic',
+  categoryId: 'category',
+  startDatetime: 'datetime',
+  endDatetime: 'datetime',
+  maxAttendees: 'capacity',
+  links: 'links',
+  recurrenceEnd: 'datetime',
+};
 
 const TITLE_MAX = 100;
 const DESCRIPTION_MAX = 2000;
@@ -63,10 +83,26 @@ const Palette = {
 export default function CreateScreen() {
   const insets = useSafeAreaInsets();
   const { hasBusiness, userBusiness } = useApp();
-  const { currentPlan } = usePremium();
+  const {
+    currentPlan,
+    eventCount,
+    eventLimit,
+    loading: premiumLoading,
+    refreshSubscription,
+  } = usePremium();
   const { isBanned } = useAuth();
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(false);
+  /** "Uploading photo 2 of 5…" while photos go up; null otherwise. */
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+  const isPremiumBusiness = userBusiness?.subscription_tier === 'premium';
+  // Monthly quota, shown up front so hosts don't fill the whole form before
+  // learning they're out of events. The server re-checks on publish.
+  const atEventLimit = !premiumLoading && eventCount >= eventLimit;
+  // Set once the host picks a venue in this session; stops the business-
+  // address seeding below from silently overwriting their choice when the
+  // business object is refreshed.
+  const venueChosenRef = useRef(false);
 
   const businessLocation = userBusiness
     ? { lat: userBusiness.lat, lng: userBusiness.lng, address: userBusiness.address }
@@ -84,12 +120,27 @@ export default function CreateScreen() {
     lng: DEFAULT_LOCATION.lng,
     images: [] as ImageAsset[],
     maxAttendees: '',
+    links: [] as EventLinkDraft[],
   });
+  const [linkErrors, setLinkErrors] = useState<Record<number, string>>({});
+  const tzLabel = useMemo(() => timeZoneLabel(), []);
   const recurrencePickerRef = useRef<RecurrencePickerHandle>(null);
   const scrollViewRef = useRef<ScrollView>(null);
+  /**
+   * Y offset of each form section, captured on layout so a validation error
+   * can scroll to the field that actually failed. Scrolling to the top was
+   * wrong whenever the only problem was Capacity or Links at the bottom.
+   */
+  const sectionY = useRef<Record<string, number>>({});
+  const captureSection = useCallback(
+    (key: string) => (e: { nativeEvent: { layout: { y: number } } }) => {
+      sectionY.current[key] = e.nativeEvent.layout.y;
+    },
+    []
+  );
 
   useEffect(() => {
-    if (businessLocation) {
+    if (businessLocation && !venueChosenRef.current) {
       setFormData((f) => ({
         ...f,
         address: businessLocation.address,
@@ -97,6 +148,7 @@ export default function CreateScreen() {
         lng: businessLocation.lng,
       }));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessLocation?.lat, businessLocation?.lng, businessLocation?.address]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -167,6 +219,7 @@ export default function CreateScreen() {
     useCallback(() => {
       const loc = eventLocationStore.consume();
       if (loc) {
+        venueChosenRef.current = true;
         setFormData((f) => ({
           ...f,
           address: loc.formattedAddress,
@@ -177,7 +230,8 @@ export default function CreateScreen() {
     }, [])
   );
 
-  const validate = () => {
+  /** Returns the list of failing field keys (empty when the form is valid). */
+  const validate = (): string[] => {
     const e: Record<string, string> = {};
     if (!formData.title.trim()) e.title = 'Title is required';
     if (!formData.description.trim()) e.description = 'Description is required';
@@ -194,30 +248,55 @@ export default function CreateScreen() {
         e.maxAttendees = 'Enter a whole number greater than 0';
       }
     }
+    if (formData.recurrence?.endDate) {
+      const seriesEnd = parseRecurrenceEndDate(formData.recurrence.endDate);
+      const firstDay = new Date(formData.startDatetime);
+      firstDay.setHours(0, 0, 0, 0);
+      if (seriesEnd && seriesEnd < firstDay) {
+        // Server-side event_has_ended would hide the series before it ever ran.
+        e.recurrenceEnd = 'The series end date is before the first event';
+      }
+    }
+    const linkIssues: Record<number, string> = {};
+    formData.links.forEach((link, index) => {
+      if (!link.url.trim() && !link.label.trim()) return; // blank row: ignored
+      if (!normalizeLinkUrl(link.url)) {
+        linkIssues[index] = 'Enter a web address like example.com/tickets';
+      }
+    });
+    setLinkErrors(linkIssues);
+    if (Object.keys(linkIssues).length > 0) e.links = 'Fix the links below';
     setErrors(e);
-    return Object.keys(e).length === 0;
+    return Object.keys(e);
   };
 
   const handleSubmit = async () => {
-    if (!validate()) {
-      // The first errors (basic info) live at the top of the form.
-      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    const problems = validate();
+    if (problems.length > 0) {
+      // Scroll to the first failing section rather than the top, so the
+      // message the user needs to read is on screen.
+      const target = problems
+        .map((key) => sectionY.current[FIELD_SECTION[key] ?? ''])
+        .filter((y): y is number => typeof y === 'number')
+        .sort((a, b) => a - b)[0];
+      scrollViewRef.current?.scrollTo({
+        y: Math.max(0, (target ?? 0) - 12),
+        animated: true,
+      });
       return;
     }
-    if (!userBusiness) return;
+    if (!userBusiness) {
+      notify.error('Your business profile is still loading. Try again in a moment.');
+      return;
+    }
     if (isBanned) {
       notify.error('Your account has been suspended. Please contact support.');
       return;
     }
-
-    const { canCreate, currentCount, maxCount } =
-      await businessesService.checkEventLimit(userBusiness.id);
-    if (!canCreate) {
-      notify.error(
-        `You've created ${currentCount} of ${maxCount} events this month. Upgrade to Premium for more events.`
-      );
-      return;
-    }
+    // Lock the button before the first network call: a second tap during the
+    // limit check used to re-enter here and publish the event twice.
+    if (loading) return;
+    setLoading(true);
 
     const address = formData.address.trim() || (businessLocation?.address ?? '');
     const lat = formData.address.trim()
@@ -227,8 +306,20 @@ export default function CreateScreen() {
       ? formData.lng
       : (businessLocation?.lng ?? formData.lng);
 
-    setLoading(true);
     try {
+      const { canCreate, currentCount, maxCount } =
+        await businessesService.checkEventLimit(userBusiness.id);
+      if (!canCreate) {
+        notifyConfirm({
+          title: 'Monthly event limit reached',
+          message: `You've created ${currentCount} of ${maxCount} events this month. Upgrade to Premium for more events.`,
+          cancelLabel: 'OK',
+          confirmLabel: 'Upgrade',
+          onConfirm: () => router.push('/premium/plans' as never),
+        });
+        return;
+      }
+
       // Create the event FIRST so a create failure never leaves orphaned
       // uploads; images are uploaded and attached afterwards, non-fatally.
       const eventId = await eventsService.createEvent({
@@ -246,25 +337,18 @@ export default function CreateScreen() {
         recurrencePattern: formData.recurrence ?? undefined,
       });
 
-      // Optional capacity: the column only exists once 20261030108000 is
-      // applied, so a missing-column error is tolerated.
-      let capacityUnavailable = false;
+      // Optional capacity. create_event_with_limit_check has no capacity
+      // parameter, so this is a second write; a failure is non-fatal (the
+      // event is live) and is reported honestly below.
+      let capacityFailed = false;
       const maxAttendeesValue = formData.maxAttendees.trim()
         ? Number(formData.maxAttendees.trim())
         : null;
       if (maxAttendeesValue != null) {
         try {
-          await eventsService.updateEvent(eventId, {
-            max_attendees: maxAttendeesValue,
-          } as never);
-        } catch (capErr: unknown) {
-          const code = (capErr as { code?: string })?.code;
-          // TODO: remove once 20261030108000 is applied
-          if (code === '42703' || code === 'PGRST204') {
-            capacityUnavailable = true;
-          } else {
-            capacityUnavailable = true; // non-fatal either way
-          }
+          await eventsService.updateEvent(eventId, { max_attendees: maxAttendeesValue });
+        } catch {
+          capacityFailed = true;
         }
       }
 
@@ -272,14 +356,16 @@ export default function CreateScreen() {
       // published, successes are kept).
       let photoFailures = 0;
       const uploadedUrls: string[] = [];
-      for (const img of formData.images) {
+      for (const [i, img] of formData.images.entries()) {
+        setUploadProgress(`Uploading photo ${i + 1} of ${formData.images.length}…`);
         try {
           const url = await eventsService.uploadEventImage({
             uri: img.uri,
             name: img.name,
             type: img.type,
           });
-          await eventsService.addEventPhoto(eventId, url, uploadedUrls.length);
+          // Position in the list, so an earlier failure doesn't shift the rest.
+          await eventsService.addEventPhoto(eventId, url, i);
           uploadedUrls.push(url);
         } catch {
           photoFailures += 1;
@@ -295,7 +381,22 @@ export default function CreateScreen() {
         }
       }
 
+      // Links: saved after the event row, non-fatal like photos.
+      let linksFailed = false;
+      const linkRows = formData.links.flatMap((link) => {
+        const url = normalizeLinkUrl(link.url);
+        return url ? [{ label: link.label.trim() || null, url }] : [];
+      });
+      if (linkRows.length > 0) {
+        try {
+          linksFailed = !(await eventsService.syncEventLinks(eventId, linkRows));
+        } catch {
+          linksFailed = true;
+        }
+      }
+
       // Reset the form so re-tapping Publish can't create a duplicate event.
+      venueChosenRef.current = false;
       setFormData({
         title: '',
         description: '',
@@ -308,8 +409,10 @@ export default function CreateScreen() {
         lng: businessLocation?.lng ?? DEFAULT_LOCATION.lng,
         images: [],
         maxAttendees: '',
+        links: [],
       });
       setErrors({});
+      setLinkErrors({});
 
       const warnings: string[] = [];
       if (photoFailures > 0) {
@@ -317,20 +420,24 @@ export default function CreateScreen() {
           `${photoFailures} photo(s) failed to upload — you can add them by editing the event.`
         );
       }
-      if (capacityUnavailable) {
+      if (capacityFailed) {
         warnings.push(
-          'Attendee capacity is not enabled yet, so the limit was not saved.'
+          'the attendee limit could not be saved — set it again by editing the event.'
         );
+      }
+      if (linksFailed) {
+        warnings.push('some links could not be saved — add them again by editing the event.');
       }
       notify.success(
         warnings.length > 0
           ? `Event published, but ${warnings.join(' Also, ')}`
           : 'Event created!'
       );
-      router.push({
-        pathname: '/(tabs)/discover',
-        params: { centerLat: lat.toString(), centerLng: lng.toString() },
-      });
+      // Keep the quota pill current for the next event.
+      void refreshSubscription();
+      // Land on the new event (owner view with Edit / Insights) so the host
+      // sees exactly what they published.
+      router.push(`/event/${eventId}` as never);
     } catch (err: unknown) {
       const message =
         err instanceof Error
@@ -340,6 +447,7 @@ export default function CreateScreen() {
       notify.error(message);
     } finally {
       setLoading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -410,16 +518,45 @@ export default function CreateScreen() {
             style={styles.pageHeaderLogo}
             resizeMode="contain"
           />
-          <View>
+          <View style={styles.pageHeaderText}>
             <Text style={styles.pageTitle}>Create Event</Text>
             <Text style={styles.pageSubtitle}>
               Fill in the details below to publish
             </Text>
           </View>
+          {!premiumLoading ? (
+            <View
+              style={[styles.quotaPill, atEventLimit && styles.quotaPillFull]}
+              accessibilityLabel={`${eventCount} of ${eventLimit} events used this month`}
+            >
+              <Text style={[styles.quotaPillText, atEventLimit && styles.quotaPillTextFull]}>
+                {eventCount}/{eventLimit} this month
+              </Text>
+            </View>
+          ) : null}
         </View>
 
+        {atEventLimit ? (
+          <TouchableOpacity
+            style={styles.limitBanner}
+            onPress={() => router.push('/premium/plans' as never)}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Monthly event limit reached. Upgrade to Premium for more events"
+          >
+            <Sparkles size={18} color={Colors.primary} />
+            <View style={styles.limitBannerText}>
+              <Text style={styles.limitBannerTitle}>{"You've used this month's events"}</Text>
+              <Text style={styles.limitBannerBody}>
+                Free plans include {eventLimit} per month. Upgrade to Premium to keep publishing.
+              </Text>
+            </View>
+            <ChevronRight size={18} color={Colors.primary} />
+          </TouchableOpacity>
+        ) : null}
+
         {/* ── Section: Basic Info ── */}
-        <Text style={styles.sectionLabel}>Basic Information</Text>
+        <Text style={styles.sectionLabel} onLayout={captureSection('basic')}>Basic Information</Text>
         <View style={styles.card}>
           <View style={styles.fieldRow}>
             <View style={styles.fieldContent}>
@@ -461,7 +598,7 @@ export default function CreateScreen() {
         </View>
 
         {/* ── Section: Category ── */}
-        <Text style={styles.sectionLabel}>Category</Text>
+        <Text style={styles.sectionLabel} onLayout={captureSection('category')}>Category</Text>
         <View style={styles.card}>
           <View style={styles.fieldRowNoPad}>
             <ScrollView
@@ -503,8 +640,15 @@ export default function CreateScreen() {
         </View>
 
         {/* ── Section: Date & Time ── */}
-        <Text style={styles.sectionLabel}>Date & Time</Text>
+        <Text style={styles.sectionLabel} onLayout={captureSection('datetime')}>Date & Time</Text>
         <View style={styles.card}>
+          <View style={styles.fieldRow}>
+            <Text style={styles.locationNote}>
+              {tzLabel
+                ? `Times are in your device timezone (${tzLabel}).`
+                : 'Times are in your device timezone.'}
+            </Text>
+          </View>
           {/* Start */}
           <TouchableOpacity
             style={styles.dateRow}
@@ -537,8 +681,22 @@ export default function CreateScreen() {
             </View>
           )}
 
+          {/* Web: the community picker renders nothing in a browser, so use a
+              native datetime-local input instead. */}
+          {Platform.OS === 'web' && showStartPicker && (
+            <View style={styles.inlinePickerContainer}>
+              <WebDateTimeInput
+                value={formData.startDatetime}
+                minimumDate={new Date()}
+                maximumDate={MAX_EVENT_DATE}
+                accessibilityLabel="Event start date and time"
+                onChange={(d) => setFormData((f) => withShiftedEnd(f, d))}
+              />
+            </View>
+          )}
+
           {/* Inline iOS picker — directly beneath its own row */}
-          {Platform.OS !== 'android' && showStartPicker && (
+          {Platform.OS === 'ios' && showStartPicker && (
             <View style={styles.inlinePickerContainer}>
               <DateTimePicker
                 value={formData.startDatetime}
@@ -597,14 +755,26 @@ export default function CreateScreen() {
             </View>
           )}
 
+          {Platform.OS === 'web' && showEndPicker && (
+            <View style={styles.inlinePickerContainer}>
+              <WebDateTimeInput
+                value={formData.endDatetime}
+                minimumDate={formData.startDatetime}
+                maximumDate={MAX_EVENT_DATE}
+                accessibilityLabel="Event end date and time"
+                onChange={(d) => setFormData((f) => ({ ...f, endDatetime: d }))}
+              />
+            </View>
+          )}
+
           {/* Inline iOS picker — directly beneath its own row */}
-          {Platform.OS !== 'android' && showEndPicker && (
+          {Platform.OS === 'ios' && showEndPicker && (
             <View style={styles.inlinePickerContainer}>
               <DateTimePicker
                 value={formData.endDatetime}
                 mode="datetime"
                 display="spinner"
-                minimumDate={new Date()}
+                minimumDate={formData.startDatetime}
                 maximumDate={MAX_EVENT_DATE}
                 textColor={Colors.text.primary}
                 themeVariant="light"
@@ -630,7 +800,7 @@ export default function CreateScreen() {
             style={styles.dateRow}
             activeOpacity={0.6}
             onPress={() => {
-              if (userBusiness?.subscription_tier !== 'premium') {
+              if (!isPremiumBusiness) {
                 notifyConfirm({
                   title: 'Premium Feature',
                   message:
@@ -648,15 +818,31 @@ export default function CreateScreen() {
               <Text style={styles.dateLabel}>Repeat</Text>
               <Text style={styles.dateValue}>
                 {getRecurrenceLabel(formData.recurrence)}
-                {userBusiness?.subscription_tier !== 'premium' && ' (Premium)'}
+                {!isPremiumBusiness && ' (Premium)'}
               </Text>
             </View>
             <ChevronRight size={18} color={Colors.text.tertiary} />
           </TouchableOpacity>
+
+          {formData.recurrence ? (
+            <>
+              <View style={styles.fieldSeparator} />
+              <RecurrenceEndRow
+                pattern={formData.recurrence}
+                seriesStart={formData.startDatetime}
+                onChange={(next) => setFormData((f) => ({ ...f, recurrence: next }))}
+              />
+              {errors.recurrenceEnd && (
+                <View style={styles.inlineError}>
+                  <Text style={styles.errorText}>{errors.recurrenceEnd}</Text>
+                </View>
+              )}
+            </>
+          ) : null}
         </View>
 
         {/* ── Section: Location ── */}
-        <Text style={styles.sectionLabel}>Location</Text>
+        <Text style={styles.sectionLabel} onLayout={captureSection('location')}>Location</Text>
         <View style={styles.card}>
           <View style={styles.fieldRow}>
             <View style={styles.fieldContent}>
@@ -703,7 +889,7 @@ export default function CreateScreen() {
         </View>
 
         {/* ── Section: Capacity ── */}
-        <Text style={styles.sectionLabel}>Capacity</Text>
+        <Text style={styles.sectionLabel} onLayout={captureSection('capacity')}>Capacity</Text>
         <View style={styles.card}>
           <View style={styles.fieldRow}>
             <View style={styles.fieldContent}>
@@ -720,12 +906,33 @@ export default function CreateScreen() {
                 keyboardType="number-pad"
                 error={errors.maxAttendees}
               />
+              <Text style={styles.locationNote}>
+                Only &quot;going&quot; RSVPs count toward the limit — marking interested
+                doesn&apos;t hold a spot.
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* ── Section: Links ── */}
+        <Text style={styles.sectionLabel} onLayout={captureSection('links')}>Links</Text>
+        <View style={styles.card}>
+          <View style={styles.fieldRow}>
+            <View style={styles.fieldContent}>
+              <EventLinksEditor
+                links={formData.links}
+                errors={linkErrors}
+                onChange={(links) => {
+                  setLinkErrors({});
+                  setFormData((f) => ({ ...f, links }));
+                }}
+              />
             </View>
           </View>
         </View>
 
         {/* ── Section: Photos ── */}
-        <Text style={styles.sectionLabel}>Photos</Text>
+        <Text style={styles.sectionLabel} onLayout={captureSection('photos')}>Photos</Text>
         <View style={styles.card}>
           <View style={styles.fieldRow}>
             <View style={styles.fieldContent}>
@@ -743,9 +950,12 @@ export default function CreateScreen() {
 
         {/* ── Submit ── */}
         <Button
-          label="Publish Event"
+          label={
+            uploadProgress ?? (atEventLimit ? 'Monthly limit reached' : 'Publish Event')
+          }
           onPress={handleSubmit}
           loading={loading}
+          disabled={atEventLimit}
           size="lg"
           fullWidth
           gradient
@@ -757,7 +967,13 @@ export default function CreateScreen() {
       <RecurrencePicker
         ref={recurrencePickerRef}
         selectedValue={formData.recurrence}
-        onSelect={(v) => setFormData((f) => ({ ...f, recurrence: v }))}
+        onSelect={(v) =>
+          setFormData((f) => ({
+            ...f,
+            // Changing the cadence keeps any end date already chosen.
+            recurrence: v ? { ...v, ...(f.recurrence?.endDate ? { endDate: f.recurrence.endDate } : {}) } : null,
+          }))
+        }
       />
     </KeyboardAvoidingView>
   );
@@ -783,6 +999,55 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 14,
     marginBottom: 28,
+  },
+  pageHeaderText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  quotaPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Palette.accentSoft,
+  },
+  quotaPillFull: {
+    backgroundColor: Colors.errorSoft,
+  },
+  quotaPillText: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.primary,
+    fontFamily: Typography.labelFontFamilies.semibold,
+  },
+  quotaPillTextFull: {
+    color: Colors.error,
+  },
+  limitBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    marginBottom: Spacing.lg,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: alpha(Colors.primary, 0.27),
+    backgroundColor: Palette.accentSoft,
+  },
+  limitBannerText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  limitBannerTitle: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.text.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+  },
+  limitBannerBody: {
+    marginTop: 2,
+    fontSize: Typography.sizes.xs,
+    lineHeight: 16,
+    color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.regular,
   },
   pageHeaderIcon: {
     width: 48,

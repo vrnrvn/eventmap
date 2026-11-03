@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { getNextOccurrences, type RecurrencePattern } from '@/utils/recurrence';
+import {
+  getNextOccurrences,
+  parseRecurrenceEndDate,
+  toRecurrenceEndDate,
+  type RecurrencePattern,
+} from '@/utils/recurrence';
+import { hasEventEnded } from '@/utils/eventStatus';
 
 /**
  * Exercises getNextOccurrences the way Discover's nextOccurrenceById memo does
@@ -184,5 +190,37 @@ describe('getNextOccurrences (Discover usage)', () => {
         1
       )
     ).toEqual([]);
+  });
+});
+
+describe('recurrence end date helpers', () => {
+  it('formats a local date as YYYY-MM-DD without UTC rollover', () => {
+    // 23:30 local on Jan 31 — toISOString() could land on Feb 1 west of UTC.
+    expect(toRecurrenceEndDate(new Date(2026, 0, 31, 23, 30))).toBe('2026-01-31');
+    expect(toRecurrenceEndDate(new Date(2026, 8, 5, 0, 0))).toBe('2026-09-05');
+  });
+
+  it('parses an end date to local midnight and round-trips', () => {
+    const parsed = parseRecurrenceEndDate('2026-03-15');
+    expect(parsed).toEqual(new Date(2026, 2, 15));
+    expect(toRecurrenceEndDate(parsed!)).toBe('2026-03-15');
+  });
+
+  it('returns null for missing or malformed values', () => {
+    expect(parseRecurrenceEndDate(undefined)).toBeNull();
+    expect(parseRecurrenceEndDate(null)).toBeNull();
+    expect(parseRecurrenceEndDate('')).toBeNull();
+    expect(parseRecurrenceEndDate('next week')).toBeNull();
+  });
+
+  it('agrees with hasEventEnded about when a series is over', () => {
+    const series = {
+      start_datetime: new Date(2026, 0, 1, 18, 0).toISOString(),
+      end_datetime: new Date(2026, 0, 1, 20, 0).toISOString(),
+      is_recurring: true,
+      recurrence_pattern: { frequency: 'weekly' as const, interval: 1, endDate: toRecurrenceEndDate(new Date(2026, 5, 30)) },
+    };
+    expect(hasEventEnded(series, new Date(2026, 5, 30, 23, 0))).toBe(false);
+    expect(hasEventEnded(series, new Date(2026, 6, 1, 0, 1))).toBe(true);
   });
 });

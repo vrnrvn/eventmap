@@ -3,10 +3,13 @@ import {
   DEFAULT_RADIUS_KM,
   MAX_RADIUS_KM,
   MIN_RADIUS_KM,
+  boundsOfPoints,
+  centroidOf,
   haversineKm,
   isInBounds,
   radiusKmFromBounds,
   type MapBounds,
+  zoomForPoints,
 } from '@/utils/geoBounds';
 
 const SF = { lat: 37.7749, lng: -122.4194 };
@@ -88,5 +91,57 @@ describe('isInBounds', () => {
   it('still applies the latitude bound across the antimeridian', () => {
     const dateLine: MapBounds = { ne: { lat: -16, lng: -170 }, sw: { lat: -20, lng: 170 } };
     expect(isInBounds(10, 179, dateLine)).toBe(false);
+  });
+});
+
+describe('boundsOfPoints / centroidOf', () => {
+  it('returns null for an empty set', () => {
+    expect(boundsOfPoints([])).toBeNull();
+    expect(centroidOf([])).toBeNull();
+  });
+
+  it('brackets every point', () => {
+    const pts = [
+      { lat: 37.7, lng: -122.5 },
+      { lat: 37.9, lng: -122.3 },
+      { lat: 37.8, lng: -122.4 },
+    ];
+    const b = boundsOfPoints(pts)!;
+    expect(b.sw).toEqual({ lat: 37.7, lng: -122.5 });
+    expect(b.ne).toEqual({ lat: 37.9, lng: -122.3 });
+    expect(centroidOf(pts)).toEqual({ lat: 37.8, lng: -122.4 });
+  });
+
+  it('handles a single point', () => {
+    const pts = [{ lat: 10, lng: 20 }];
+    expect(centroidOf(pts)).toEqual({ lat: 10, lng: 20 });
+  });
+});
+
+describe('zoomForPoints', () => {
+  it('falls back when there is nothing to fit', () => {
+    expect(zoomForPoints([], 11)).toBe(11);
+    expect(zoomForPoints([{ lat: 1, lng: 2 }], 11)).toBe(11);
+  });
+
+  it('zooms out further for a wider spread', () => {
+    const tight = zoomForPoints([
+      { lat: 37.77, lng: -122.42 },
+      { lat: 37.79, lng: -122.4 },
+    ]);
+    const wide = zoomForPoints([
+      { lat: 36.0, lng: -123.0 },
+      { lat: 39.0, lng: -120.0 },
+    ]);
+    expect(tight).toBeGreaterThan(wide);
+  });
+
+  it('stays within a usable range', () => {
+    const world = zoomForPoints([
+      { lat: -80, lng: -179 },
+      { lat: 80, lng: 179 },
+    ]);
+    expect(world).toBeGreaterThanOrEqual(2);
+    expect(world).toBeLessThanOrEqual(15);
   });
 });

@@ -1,4 +1,7 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { queryKeys } from '@/hooks/queryKeys';
+import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
 import {
   View,
   Text,
@@ -7,10 +10,9 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { socialService, type GoingEventsScope } from '@/services/social';
 import { eventChatService } from '@/services/eventChat';
@@ -19,7 +21,8 @@ import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { isEventInProgress } from '@/utils/eventStatus';
 import { Button } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ui/ErrorState';
-import { EventListItem, formatEventDate } from '@/components/EventListItem';
+import { EventListItem } from '@/components/EventListItem';
+import { formatEventDate, formatEventWhen } from '@/utils/formatEventWhen';
 import {
   ArrowLeft,
   CalendarDays,
@@ -31,14 +34,10 @@ import {
 
 const PAGE_SIZE = 20;
 
-type TabState = {
-  items: RankedEvent[];
-  loaded: boolean;
-  loadingMore: boolean;
-  hasMore: boolean;
+const dedupeById = (events: RankedEvent[]) => {
+  const seen = new Set<string>();
+  return events.filter((event) => (seen.has(event.id) ? false : (seen.add(event.id), true)));
 };
-
-const emptyTab = (): TabState => ({ items: [], loaded: false, loadingMore: false, hasMore: true });
 
 export default function JoinedEvents() {
   const insets = useSafeAreaInsets();
@@ -47,97 +46,69 @@ export default function JoinedEvents() {
   const initialScope: GoingEventsScope =
     params.tab === 'past' || params.tab === 'interested' ? params.tab : 'upcoming';
   const [scope, setScope] = useState<GoingEventsScope>(initialScope);
-  const [tabs, setTabs] = useState<Record<GoingEventsScope, TabState>>({
-    upcoming: emptyTab(),
-    interested: emptyTab(),
-    past: emptyTab(),
-  });
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [chatUnread, setChatUnread] = useState<Record<string, number>>({});
-  // Guards against a slow response for one tab overwriting a newer one.
-  const requestSeq = useRef<Record<GoingEventsScope, number>>({ upcoming: 0, interested: 0, past: 0 });
-
   const userId = user?.id;
-  const current = tabs[scope];
 
-  const patchTab = useCallback((key: GoingEventsScope, patch: Partial<TabState>) => {
-    setTabs((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
-  }, []);
+  // One cached, paged query per tab. React Query gives us request de-duping,
+  // stale-while-revalidate on focus and tab switches, and page merging — the
+  // hand-rolled per-tab state with request sequencing is gone.
+  const query = useInfiniteQuery({
+    queryKey: queryKeys.joinedEvents(userId, scope),
+    enabled: !!userId,
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
+      socialService.getUserGoingEvents(userId!, scope, { limit: PAGE_SIZE, offset: pageParam }),
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length >= PAGE_SIZE ? allPages.reduce((n, page) => n + page.length, 0) : undefined,
+  });
+  useRefetchOnFocus(query.refetch, !!userId);
 
-  const loadUnread = useCallback(async (events: RankedEvent[]) => {
-    const ids = events.map((event) => event.id);
-    if (ids.length === 0) return;
-    try {
-      const counts = await eventChatService.getUnreadCounts(ids);
-      setChatUnread((prev) => ({
-        ...prev,
-        ...Object.fromEntries(counts.map((row) => [row.event_id, row.unread_count])),
-      }));
-    } catch {
-      // Badges are best-effort.
-    }
-  }, []);
+  const items = useMemo(() => dedupeById(query.data?.pages.flat() ?? []), [query.data]);
+  const loaded = !query.isPending;
+  const error = query.isError ? 'Could not load your events.' : null;
+  // Only the pull gesture drives the RefreshControl; background refetches
+  // (focus, invalidation, foreground) must not animate the list.
+  const [pulling, setPulling] = useState(false);
 
-  const loadPage = useCallback(
-    async (key: GoingEventsScope, offset: number) => {
-      if (!userId) return;
-      const seq = ++requestSeq.current[key];
-      if (offset > 0) patchTab(key, { loadingMore: true });
-      try {
-        const page = await socialService.getUserGoingEvents(userId, key, {
-          limit: PAGE_SIZE,
-          offset,
-        });
-        if (seq !== requestSeq.current[key]) return;
-        setError(null);
-        setTabs((prev) => {
-          const existing = offset === 0 ? [] : prev[key].items;
-          const seen = new Set(existing.map((event) => event.id));
-          const merged = [...existing, ...page.filter((event) => !seen.has(event.id))];
-          return {
-            ...prev,
-            [key]: { items: merged, loaded: true, loadingMore: false, hasMore: page.length >= PAGE_SIZE },
-          };
-        });
-        if (key === 'upcoming') void loadUnread(page);
-        // 'interested' and 'past' carry no chat badges.
-      } catch {
-        if (seq !== requestSeq.current[key]) return;
-        setError('Could not load your events.');
-        patchTab(key, { loaded: true, loadingMore: false, hasMore: false });
-      }
-    },
-    [userId, patchTab, loadUnread]
-  );
+  // Chat unread badges only matter on the Going tab.
+  useEffect(() => {
+    if (scope !== 'upcoming' || items.length === 0) return;
+    let cancelled = false;
+    eventChatService
+      .getUnreadCounts(items.map((event) => event.id))
+      .then((counts) => {
+        if (cancelled) return;
+        setChatUnread((prev) => ({
+          ...prev,
+          ...Object.fromEntries(counts.map((row) => [row.event_id, row.unread_count])),
+        }));
+      })
+      .catch(() => {
+        // Badges are best-effort.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [scope, items]);
 
-  // Fresh data every time the screen gains focus (RSVPs change elsewhere), and
-  // again when the user switches tabs since the callback identity changes.
-  useFocusEffect(
-    useCallback(() => {
-      void loadPage(scope, 0);
-    }, [loadPage, scope])
-  );
-
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadPage(scope, 0);
-    setRefreshing(false);
-  }, [loadPage, scope]);
+  const onRefresh = useCallback(() => {
+    setPulling(true);
+    void query.refetch().finally(() => setPulling(false));
+  }, [query]);
 
   const onEndReached = useCallback(() => {
-    if (!current.loaded || current.loadingMore || !current.hasMore) return;
-    void loadPage(scope, current.items.length);
-  }, [current, loadPage, scope]);
+    if (!loaded || query.isFetchingNextPage || !query.hasNextPage) return;
+    void query.fetchNextPage();
+  }, [loaded, query]);
 
   const subtitle = useMemo(() => {
-    if (!current.loaded) return 'Loading…';
-    const n = `${current.items.length}${current.hasMore ? '+' : ''}`;
-    const noun = current.items.length === 1 ? 'event' : 'events';
+    if (!loaded) return 'Loading…';
+    const n = `${items.length}${query.hasNextPage ? '+' : ''}`;
+    const noun = items.length === 1 ? 'event' : 'events';
     if (scope === 'upcoming') return `${n} upcoming ${noun}`;
     if (scope === 'interested') return `${n} ${noun} you're interested in`;
     return `${n} attended ${noun}`;
-  }, [current, scope]);
+  }, [loaded, items.length, query.hasNextPage, scope]);
 
   const renderItem = useCallback(
     ({ item }: { item: RankedEvent }) => {
@@ -145,7 +116,7 @@ export default function JoinedEvents() {
       const live = scope !== 'past' && isEventInProgress(item);
       const unread = chatUnread[item.id] ?? 0;
       const dateLine =
-        (scope === 'past' ? formatEventDate(when) : `${formatDayLabel(when)} · ${formatTime(when)}`) +
+        (scope === 'past' ? formatEventDate(when) : formatEventWhen(when)) +
         (item.is_recurring && scope !== 'past' ? ' · repeats' : '');
       return (
         <EventListItem
@@ -177,7 +148,7 @@ export default function JoinedEvents() {
   );
 
   const renderEmpty = () => {
-    if (!current.loaded) {
+    if (!loaded) {
       // Static skeleton rows mirroring EventListItem's shape.
       return (
         <View
@@ -202,12 +173,7 @@ export default function JoinedEvents() {
         <ErrorState
           title="Couldn't load your events"
           message={error}
-          onRetry={() => {
-            // Re-enter the skeleton state so the retry gives visible feedback.
-            setError(null);
-            patchTab(scope, { loaded: false });
-            void loadPage(scope, 0);
-          }}
+          onRetry={() => void query.refetch()}
           style={styles.center}
         />
       );
@@ -288,22 +254,22 @@ export default function JoinedEvents() {
       </View>
 
       <FlatList
-        data={current.items}
+        data={items}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         ListEmptyComponent={renderEmpty}
         contentContainerStyle={[
           styles.listContent,
-          current.items.length === 0 && styles.listContentEmpty,
+          items.length === 0 && styles.listContentEmpty,
           { paddingBottom: insets.bottom + 32 },
         ]}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
+          <RefreshControl refreshing={pulling} onRefresh={onRefresh} tintColor={Colors.primary} />
         }
         onEndReached={onEndReached}
         onEndReachedThreshold={0.4}
         ListFooterComponent={
-          current.loadingMore ? (
+          query.isFetchingNextPage ? (
             <ActivityIndicator size="small" color={Colors.primary} style={styles.footerSpinner} />
           ) : null
         }
@@ -311,23 +277,6 @@ export default function JoinedEvents() {
       />
     </View>
   );
-}
-
-function formatTime(value: string) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-}
-
-function formatDayLabel(value: string) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  const today = new Date();
-  const tomorrow = new Date();
-  tomorrow.setDate(today.getDate() + 1);
-  if (d.toDateString() === today.toDateString()) return 'Today';
-  if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 const styles = StyleSheet.create({

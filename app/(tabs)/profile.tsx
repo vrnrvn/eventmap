@@ -22,7 +22,13 @@ import { socialService } from '@/services/social';
 import { useFocusEffect, router } from 'expo-router';
 import { Colors, Typography, BorderRadius, Spacing } from '@/constants/theme';
 import { Event, RankedEvent } from '@/types/database';
-import { hasEventEnded } from '@/utils/eventStatus';
+import { hasEventEnded, isEventInProgress } from '@/utils/eventStatus';
+import { getNextOccurrences } from '@/utils/recurrence';
+import {
+  formatEventDate,
+  formatEventDayLabel as formatEventDayLabelShared,
+  formatEventTime as formatEventTimeShared,
+} from '@/utils/formatEventWhen';
 import { AvatarRing } from '@/components/AvatarRing';
 import { Button } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ui/ErrorState';
@@ -106,7 +112,10 @@ export default function ProfileScreen() {
       try {
         const [created, createdCount, upcoming, counts] = await Promise.all([
           businessId
-            ? eventsService.getBusinessEvents(businessId, { limit: CREATED_PREVIEW_LIMIT })
+            ? eventsService.getBusinessEvents(businessId, {
+                limit: CREATED_PREVIEW_LIMIT,
+                scope: 'upcoming',
+              })
             : Promise.resolve([] as Event[]),
           businessId ? eventsService.getBusinessEventsCount(businessId) : Promise.resolve(0),
           userId
@@ -118,7 +127,9 @@ export default function ProfileScreen() {
         ]);
         if (isCancelled()) return;
 
-        setCreatedEvents(created);
+        // The upcoming query can't evaluate a recurring series' own end
+        // date server-side; drop ended series here.
+        setCreatedEvents(created.filter((e) => !hasEventEnded(e)));
         setJoinedEvents(upcoming);
         setStats({
           upcoming: counts.upcoming,
@@ -456,14 +467,17 @@ export default function ProfileScreen() {
               <View style={styles.joinedEmptyIcon}>
                 <PlusCircle size={24} color={Palette.primary} />
               </View>
-              <Text style={styles.joinedEmptyTitle}>No events yet</Text>
+              <Text style={styles.joinedEmptyTitle}>No upcoming events</Text>
               <Text style={styles.joinedEmptyText}>
-                Events you create for your venue will show up here.
+                Your next events will show up here. Past ones live under View All.
               </Text>
             </View>
           ) : (
             createdEvents.map((event) => {
-              const ended = hasEventEnded(event);
+              const live = isEventInProgress(event);
+              const nextStart = event.is_recurring
+                ? (getNextOccurrences(event, 1)[0]?.toISOString() ?? event.start_datetime)
+                : event.start_datetime;
               return (
                 <TouchableOpacity
                   key={event.id}
@@ -471,7 +485,7 @@ export default function ProfileScreen() {
                   activeOpacity={0.9}
                   onPress={() => router.push(`/event/${event.id}`)}
                   accessibilityRole="button"
-                  accessibilityLabel={`${event.title}, ${formatEventDateTime(event.start_datetime)}`}
+                  accessibilityLabel={`${event.title}, ${formatEventDateTime(nextStart)}`}
                 >
                   <View style={styles.eventImageWrap}>
                     {event.cover_image_url ? (
@@ -481,9 +495,9 @@ export default function ProfileScreen() {
                         <CalendarDays size={32} color={Palette.primary} />
                       </View>
                     )}
-                    <View style={[styles.eventStatusPill, ended ? styles.draftPill : styles.activePill]}>
-                      <Text style={[styles.eventStatusText, ended && styles.eventStatusTextMuted]}>
-                        {ended ? 'PAST' : 'UPCOMING'}
+                    <View style={[styles.eventStatusPill, styles.activePill]}>
+                      <Text style={styles.eventStatusText}>
+                        {live ? 'LIVE' : event.is_recurring ? 'REPEATS' : 'UPCOMING'}
                       </Text>
                     </View>
                   </View>
@@ -493,7 +507,7 @@ export default function ProfileScreen() {
                     </Text>
                     <View style={styles.eventMetaRow}>
                       <CalendarDays size={14} color={Palette.lightMuted} />
-                      <Text style={styles.eventMetaText}>{formatEventDateTime(event.start_datetime)}</Text>
+                      <Text style={styles.eventMetaText}>{formatEventDateTime(nextStart)}</Text>
                     </View>
                   </View>
                 </TouchableOpacity>
@@ -696,44 +710,10 @@ function ProfileStat({
   );
 }
 
-function formatEventDateTime(value: string) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return 'Upcoming';
-  return d.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  }).replace(',', ' •');
-}
-
-function formatEventTime(value: string) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '--:--';
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-}
-
-function formatEventDayLabel(value: string) {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return 'UPCOMING';
-
-  const today = new Date();
-  const tomorrow = new Date();
-  tomorrow.setDate(today.getDate() + 1);
-
-  if (d.toDateString() === today.toDateString()) return 'TODAY';
-  if (d.toDateString() === tomorrow.toDateString()) return 'TOMORROW';
-
-  return d
-    .toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    })
-    .toUpperCase();
-}
+const formatEventDateTime = (value: string) => formatEventDate(value) || 'Upcoming';
+const formatEventTime = (value: string) => formatEventTimeShared(value) || '--:--';
+const formatEventDayLabel = (value: string) =>
+  (formatEventDayLabelShared(value) || 'UPCOMING').toUpperCase();
 
 const styles = StyleSheet.create({
   root: {

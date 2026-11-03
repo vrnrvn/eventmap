@@ -11,7 +11,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import {
   Mail,
   Clock3,
@@ -29,7 +29,8 @@ import {
 } from 'lucide-react-native';
 import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import {
-  getNotifications,
+  getNotificationsPage,
+  getUnreadNotificationCount,
   markNotificationAsRead,
   markAllNotificationsAsRead,
   deleteNotification,
@@ -93,11 +94,21 @@ export default function NotificationsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  // Server-side count: the list is paged, so counting loaded rows would
+  // under-report (and disagree with the tab badge).
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const loadNotifications = useCallback(async () => {
     try {
-      const list = await getNotifications();
-      setNotifications(list);
+      const [{ items, hasMore: more }, unread] = await Promise.all([
+        getNotificationsPage({ offset: 0 }),
+        getUnreadNotificationCount().catch(() => 0),
+      ]);
+      setNotifications(items);
+      setHasMore(more);
+      setUnreadCount(unread);
       setError(false);
     } catch (err) {
       console.error('Failed to load notifications:', err);
@@ -120,11 +131,17 @@ export default function NotificationsScreen() {
           if (prev.some((n) => n.id === incoming.id)) return prev;
           return [incoming, ...prev];
         });
+        if (!incoming.read) setUnreadCount((c) => c + 1);
       },
       onUpdate: (updated) => {
-        setNotifications((prev) =>
-          prev.map((n) => (n.id === updated.id ? updated : n))
-        );
+        setNotifications((prev) => {
+          const before = prev.find((n) => n.id === updated.id);
+          // A push tap marks the row read server-side; keep the chip honest.
+          if (before && before.read !== updated.read) {
+            setUnreadCount((c) => Math.max(0, c + (updated.read ? -1 : 1)));
+          }
+          return prev.map((n) => (n.id === updated.id ? updated : n));
+        });
       },
       onDelete: (id) => {
         setNotifications((prev) => prev.filter((n) => n.id !== id));
@@ -133,7 +150,34 @@ export default function NotificationsScreen() {
     return unsubscribe;
   }, [user?.id]);
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const { items, hasMore: more } = await getNotificationsPage({
+        offset: notifications.length,
+      });
+      setNotifications((prev) => {
+        const seen = new Set(prev.map((n) => n.id));
+        return [...prev, ...items.filter((n) => !seen.has(n.id))];
+      });
+      setHasMore(more);
+    } catch {
+      // Keep the button so a transient failure can be retried.
+      notify.error("Couldn't load older notifications.");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, notifications.length]);
+
+  // Realtime pauses while backgrounded, so the list can drift from the badge.
+  useFocusEffect(
+    useCallback(() => {
+      getUnreadNotificationCount()
+        .then(setUnreadCount)
+        .catch(() => {});
+    }, [])
+  );
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -144,11 +188,13 @@ export default function NotificationsScreen() {
     setNotifications((prev) =>
       prev.map((n) => (n.id === id ? { ...n, read: true } : n))
     );
+    setUnreadCount((c) => Math.max(0, c - 1));
     markNotificationAsRead(id).catch(() => {
       // Revert the optimistic change so the UI and badge stay in sync.
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, read: false } : n))
       );
+      setUnreadCount((c) => c + 1);
       notify.error('Could not mark notification as read.');
     });
   }, []);
@@ -159,11 +205,14 @@ export default function NotificationsScreen() {
       previous = prev;
       return prev.map((n) => ({ ...n, read: true }));
     });
+    const previousCount = unreadCount;
+    setUnreadCount(0);
     markAllNotificationsAsRead().catch(() => {
       setNotifications(previous);
+      setUnreadCount(previousCount);
       notify.error('Could not mark all notifications as read.');
     });
-  }, []);
+  }, [unreadCount]);
 
   const dismissNotification = useCallback((id: string) => {
     let previous: Notification[] = [];
@@ -171,8 +220,11 @@ export default function NotificationsScreen() {
       previous = prev;
       return prev.filter((n) => n.id !== id);
     });
+    const wasUnread = previous.find((n) => n.id === id)?.read === false;
+    if (wasUnread) setUnreadCount((c) => Math.max(0, c - 1));
     deleteNotification(id).catch(() => {
       setNotifications(previous);
+      if (wasUnread) setUnreadCount((c) => c + 1);
       notify.error('Could not dismiss notification.');
     });
   }, []);
@@ -316,6 +368,20 @@ export default function NotificationsScreen() {
               );
             })
           )}
+          {!loading && !error && hasMore ? (
+            <TouchableOpacity
+              style={styles.loadMoreButton}
+              onPress={() => void loadMore()}
+              disabled={loadingMore}
+              activeOpacity={0.84}
+              accessibilityRole="button"
+              accessibilityLabel="Load older notifications"
+            >
+              <Text style={styles.loadMoreText}>
+                {loadingMore ? 'Loading…' : 'Load older notifications'}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         {!loading && !error && unreadCount > 0 ? (
@@ -532,6 +598,18 @@ const styles = StyleSheet.create({
     color: Palette.muted,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
+  },
+  loadMoreButton: {
+    alignSelf: 'center',
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.lg,
+    marginTop: Spacing.sm,
+  },
+  loadMoreText: {
+    fontSize: Typography.sizes.sm,
+    color: Palette.primary,
+    fontFamily: Typography.fontFamilies.semibold,
   },
   historyButton: {
     marginTop: 26,

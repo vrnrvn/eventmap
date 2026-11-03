@@ -6,45 +6,49 @@ import {
   TouchableOpacity,
   Pressable,
   ActivityIndicator,
-  Dimensions,
+  useWindowDimensions,
   Platform,
   Image,
   ScrollView,
   Modal,
   Linking,
 } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
 import { router, useFocusEffect } from 'expo-router';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BottomSheet, { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
-import { useSearch } from '@/contexts/SearchContext';
+import { useSearch, type SearchDateRange } from '@/contexts/SearchContext';
 import { eventsService } from '@/services/events';
 import { categoriesService } from '@/services/categories';
 import { RankedEvent, Category } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { getCategoryIconColor } from '@/constants/categoryIcons';
 import { CategoryIcon } from '@/components/CategoryIcon';
-import { X, Search, SlidersHorizontal, Plus, MapPin, BookmarkCheck, Flame } from 'lucide-react-native';
+import { X, Search, SlidersHorizontal, Plus, MapPin, Flame } from 'lucide-react-native';
 import { EventmapFilter, EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView';
-import { EventCardCarousel } from '@/components/EventCardCarousel';
-import { Avatar } from '@/components/Avatar';
 import { SearchOverlay } from '@/components/SearchOverlay';
 import { filterEventsByDateRange, getNextOccurrences } from '@/utils/recurrence';
-import { isInBounds, radiusKmFromBounds } from '@/utils/geoBounds';
+import { centroidOf, isInBounds, radiusKmFromBounds, zoomForPoints } from '@/utils/geoBounds';
 import { bannersService, type AppBanner } from '@/services/banners';
 import { AppBannerCarousel } from '@/components/AppBannerCarousel';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { notify } from '@/utils/notify';
 import { Button } from '@/components/ui/Button';
+import { DiscoverEventCard } from '@/components/DiscoverEventCard';
+import {
+  DATE_PRESETS,
+  matchDatePreset,
+  type DatePresetKey,
+} from '@/utils/datePresets';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+/** Collapsed sheet peek, as a share of window height. */
+const SHEET_PEEK_RATIO = 0.13;
 /** Matches listContent/sheetHeader paddingHorizontal (24pt per side). */
 const LIST_HORIZONTAL_PADDING = 24;
-const EVENT_CARD_WIDTH = SCREEN_WIDTH - LIST_HORIZONTAL_PADDING * 2;
+
 const DEFAULT_CENTER = { lat: 37.7749, lng: -122.4194 };
 const REGION_DEBOUNCE_MS = 500;
 const HEADER_HEIGHT_PX = 170;
@@ -62,6 +66,10 @@ function truncateText(text: string, limit = 50): string {
 
 export default function DiscoverScreen() {
   const insets = useSafeAreaInsets();
+  // Measured per render: card width, sheet snap points and the FAB offset all
+  // depend on it, and a module-level Dimensions.get() froze them at import.
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const eventCardWidth = windowWidth - LIST_HORIZONTAL_PADDING * 2;
   const { profile } = useAuth();
   const { hasBusiness, loading: appLoading } = useApp();
   const { location: searchLocation, dateRange, setDateRange } = useSearch();
@@ -131,9 +139,30 @@ export default function DiscoverScreen() {
     };
   }, []);
 
+  // One fetch per genuine filter change. The effect used to re-run for any
+  // identity change (and on mount, against the default centre) while
+  // handleSearchFromOverlay issued its own load — up to three requests per
+  // search. Comparing a signature makes the programmatic path and this effect
+  // mutually exclusive.
+  const filterSignature = useMemo(
+    () =>
+      JSON.stringify({
+        q: searchQuery,
+        c: [...selectedCategories].sort(),
+        d: dateRange ? [dateRange.start.getTime(), dateRange.end.getTime()] : null,
+      }),
+    [searchQuery, selectedCategories, dateRange]
+  );
+  // Seeded with the initial signature so mount doesn't duplicate
+  // loadInitialData's fetch.
+  const lastFilterSignatureRef = useRef(filterSignature);
+
   useEffect(() => {
+    if (lastFilterSignatureRef.current === filterSignature) return;
+    lastFilterSignatureRef.current = filterSignature;
     loadEventsWithCenter(center.lat, center.lng);
-  }, [searchQuery, selectedCategories, dateRange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterSignature]);
 
   const mapCenterRef = useRef(mapCenter);
   mapCenterRef.current = mapCenter;
@@ -215,37 +244,47 @@ export default function DiscoverScreen() {
   const loadRequestIdRef = useRef(0);
   const loadingMoreRef = useRef(false);
 
-  const currentFilters = () => ({
-    // Read through a ref: pagination and debounced region loads call this from
-    // closures that may hold a stale `mapBounds` render value.
-    radiusKm: radiusKmFromBounds(mapBoundsRef.current),
-    searchQuery: searchQuery || undefined,
-    categories: selectedCategories.length > 0 ? selectedCategories : undefined,
-    startDate: dateRange?.start ?? null,
-    endDate: dateRange?.end ?? null,
-  });
+  /**
+   * Filters that haven't been committed to state yet. The overlay search sets
+   * keyword + dates and loads in the same tick; without passing them through,
+   * the load would read the pre-search values from this render's closure.
+   */
+  type FilterOverride = { searchQuery?: string; dateRange?: SearchDateRange | null };
+  const rangeFor = (override?: FilterOverride) =>
+    override && 'dateRange' in override ? (override.dateRange ?? null) : dateRange;
 
-  const applyDateFilter = (data: RankedEvent[]) =>
-    dateRange != null
-      ? filterEventsByDateRange(data, dateRange.start, dateRange.end)
-      : data;
+  const currentFilters = (override?: FilterOverride) => {
+    const range = rangeFor(override);
+    return {
+      // Read through a ref: pagination and debounced region loads call this from
+      // closures that may hold a stale `mapBounds` render value.
+      radiusKm: radiusKmFromBounds(mapBoundsRef.current),
+      searchQuery: (override?.searchQuery ?? searchQuery) || undefined,
+      categories: selectedCategories.length > 0 ? selectedCategories : undefined,
+      startDate: range?.start ?? null,
+      endDate: range?.end ?? null,
+    };
+  };
+
+  const applyDateFilter = (data: RankedEvent[], range: SearchDateRange | null = dateRange) =>
+    range != null ? filterEventsByDateRange(data, range.start, range.end) : data;
 
   // First page: resets paging. Any filter or region change routes through
   // here, so paging always restarts from offset 0 for the new query.
-  const loadEventsWithCenter = async (lat: number, lng: number) => {
+  const loadEventsWithCenter = async (lat: number, lng: number, override?: FilterOverride) => {
     const requestId = ++loadRequestIdRef.current;
     try {
       setLoading(true);
       const { items, hasMore } = await eventsService.getRankedEventsPage(
         lat,
         lng,
-        currentFilters(),
+        currentFilters(override),
         { limit: EVENTS_PAGE_SIZE, offset: 0 }
       );
       if (requestId !== loadRequestIdRef.current) return;
       fetchOffsetRef.current = items.length;
       setHasMoreEvents(hasMore);
-      setEvents(applyDateFilter(items));
+      setEvents(applyDateFilter(items, rangeFor(override)));
       setLoadError(false);
     } catch (err) {
       console.error('Failed to load events:', err);
@@ -372,17 +411,33 @@ export default function DiscoverScreen() {
   };
 
   const handleSearchFromOverlay = useCallback(
-    (location: { lat: number; lng: number; label: string } | null, keyword: string) => {
+    (
+      location: { lat: number; lng: number; label: string } | null,
+      keyword: string,
+      range: SearchDateRange | null
+    ) => {
       setSearchQuery(keyword);
+      setDateRange(range);
+      // Claim this filter combination so the effect above doesn't fire a
+      // second request for the same state.
+      lastFilterSignatureRef.current = JSON.stringify({
+        q: keyword,
+        c: [...selectedCategories].sort(),
+        d: range ? [range.start.getTime(), range.end.getTime()] : null,
+      });
       const target = location ?? userLocation ?? { lat: DEFAULT_CENTER.lat, lng: DEFAULT_CENTER.lng };
       beginProgrammaticMove(1200);
       setCenter(target);
       setMapCenter(target);
       setExplicitMoveTrigger((t) => t + 1);
       mapRef.current?.animateTo(target.lat, target.lng);
-      loadEventsWithCenter(target.lat, target.lng);
+      // Pass the new keyword/dates explicitly: this closure still holds the
+      // pre-search state, and the signature claim above means the filter
+      // effect won't issue a corrective fetch.
+      loadEventsWithCenter(target.lat, target.lng, { searchQuery: keyword, dateRange: range });
     },
-    [userLocation, beginProgrammaticMove]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [userLocation, beginProgrammaticMove, selectedCategories, setDateRange]
   );
 
   const handleRegionChange = useCallback(
@@ -420,19 +475,67 @@ export default function DiscoverScreen() {
     return events.filter((e) => isInBounds(e.lat, e.lng, mapBounds));
   }, [events, mapBounds]);
 
+  /**
+   * Events we fetched for this area that fall outside the current viewport.
+   * The list is bounds-filtered but the map is not (markers are injected from
+   * the full set so a small pan doesn't rebuild the cluster group), so the
+   * list can read "nothing here" while pins sit just off-screen. Rather than
+   * dropping those markers — which would hide results the user could pan to —
+   * the empty state says how many there are and offers to fit them.
+   */
+  const offscreenEvents = useMemo(() => {
+    if (!mapBounds) return [];
+    return events.filter((e) => !isInBounds(e.lat, e.lng, mapBounds));
+  }, [events, mapBounds]);
+
+  const showOffscreenEvents = useCallback(() => {
+    const points = offscreenEvents.map((e) => ({ lat: e.lat, lng: e.lng }));
+    const target = centroidOf(points);
+    if (!target) return;
+    beginProgrammaticMove(1200);
+    setCenter(target);
+    setMapCenter(target);
+    setExplicitMoveTrigger((t) => t + 1);
+    mapRef.current?.animateTo(target.lat, target.lng, zoomForPoints(points));
+  }, [offscreenEvents, beginProgrammaticMove]);
+
+  // Looked up in the full fetched set, not the bounds-filtered list: a pin
+  // can be tapped at the viewport edge (or while mapBounds is a step behind
+  // an animated move) and still needs its preview.
   const activeEvent = useMemo(
-    () => (activeMarkerId ? visibleEvents.find((e) => e.id === activeMarkerId) ?? null : null),
-    [activeMarkerId, visibleEvents]
+    () => (activeMarkerId ? events.find((e) => e.id === activeMarkerId) ?? null : null),
+    [activeMarkerId, events]
   );
+
+  // The sheet is closed imperatively on marker press; if the preview
+  // disappears for any reason other than the user dismissing it (the event
+  // dropped out of a reloaded page), restore the sheet so the screen never
+  // ends up as map-only with no way back.
+  useEffect(() => {
+    if (showFloatingCard && !activeEvent) {
+      setShowFloatingCard(false);
+      setActiveMarkerId(null);
+      bottomSheetRef.current?.snapToIndex(0);
+    }
+  }, [showFloatingCard, activeEvent]);
 
   const handleMarkerPress = useCallback(
     (eventId: string) => {
       setActiveMarkerId(eventId);
       setShowFloatingCard(true);
+      // Slide the list out of the way; its scroll position is preserved
+      // because the sheet stays mounted.
+      bottomSheetRef.current?.close();
       beginProgrammaticMove(1000);
     },
     [beginProgrammaticMove]
   );
+
+  const dismissFloatingCard = useCallback(() => {
+    setActiveMarkerId(null);
+    setShowFloatingCard(false);
+    bottomSheetRef.current?.snapToIndex(0);
+  }, []);
 
   const viewabilityCallbackRef = useRef<
     (info: { viewableItems: Array<{ item: RankedEvent; index: number | null }> }) => void
@@ -477,27 +580,24 @@ export default function DiscoverScreen() {
     return map;
   }, [events]);
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  };
-
-  /** Short badge date: "TODAY" or "SAT, NOV 8". */
-  const formatBadgeDate = (dateString: string) => {
-    const date = new Date(dateString);
-    if (date.toDateString() === new Date().toDateString()) return 'TODAY';
-    return date
-      .toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
-      .toUpperCase();
-  };
-
   const activeFilterCount =
     selectedCategories.length + (searchQuery.length > 0 ? 1 : 0) + (dateRange != null ? 1 : 0);
+
+  /**
+   * Date filtering used to live only inside the search overlay's "when" step,
+   * which is reachable only after choosing a destination — so "what's on
+   * tonight" had no discoverable path. These presets back both the Filters
+   * sheet and the header chip.
+   */
+  const activeDatePreset = useMemo<DatePresetKey>(() => matchDatePreset(dateRange), [dateRange]);
+
+  const applyDatePreset = useCallback(
+    (key: DatePresetKey) => {
+      const preset = DATE_PRESETS.find((p) => p.key === key);
+      setDateRange(preset ? preset.build() : null);
+    },
+    [setDateRange]
+  );
 
   const headerHeight = useMemo(
     () => HEADER_HEIGHT_PX,
@@ -507,10 +607,10 @@ export default function DiscoverScreen() {
   const snapPoints = useMemo(
     () => [
       // Tall enough at rest for the sheet title/count to peek above the tab bar.
-      SCREEN_HEIGHT * 0.13,
-      SCREEN_HEIGHT - headerHeight,
+      windowHeight * SHEET_PEEK_RATIO,
+      windowHeight - headerHeight,
     ],
-    [headerHeight]
+    [headerHeight, windowHeight]
   );
 
   const centerForMap = useMemo(
@@ -533,76 +633,28 @@ export default function DiscoverScreen() {
     [events]
   );
 
-  const renderEventCard = ({ item, index }: { item: RankedEvent; index: number }) => {
-    // Recurring events show their next upcoming occurrence, not the raw start.
-    const displayDate = nextOccurrenceById.get(item.id) ?? item.start_datetime;
-    return (
-    <Animated.View
-      entering={FadeInDown.delay(index * 60).springify().damping(18)}
-      style={styles.eventCardWrapper}
-    >
-      <TouchableOpacity
-        style={styles.eventCard}
-        onPress={() => router.push(`/event/${item.id}` as never)}
-        activeOpacity={0.92}
-        accessibilityRole="button"
-        accessibilityLabel={`${item.title}, ${formatDate(displayDate)}`}
-      >
-        <EventCardCarousel
-          imageUrls={item.cover_image_url ? [item.cover_image_url] : []}
-          width={EVENT_CARD_WIDTH}
-        />
-        <View style={styles.eventContent}>
-          <View style={styles.eventHeader}>
-            <Text style={styles.eventTitle} numberOfLines={1}>
-              {item.title}
-            </Text>
-          </View>
-          <View style={styles.eventMeta}>
-            <View style={styles.metaRow}>
-              <MapPin size={14} color={Colors.text.tertiary} />
-              <Text style={styles.metaText}>{(item.distance_km * 0.621371).toFixed(1)} mi</Text>
-              <Text style={styles.metaDot}>•</Text>
-              <Text style={styles.metaText} numberOfLines={1}>
-                {formatDate(displayDate)}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.eventBadgeRow}>
-            <View style={styles.eventBadgeLight}>
-              <Text style={styles.eventBadgeLightText}>
-                {formatBadgeDate(displayDate)}
-              </Text>
-            </View>
-            <View style={styles.eventBadgeDark}>
-              <Text style={styles.eventBadgeDarkText}>{item.category_label.toUpperCase()}</Text>
-            </View>
-            {/* Viewer fields are undefined until 20261030114000 is applied — nothing renders. */}
-            {item.user_rsvp === 'going' ? (
-              <View style={styles.eventBadgeGoing}>
-                <Text style={styles.eventBadgeGoingText}>GOING</Text>
-              </View>
-            ) : null}
-            {item.user_saved ? (
-              <View
-                style={styles.eventSavedGlyph}
-                accessibilityLabel="Saved event"
-              >
-                <BookmarkCheck size={14} color={Colors.primary} />
-              </View>
-            ) : null}
-          </View>
-          <TouchableOpacity style={styles.businessRow} onPress={() => router.push(`/business/${item.business_id}` as never)} activeOpacity={0.7}>
-            <Avatar imageUrl={item.business_logo_url} name={item.business_name} size={24} />
-            <Text style={styles.businessName} numberOfLines={1}>
-              {item.business_name}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
-    </Animated.View>
-    );
-  };
+  const openEvent = useCallback((eventId: string) => {
+    router.push(`/event/${eventId}` as never);
+  }, []);
+  const openBusiness = useCallback((businessId: string) => {
+    router.push(`/business/${businessId}` as never);
+  }, []);
+
+  // Memoised card + stable callbacks: a map pan updates mapCenter/mapBounds
+  // on every moveend, which used to re-render every mounted card.
+  const renderEventCard = useCallback(
+    ({ item, index }: { item: RankedEvent; index: number }) => (
+      <DiscoverEventCard
+        item={item}
+        index={index}
+        width={eventCardWidth}
+        displayDate={nextOccurrenceById.get(item.id) ?? item.start_datetime}
+        onPress={openEvent}
+        onBusinessPress={openBusiness}
+      />
+    ),
+    [nextOccurrenceById, openEvent, openBusiness, eventCardWidth]
+  );
 
   const eventCountLabel = loading
     ? 'Finding events near you...'
@@ -652,10 +704,8 @@ export default function DiscoverScreen() {
         <>
           <Pressable
             style={styles.floatingCardBackdrop}
-            onPress={() => {
-              setActiveMarkerId(null);
-              setShowFloatingCard(false);
-            }}
+            onPress={dismissFloatingCard}
+            accessibilityLabel="Close event preview"
           />
           <View
             style={[styles.floatingCardWrapper, { bottom: insets.bottom + 20 }]}
@@ -693,8 +743,7 @@ export default function DiscoverScreen() {
                     style={styles.floatingCardActionBtn}
                     onPress={(e) => {
                       e.stopPropagation();
-                      setActiveMarkerId(null);
-                      setShowFloatingCard(false);
+                      dismissFloatingCard();
                     }}
                     hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                     accessibilityRole="button"
@@ -766,6 +815,24 @@ export default function DiscoverScreen() {
           contentContainerStyle={styles.chipsRow}
           style={styles.chipsScroll}
         >
+          <TouchableOpacity
+            style={[styles.overlayChip, activeDatePreset === 'today' && styles.overlayChipActive]}
+            onPress={() => applyDatePreset(activeDatePreset === 'today' ? 'any' : 'today')}
+            activeOpacity={0.85}
+            hitSlop={CHIP_HIT_SLOP}
+            accessibilityRole="button"
+            accessibilityLabel="Only events happening today"
+            accessibilityState={{ selected: activeDatePreset === 'today' }}
+          >
+            <Text
+              style={[
+                styles.overlayChipText,
+                activeDatePreset === 'today' && styles.overlayChipTextActive,
+              ]}
+            >
+              TODAY
+            </Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={[styles.overlayChip, selectedCategories.length === 0 && styles.overlayChipActive]}
             onPress={() => setSelectedCategories([])}
@@ -865,7 +932,44 @@ export default function DiscoverScreen() {
             contentContainerStyle={styles.filtersPageContentInner}
             showsVerticalScrollIndicator={false}
           >
-            <Text style={styles.filtersSectionTitle}>Categories</Text>
+            <Text style={styles.filtersSectionTitle}>When</Text>
+            <View style={styles.datePresetRow}>
+              {DATE_PRESETS.map((preset) => {
+                const selected = activeDatePreset === preset.key;
+                return (
+                  <TouchableOpacity
+                    key={preset.key}
+                    style={[styles.datePresetChip, selected && styles.datePresetChipSelected]}
+                    onPress={() => applyDatePreset(preset.key)}
+                    activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={preset.label}
+                  >
+                    <Text
+                      style={[
+                        styles.datePresetText,
+                        selected && styles.datePresetTextSelected,
+                      ]}
+                    >
+                      {preset.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            {dateRange ? (
+              <Text style={styles.datePresetSummary}>
+                {dateRange.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                {' — '}
+                {dateRange.end.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                {activeDatePreset === 'custom' ? ' (from search)' : ''}
+              </Text>
+            ) : null}
+
+            <Text style={[styles.filtersSectionTitle, styles.filtersSectionTitleSpaced]}>
+              Categories
+            </Text>
             <View style={styles.categoriesGrid}>
               {categories.map((category) => {
                 const isSelected = selectedCategories.includes(category.id);
@@ -937,7 +1041,7 @@ export default function DiscoverScreen() {
             // Sit a step above the sheet's collapsed peek (same 0.13 snap as
             // snapPoints) so the FAB never brushes the peeked header on tall
             // screens, while staying clear of the map attribution.
-            { bottom: Math.max(SCREEN_HEIGHT * 0.13 + Spacing.md, insets.bottom + 104) },
+            { bottom: Math.max(windowHeight * SHEET_PEEK_RATIO + Spacing.md, insets.bottom + 104) },
           ]}
         >
           <TouchableOpacity
@@ -952,7 +1056,9 @@ export default function DiscoverScreen() {
         </View>
       )}
 
-      {!(activeEvent && showFloatingCard) && (
+      {/* The sheet stays mounted while a map preview is open: unmounting it
+          reset the list's scroll position and replayed every card's entrance
+          animation when the preview closed. It is animated closed instead. */}
       <BottomSheet
         ref={bottomSheetRef}
         index={0}
@@ -992,19 +1098,47 @@ export default function DiscoverScreen() {
                     resizeMode="contain"
                   />
                 </View>
-                <Text style={styles.emptyTitle}>No events nearby</Text>
-                <Text style={styles.emptySubtitle}>
-                  No events in this area. Try moving the map or adjusting your filters
+                <Text style={styles.emptyTitle}>
+                  {offscreenEvents.length > 0
+                    ? 'Nothing in this part of the map'
+                    : searchQuery
+                      ? `No results for “${searchQuery}”`
+                      : 'No events nearby'}
                 </Text>
-                {(selectedCategories.length > 0 || searchQuery.length > 0 || dateRange != null) && (
+                <Text style={styles.emptySubtitle}>
+                  {offscreenEvents.length > 0
+                    ? `${offscreenEvents.length} ${
+                        offscreenEvents.length === 1 ? 'event is' : 'events are'
+                      } just outside the current view.`
+                    : searchQuery
+                      ? 'Nothing matches in the current map area. Zoom out or clear the search.'
+                      : dateRange || selectedCategories.length > 0
+                        ? 'Nothing matches these filters here. Try another date or category.'
+                        : 'No events in this area yet. Try moving the map.'}
+                </Text>
+                {offscreenEvents.length > 0 ? (
+                  <TouchableOpacity
+                    style={styles.clearFiltersButton}
+                    onPress={showOffscreenEvents}
+                    activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Show the ${offscreenEvents.length} events just outside the view`}
+                  >
+                    <Text style={styles.clearFiltersText}>
+                      Show {offscreenEvents.length === 1 ? 'it' : 'them'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : (selectedCategories.length > 0 || searchQuery.length > 0 || dateRange != null) ? (
                   <TouchableOpacity
                     style={styles.clearFiltersButton}
                     onPress={clearFilters}
                     activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear all filters"
                   >
                     <Text style={styles.clearFiltersText}>Clear filters</Text>
                   </TouchableOpacity>
-                )}
+                ) : null}
               </View>
             )
           }
@@ -1032,7 +1166,6 @@ export default function DiscoverScreen() {
           }}
         />
       </BottomSheet>
-      )}
     </View>
   );
 }
@@ -1047,7 +1180,6 @@ const styles = StyleSheet.create({
   },
   map: {
     flex: 1,
-    minHeight: SCREEN_HEIGHT,
   },
   mapDimOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -1178,6 +1310,43 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
     color: Colors.text.inverse,
+  },
+  datePresetRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.sm,
+  },
+  datePresetChip: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 10,
+    minHeight: 44,
+    justifyContent: 'center',
+    borderRadius: BorderRadius.round,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+    backgroundColor: Colors.surface,
+  },
+  datePresetChipSelected: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primarySoft,
+  },
+  datePresetText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.medium,
+  },
+  datePresetTextSelected: {
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+  },
+  datePresetSummary: {
+    marginTop: Spacing.sm,
+    fontSize: Typography.sizes.xs,
+    color: Colors.text.tertiary,
+    fontFamily: Typography.fontFamilies.regular,
+  },
+  filtersSectionTitleSpaced: {
+    marginTop: Spacing.xl,
   },
   filtersPage: {
     flex: 1,
@@ -1317,7 +1486,7 @@ const styles = StyleSheet.create({
     zIndex: 100,
   },
   floatingCard: {
-    height: SCREEN_HEIGHT * 0.35,
+    height: 260,
     flexDirection: 'column',
     borderRadius: 20,
     overflow: 'hidden',
@@ -1456,9 +1625,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: Spacing.xxl * 2,
   },
-  eventCardWrapper: {
-    marginBottom: 18,
-  },
   clearText: {
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamily,
@@ -1489,107 +1655,6 @@ const styles = StyleSheet.create({
     color: Colors.text.inverse,
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
-  },
-  eventCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 32,
-    overflow: 'hidden',
-    borderWidth: 0,
-    ...Shadows.sm,
-  },
-  eventContent: {
-    padding: 10,
-  },
-  eventHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: Spacing.sm,
-  },
-  eventTitle: {
-    flex: 1,
-    fontSize: 22,
-    lineHeight: 28,
-    fontFamily: Typography.displayFontFamilies.extrabold,
-    fontWeight: '800',
-    color: Colors.text.primary,
-    letterSpacing: -0.2,
-  },
-  eventMeta: {
-    gap: Spacing.xs,
-    marginBottom: 10,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.xs,
-  },
-  metaText: {
-    fontSize: 12,
-    fontFamily: Typography.labelFontFamilies.medium,
-    color: Colors.text.secondary,
-  },
-  metaDot: {
-    color: Colors.text.tertiary,
-    marginHorizontal: 4,
-  },
-  eventBadgeRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 10,
-  },
-  eventBadgeLight: {
-    backgroundColor: Colors.primarySoft,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: BorderRadius.round,
-  },
-  eventBadgeLightText: {
-    color: Colors.primary,
-    fontSize: Typography.sizes.xxs,
-    letterSpacing: 2,
-    fontFamily: Typography.labelFontFamilies.semibold,
-  },
-  eventBadgeDark: {
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: BorderRadius.round,
-  },
-  eventBadgeDarkText: {
-    color: '#FFFFFF',
-    fontSize: Typography.sizes.xxs,
-    letterSpacing: 2,
-    fontFamily: Typography.labelFontFamilies.semibold,
-  },
-  eventBadgeGoing: {
-    backgroundColor: Colors.successSoft,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: BorderRadius.round,
-  },
-  eventBadgeGoingText: {
-    color: Colors.success,
-    fontSize: Typography.sizes.xxs,
-    letterSpacing: 2,
-    fontFamily: Typography.labelFontFamilies.semibold,
-  },
-  eventSavedGlyph: {
-    alignSelf: 'center',
-    marginLeft: 'auto',
-    paddingHorizontal: Spacing.xs,
-  },
-  businessRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    marginTop: 2,
-  },
-  businessName: {
-    flex: 1,
-    fontSize: 12,
-    fontFamily: Typography.labelFontFamilies.medium,
-    color: Colors.text.secondary,
   },
   loadingRow: {
     paddingVertical: Spacing.xxl,

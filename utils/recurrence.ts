@@ -30,6 +30,23 @@ function toDateOnly(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * Local calendar date → 'YYYY-MM-DD' for `RecurrencePattern.endDate`. Uses
+ * local components (not toISOString) so a date picked in the evening west of
+ * UTC doesn't roll over to the next day.
+ */
+export function toRecurrenceEndDate(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Parse a `RecurrencePattern.endDate` into a local-midnight Date, or null. */
+export function parseRecurrenceEndDate(s: string | null | undefined): Date | null {
+  if (!s || !/^\d{4}-\d{2}-\d{2}/.test(s)) return null;
+  const d = parseDateOnly(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 function parseDateOnly(s: string): Date {
   // Parse 'YYYY-MM-DD' into LOCAL date components (matches utils/eventStatus.ts)
   // so the end date doesn't land a day early west of UTC.

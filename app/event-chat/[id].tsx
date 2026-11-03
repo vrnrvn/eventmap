@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
-  Linking,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -33,7 +32,9 @@ import {
   ShieldCheck,
   Users,
 } from 'lucide-react-native';
-import { socialService } from '@/services/social';
+import { socialService, BlockingUnavailableError } from '@/services/social';
+import { complaintsService } from '@/services/complaints';
+import { ReportReasonSheet } from '@/components/ReportReasonSheet';
 import { ChatModerationSheet } from '@/components/ChatModerationSheet';
 import { useAuth } from '@/contexts/AuthContext';
 import { eventsService } from '@/services/events';
@@ -46,6 +47,7 @@ import {
   ChatConnectionStatus,
   ChatPostStatus,
   ChatReportReason,
+  CHAT_REPORT_REASONS,
   ChatSlowModeSeconds,
   ChatSubscription,
   CHAT_MESSAGE_PAGE_SIZE,
@@ -63,18 +65,19 @@ import {
   dayLabel,
   isGrouped,
   resolveMentions,
-  segmentBody,
   sortMessages,
-  timeLabel,
-  tombstoneLabel,
   typingLabel,
 } from '@/utils/chatMessages';
-import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import {
+  ChatListRow,
+  type ChatListRowData,
+  type ChatMessage,
+} from '@/components/chat/ChatMessageRow';
 
 const NEAR_BOTTOM_THRESHOLD = 80;
 const MAX_MESSAGE_LENGTH = 1000;
 const COUNTER_VISIBLE_FROM = MAX_MESSAGE_LENGTH - 100;
-const AVATAR_SIZE = 32;
 const TYPING_IDLE_MS = 2500;
 const TYPING_EXPIRE_MS = 4000;
 const MARK_READ_DEBOUNCE_MS = 800;
@@ -88,64 +91,13 @@ const HIGHLIGHT_MS = 2500;
 const DEEP_LINK_MAX_PAGES = 5;
 const UNREAD_JUMP_MIN_DISTANCE = 6;
 
-type ChatMessage = EventChatMessageWithSender & {
-  localStatus?: 'sending' | 'failed';
-};
-
-type ListRow =
-  | { kind: 'day'; id: string; label: string }
-  | { kind: 'divider'; id: string; label: string }
-  | {
-      kind: 'message';
-      id: string;
-      message: ChatMessage;
-      mine: boolean;
-      firstOfGroup: boolean;
-      lastOfGroup: boolean;
-    };
+type ListRow = ChatListRowData;
 
 function haptic(kind: 'send' | 'press' | 'error') {
   if (Platform.OS === 'web') return;
   if (kind === 'send') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   else if (kind === 'press') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   else void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-}
-
-/** Message body with tappable URLs and highlighted @mentions. */
-function LinkifiedText({
-  body,
-  mine,
-  mentionNames,
-}: {
-  body: string;
-  mine: boolean;
-  mentionNames: string[];
-}) {
-  const segments = segmentBody(body, mentionNames);
-  return (
-    <Text style={[styles.messageText, mine && styles.messageTextMine]} selectable>
-      {segments.map((segment, index) => {
-        if (segment.kind === 'text') return segment.text;
-        if (segment.kind === 'mention') {
-          return (
-            <Text key={`m-${index}`} style={[styles.mention, mine && styles.mentionMine]}>
-              {segment.text}
-            </Text>
-          );
-        }
-        return (
-          <Text
-            key={`l-${index}`}
-            style={[styles.messageLink, mine && styles.messageLinkMine]}
-            onPress={() => void Linking.openURL(segment.href)}
-            accessibilityRole="link"
-          >
-            {segment.text}
-          </Text>
-        );
-      })}
-    </Text>
-  );
 }
 
 export default function EventChatScreen() {
@@ -168,6 +120,9 @@ export default function EventChatScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [actionTarget, setActionTarget] = useState<ChatMessageActionsTarget | null>(null);
   const [postStatus, setPostStatus] = useState<ChatPostStatus | null>(null);
+  /** Senders the viewer has globally blocked (user_blocks). */
+  const [blockedSenders, setBlockedSenders] = useState<Set<string>>(new Set());
+  const [reportUserTarget, setReportUserTarget] = useState<{ id: string; name: string } | null>(null);
   const [moderationOpen, setModerationOpen] = useState(false);
   const [mentionCandidates, setMentionCandidates] = useState<PublicAttendee[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -817,7 +772,32 @@ export default function EventChatScreen() {
         } else if (isChatRateLimitError(err)) {
           showNotice("You're sending messages too quickly — give it a moment.");
         } else if (isChatAccessError(err)) {
-          showNotice('You can no longer post in this chat.');
+          // RLS refused the insert: the chat was locked, relocked below two
+          // attendees, or this user was blocked/banned since the screen
+          // loaded. Retrying can't succeed, so drop the optimistic bubble,
+          // give the text back as the draft and explain. (Settings changes
+          // don't reach us live — event_chat_settings is not in the
+          // realtime publication until migration 20261102120000 — so this
+          // is where attendees first learn the chat was locked.)
+          setMessages((current) => current.filter((item) => item.id !== pending.id));
+          // Never lose what they typed: if a new draft is already underway,
+          // append the rejected text rather than replacing it, and restore
+          // the mention ids so an @Name still resolves on re-send.
+          setDraft((current) => (current.trim() ? `${current}\n${pending.body}` : pending.body));
+          const restored = Object.entries(pending.mention_names ?? {}).map(([mentionId, name]) => ({ id: mentionId, name }));
+          if (restored.length) {
+            const known = new Set(draftMentionsRef.current.map((m) => m.id));
+            draftMentionsRef.current = [...draftMentionsRef.current, ...restored.filter((m) => !known.has(m.id))];
+          }
+          const status = await eventChatService.getPostStatus(id).catch(() => null);
+          if (status) setPostStatus(status);
+          showNotice(
+            status?.locked && !status.is_host && !status.is_admin
+              ? "The host locked the chat — your message wasn't sent."
+              : status?.is_blocked
+                ? "You've been removed from this chat — your message wasn't sent."
+                : "You can no longer post in this chat — your message wasn't sent."
+          );
           void refreshDetails();
         } else {
           showNotice("Message not sent — tap it to retry.");
@@ -949,9 +929,83 @@ export default function EventChatScreen() {
         deleted: Boolean(message.deleted_at),
         deletedBySender: Boolean(message.deleted_at) && message.deleted_by === message.sender_id,
         canModerate: isModerator,
+        senderBlocked: blockedSenders.has(message.sender_id),
       });
     },
-    [isModerator]
+    [isModerator, blockedSenders]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    socialService
+      .getBlockedUsers()
+      .then((rows) => {
+        if (!cancelled) setBlockedSenders(new Set(rows.map((row) => row.id)));
+      })
+      .catch(() => {
+        // Blocking unavailable or transient failure: treat as none blocked.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleViewProfile = useCallback((target: ChatMessageActionsTarget) => {
+    router.push(`/user/${target.senderId}` as never);
+  }, []);
+
+  /**
+   * Account-level block (user_blocks), distinct from the host's per-chat
+   * removal: it hides the person's messages from this viewer everywhere.
+   */
+  const handleToggleGlobalBlock = useCallback(
+    async (target: ChatMessageActionsTarget) => {
+      const wasBlocked = blockedSenders.has(target.senderId);
+      try {
+        if (wasBlocked) {
+          await socialService.unblockUser(target.senderId);
+          setBlockedSenders((prev) => {
+            const next = new Set(prev);
+            next.delete(target.senderId);
+            return next;
+          });
+          showNotice(`${target.senderName} unblocked.`);
+        } else {
+          await socialService.blockUser(target.senderId);
+          setBlockedSenders((prev) => new Set(prev).add(target.senderId));
+          showNotice(`${target.senderName} blocked. You won't see their messages.`);
+        }
+        setReloadKey((key) => key + 1);
+      } catch (err) {
+        showNotice(
+          err instanceof BlockingUnavailableError
+            ? "Blocking isn't enabled on this server yet."
+            : "Couldn't update the block. Please try again."
+        );
+      }
+    },
+    [blockedSenders, showNotice]
+  );
+
+  const handleReportUser = useCallback((target: ChatMessageActionsTarget) => {
+    setReportUserTarget({ id: target.senderId, name: target.senderName });
+  }, []);
+
+  const submitUserReport = useCallback(
+    async (reason: string) => {
+      if (!reportUserTarget) return;
+      try {
+        await complaintsService.createComplaint('user', reportUserTarget.id, reason);
+        showNotice('Report received. We review reports within about 48 hours.');
+      } catch (err) {
+        showNotice(
+          (err as { code?: string })?.code === '23505'
+            ? "You've already reported this person."
+            : "Couldn't send the report. Please try again."
+        );
+      }
+    },
+    [reportUserTarget, showNotice]
   );
 
   const handleCopy = useCallback(
@@ -1040,7 +1094,7 @@ export default function EventChatScreen() {
       );
       showNotice(
         settings.locked === true
-          ? 'Chat locked. Only you can post.'
+          ? 'Chat locked. Attendees can read but not post until you unlock it.'
           : settings.locked === false
             ? 'Chat unlocked.'
             : settings.slowModeSeconds === 0
@@ -1081,118 +1135,27 @@ export default function EventChatScreen() {
     [removeMessage]
   );
 
-  const renderRow = ({ item }: { item: ListRow }) => {
-    if (item.kind === 'day') {
-      return (
-        <View style={styles.dayRow}>
-          <Text style={styles.dayLabel}>{item.label}</Text>
-        </View>
-      );
-    }
-    if (item.kind === 'divider') {
-      return (
-        <View style={styles.dividerRow} accessibilityRole="header">
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerLabel}>{item.label}</Text>
-          <View style={styles.dividerLine} />
-        </View>
-      );
-    }
+  const viewerId = user?.id;
+  const viewProfile = useCallback((userId: string) => {
+    router.push(`/user/${userId}` as never);
+  }, []);
 
-    const { message, mine, firstOfGroup, lastOfGroup } = item;
-    const senderName = message.sender?.name ?? 'Someone';
-    const failed = message.localStatus === 'failed';
-    const sending = message.localStatus === 'sending';
-    const mentionsMe = !mine && !!user?.id && message.mentions.includes(user.id);
-
-    if (message.deleted_at) {
-      const tombstone = (
-        <View style={[styles.tombstone, mine && styles.tombstoneMine]} accessibilityRole="text">
-          <Text style={styles.tombstoneText}>
-            {tombstoneLabel(message, user?.id, isModerator)}
-            {!mine ? ` · ${senderName}` : ''}
-            {isModerator ? ' · hold for options' : ''}
-          </Text>
-        </View>
-      );
-      return (
-        <View style={[styles.messageRow, mine && styles.messageRowMine, styles.messageRowGroupEnd]}>
-          {!mine ? <View style={styles.avatarSpacer} /> : null}
-          {isModerator ? (
-            <Pressable
-              onLongPress={() => openActions(message, mine)}
-              delayLongPress={300}
-              accessibilityRole="button"
-              accessibilityLabel="Removed message, long press for moderator options"
-            >
-              {tombstone}
-            </Pressable>
-          ) : (
-            tombstone
-          )}
-        </View>
-      );
-    }
-
-    return (
-      <View
-        style={[
-          styles.messageRow,
-          mine && styles.messageRowMine,
-          // Inverted list: cells are flipped twice, so a row's bottom margin
-          // still renders below it — the gap to the next (newer) message.
-          lastOfGroup ? styles.messageRowGroupEnd : styles.messageRowGrouped,
-        ]}
-      >
-        {!mine ? (
-          lastOfGroup ? (
-            <Avatar imageUrl={message.sender?.avatar_url ?? null} name={senderName} size={AVATAR_SIZE} />
-          ) : (
-            <View style={styles.avatarSpacer} />
-          )
-        ) : null}
-        <Pressable
-          onLongPress={() => openActions(message, mine)}
-          onPress={failed ? () => openActions(message, mine) : undefined}
-          delayLongPress={300}
-          style={({ pressed }) => [
-            styles.messageBubble,
-            mine && styles.messageBubbleMine,
-            !lastOfGroup && styles.messageBubbleGrouped,
-            mentionsMe && styles.messageBubbleMentioned,
-            highlightedId === message.id && styles.messageBubbleHighlighted,
-            failed && styles.messageBubbleFailed,
-            pressed && styles.messageBubblePressed,
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel={
-            failed
-              ? 'Message not sent, tap for options'
-              : `${mine ? 'Your' : `${senderName}'s`} message, long press for options`
-          }
-          accessibilityHint={message.body}
-        >
-          {!mine && firstOfGroup ? (
-            <Text style={styles.senderName} numberOfLines={1}>
-              {senderName}
-            </Text>
-          ) : null}
-          <LinkifiedText body={message.body} mine={mine} mentionNames={Object.values(message.mention_names)} />
-          {lastOfGroup || sending || failed ? (
-            <Text
-              style={[
-                styles.messageMeta,
-                mine && styles.messageMetaMine,
-                failed && styles.messageMetaFailed,
-              ]}
-            >
-              {failed ? 'Not sent · tap to retry' : sending ? 'Sending…' : timeLabel(message.created_at)}
-            </Text>
-          ) : null}
-        </Pressable>
-      </View>
-    );
-  };
+  // Rows are memoised components: only the highlighted flag, the viewer and
+  // the moderator role vary per row, so composer keystrokes and typing
+  // indicators no longer re-render the whole transcript.
+  const renderRow = useCallback(
+    ({ item }: { item: ListRow }) => (
+      <ChatListRow
+        row={item}
+        viewerId={viewerId}
+        isModerator={isModerator}
+        highlighted={item.kind === 'message' && highlightedId === item.id}
+        onOpenActions={openActions}
+        onViewProfile={viewProfile}
+      />
+    ),
+    [viewerId, isModerator, highlightedId, openActions, viewProfile]
+  );
 
   const renderEmpty = () => {
     if (loading) {
@@ -1449,6 +1412,15 @@ export default function EventChatScreen() {
         ) : null}
       </View>
 
+      {!loading && details?.event.status === 'cancelled' ? (
+        <View style={styles.lockedNotice} accessibilityRole="alert">
+          <Info size={16} color={Colors.text.secondary} />
+          <Text style={styles.lockedNoticeText}>
+            This event was cancelled by the organizer. The chat stays open for everyone who was going.
+          </Text>
+        </View>
+      ) : null}
+
       {showLockedNotice ? (
         <View style={[styles.lockedNotice, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <Lock size={16} color={Colors.text.secondary} />
@@ -1495,7 +1467,7 @@ export default function EventChatScreen() {
                   key={attendee.id}
                   onPress={() => insertMention(attendee)}
                   hitSlop={2}
-                  style={({ pressed }) => [styles.mentionChip, pressed && styles.messageBubblePressed]}
+                  style={({ pressed }) => [styles.mentionChip, pressed && styles.pressedDim]}
                   accessibilityRole="button"
                   accessibilityLabel={`Mention ${attendee.name}`}
                 >
@@ -1559,6 +1531,14 @@ export default function EventChatScreen() {
         />
       ) : null}
 
+      <ReportReasonSheet
+        visible={reportUserTarget != null}
+        title={reportUserTarget ? `Report ${reportUserTarget.name}` : 'Report'}
+        description="Tell us what's wrong. A moderator will review it; they aren't told who reported."
+        reasons={CHAT_REPORT_REASONS}
+        onClose={() => setReportUserTarget(null)}
+        onSubmit={(reason) => void submitUserReport(reason)}
+      />
       <ChatMessageActionsSheet
         target={actionTarget}
         onClose={() => setActionTarget(null)}
@@ -1567,6 +1547,9 @@ export default function EventChatScreen() {
         onDelete={(target) => void handleDelete(target)}
         onRestore={(target) => void handleRestore(target)}
         onBlockUser={(target, minutes) => void handleBlockUser(target, minutes)}
+        onViewProfile={handleViewProfile}
+        onToggleGlobalBlock={(target) => void handleToggleGlobalBlock(target)}
+        onReportUser={handleReportUser}
         onRetry={handleRetry}
         onDiscard={handleDiscard}
       />
@@ -1676,23 +1659,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamilies.semibold,
   },
-  dayRow: {
-    alignItems: 'center',
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-  dayLabel: {
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Colors.background.tertiary,
-    fontSize: Typography.sizes.xs,
-    lineHeight: 14,
-    letterSpacing: 0.2,
-    color: Colors.text.secondary,
-    fontFamily: Typography.labelFontFamilies.semibold,
-    overflow: 'hidden',
-  },
   historyFooter: {
     alignItems: 'center',
     paddingVertical: Spacing.md,
@@ -1701,70 +1667,6 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.xs,
     color: Colors.text.tertiary,
     fontFamily: Typography.labelFontFamilies.medium,
-  },
-  messageRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: Spacing.sm,
-  },
-  messageRowMine: {
-    justifyContent: 'flex-end',
-  },
-  messageRowGroupEnd: {
-    marginBottom: 12,
-  },
-  messageRowGrouped: {
-    marginBottom: Spacing.xs,
-  },
-  avatarSpacer: {
-    width: AVATAR_SIZE,
-  },
-  messageBubble: {
-    maxWidth: '80%',
-    borderRadius: BorderRadius.lg,
-    borderBottomLeftRadius: BorderRadius.sm,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: Colors.surface,
-    ...Shadows.sm,
-  },
-  messageBubbleMine: {
-    borderBottomLeftRadius: BorderRadius.lg,
-    borderBottomRightRadius: BorderRadius.sm,
-    backgroundColor: Colors.primary,
-  },
-  messageBubbleGrouped: {
-    borderBottomLeftRadius: BorderRadius.lg,
-    borderBottomRightRadius: BorderRadius.lg,
-  },
-  messageBubbleFailed: {
-    opacity: 0.7,
-  },
-  messageBubbleHighlighted: {
-    borderWidth: 2,
-    borderColor: Colors.primary,
-    transform: [{ scale: 1.02 }],
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    marginTop: Spacing.xs,
-    marginBottom: Spacing.md,
-  },
-  dividerLine: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: Colors.primary,
-    opacity: 0.5,
-  },
-  dividerLabel: {
-    fontSize: Typography.sizes.xs,
-    lineHeight: 14,
-    letterSpacing: 0.4,
-    textTransform: 'uppercase',
-    color: Colors.primary,
-    fontFamily: Typography.labelFontFamilies.semibold,
   },
   unreadJumpPill: {
     backgroundColor: Colors.surface,
@@ -1776,38 +1678,6 @@ const styles = StyleSheet.create({
   },
   unreadJumpText: {
     color: Colors.primary,
-  },
-  messageBubbleMentioned: {
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.primary,
-    backgroundColor: Colors.accentLight,
-  },
-  tombstone: {
-    maxWidth: '80%',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: Colors.border.medium,
-  },
-  tombstoneMine: {
-    alignSelf: 'flex-end',
-  },
-  tombstoneText: {
-    fontSize: Typography.sizes.sm,
-    lineHeight: 18,
-    fontStyle: 'italic',
-    color: Colors.text.tertiary,
-    fontFamily: Typography.fontFamilies.regular,
-  },
-  mention: {
-    color: Colors.primary,
-    fontFamily: Typography.fontFamilies.semibold,
-  },
-  mentionMine: {
-    color: Colors.text.inverse,
-    textDecorationLine: 'underline',
   },
   mentionStrip: {
     gap: Spacing.sm,
@@ -1824,51 +1694,14 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.round,
     backgroundColor: Colors.background.secondary,
   },
+  pressedDim: {
+    opacity: 0.85,
+  },
   mentionChipText: {
     maxWidth: 140,
     fontSize: Typography.sizes.sm,
     color: Colors.text.primary,
     fontFamily: Typography.fontFamilies.medium,
-  },
-  messageBubblePressed: {
-    opacity: 0.85,
-  },
-  senderName: {
-    marginBottom: 2,
-    fontSize: Typography.sizes.xs,
-    lineHeight: 16,
-    color: Colors.primary,
-    fontFamily: Typography.labelFontFamilies.semibold,
-  },
-  messageText: {
-    fontSize: Typography.sizes.md,
-    lineHeight: 22,
-    color: Colors.text.primary,
-    fontFamily: Typography.fontFamilies.regular,
-  },
-  messageTextMine: {
-    color: Colors.text.inverse,
-  },
-  messageLink: {
-    color: Colors.primary,
-    textDecorationLine: 'underline',
-  },
-  messageLinkMine: {
-    color: Colors.text.inverse,
-  },
-  messageMeta: {
-    marginTop: 4,
-    alignSelf: 'flex-end',
-    fontSize: Typography.sizes.xs,
-    lineHeight: 14,
-    color: Colors.text.tertiary,
-    fontFamily: Typography.labelFontFamilies.medium,
-  },
-  messageMetaMine: {
-    color: alpha(Colors.surface, 0.75),
-  },
-  messageMetaFailed: {
-    color: Colors.error,
   },
   unseenPill: {
     position: 'absolute',

@@ -8,8 +8,8 @@ Items marked **[DB]** require a migration — deferred until migrations can be a
 
 1. [x] Rebrand reconciliation (style.md ↔ theme.ts, tokens, local palettes) — style.md rewritten for the red brand; `surface`/`primarySoft`/soft status tokens + `alpha()` added to theme.ts; terracotta/teal/amber remnants purged; local palettes dissolved or token-backed.
 2. [x] Premium consolidation (single source of truth, client-side) — **done**: `businesses.subscription_tier` + `subscription_expires_at` are the single source of truth; mock in-memory state removed; one plan catalog (Free + Pro, $29.99/mo) in `services/premium.ts`.
-3. [ ] Event lifecycle (cancelled state, owner past-events policy, capacity) — **[DB]** [migration written — pending apply: 20261030105000 owner policy, 20261030106000 cancelled status + cancel_event RPC, 20261030108000 capacity + join_event_with_capacity RPC; client cancel + capacity flows wired with pre-apply fallbacks]
-4. [ ] Server-side enforcement sweep (reviews, bans, privacy) — **[DB]** [migration written — pending apply: 20261030103000 reviews, 20261030104000 bans + RSVP lifecycle; privacy already server-side since 20261029110000]
+3. [x] Event lifecycle (cancelled state, owner past-events policy, capacity) — **[DB]** [migration written — pending apply: 20261030105000 owner policy, 20261030106000 cancelled status + cancel_event RPC, 20261030108000 capacity + join_event_with_capacity RPC; client cancel + capacity flows wired with pre-apply fallbacks] **Applied locally 2026-11-02; client fallbacks removed.**
+4. [x] Server-side enforcement sweep (reviews, bans, privacy) — **[DB]** [migration written — pending apply: 20261030103000 reviews, 20261030104000 bans + RSVP lifecycle; privacy already server-side since 20261029110000] **Applied locally 2026-11-02.**
 5. [x] Quick wins (km/mi, search input, fake description, etc.) — done (see checked items below)
 
 ---
@@ -20,14 +20,14 @@ Items marked **[DB]** require a migration — deferred until migrations can be a
 - [x] Keyword search unreachable: `searchQuery` in `app/(tabs)/discover.tsx:57` only written by `clearFilters()`; backend ILIKE support unused — fixed: keyword field added to SearchOverlay 'where' step, wired to `searchQuery`.
 - [x] `Alert.alert` no-op on web: all auth/onboarding feedback invisible on web (`app/(auth)/signup.tsx:53`, `login.tsx:59`, onboarding saves) — fixed for auth/onboarding/settings: `utils/notify.ts` + `components/AppToast.tsx` toast/confirm system mounted in `app/_layout.tsx`; remaining call sites tracked in P1.
 - [x] Past events publishable and instantly hidden: create validates only end>start (`app/(tabs)/create.tsx:166-176`); RLS hides ended events; burns monthly limit — client side fixed: future-start validation + `minimumDate` on pickers (Edit screen only enforces it when the start was changed).
-- [ ] **[DB]** Business owners lose past events: only SELECT policy is `end_datetime > now()` (`supabase/migrations/20260213092204:126-130`). Needs owner SELECT policy. [migration written — pending apply: 20261030105000; MyEvents needs no client change]
-- [ ] **[DB]** Event deletion strands attendees: hard cascade, no DELETE notification trigger (`services/events.ts:95-99`). Needs "cancelled" soft state + notify. [migration written — pending apply: 20261030106000 adds events.status + cancel_event RPC (notifies going/interested); CLIENT WIRED: MyEvents/EventDetail now call `eventsService.cancelEvent` (cancel_event RPC) with a hard-delete fallback while 42883/PGRST202 (pre-apply); remove fallback in services/events.ts once applied]
-- [ ] **[DB]** RLS hole: business owners can rewrite customer reviews — UPDATE policy has no column restriction (`…20260217110000_create_reviews.sql:44-60`). [migration written — pending apply: 20261030103000 column-scoping trigger]
+- [x] **[DB]** Business owners lose past events: only SELECT policy is `end_datetime > now()` (`supabase/migrations/20260213092204:126-130`). Needs owner SELECT policy. [migration written — pending apply: 20261030105000; MyEvents needs no client change] **Applied on the shared local DB (verified 2026-11-02).**
+- [x] **[DB]** Event deletion strands attendees: hard cascade, no DELETE notification trigger (`services/events.ts:95-99`). Needs "cancelled" soft state + notify. [migration written — pending apply: 20261030106000 adds events.status + cancel_event RPC (notifies going/interested); CLIENT WIRED: MyEvents/EventDetail now call `eventsService.cancelEvent` (cancel_event RPC) with a hard-delete fallback while 42883/PGRST202 (pre-apply); remove fallback in services/events.ts once applied] **Applied on the shared local DB (verified 2026-11-02). Hard-delete fallback removed from services/events.ts.**
+- [x] **[DB]** RLS hole: business owners can rewrite customer reviews — UPDATE policy has no column restriction (`…20260217110000_create_reviews.sql:44-60`). [migration written — pending apply: 20261030103000 column-scoping trigger] **Applied on the shared local DB (verified 2026-11-02).**
 - [x] Premium system three-way contradiction (see Premium section) — fixed: single DB-backed source of truth, one cancel flow (`/premium/manage`), one upsell route (`/premium/plans`).
 - [x] Distance km shown as "mi" (`app/(tabs)/discover.tsx:369`) — fixed: km→mi conversion applied (also unified `screens/SavedEvents.tsx` to miles).
 - [x] No account deletion (`screens/Settings.tsx`) — fixed: `delete_own_account()` RPC + Settings "Delete account" row with double confirm [migration written — pending apply: 20261030109000; client degrades gracefully via `services/account.ts` NOT_AVAILABLE on 42883/PGRST202]. Report user added to profile header (`screens/UserProfile.tsx`, complaintsService 'user'); global blocking still missing (see [DB] item below).
-- [ ] **[DB]** No global user-block table (only per-event `event_chat_blocks`) — [migration written — pending apply: 20261030111000 `user_blocks` table + blocker-scoped RLS; client wired: Block/Unblock on `screens/UserProfile.tsx` via `socialService.blockUser/unblockUser/isBlocked`, degrades to "Blocking isn't enabled on this server yet." pre-apply (42P01 → NOT_AVAILABLE)].
-- [ ] **[DB]** Enforce user_blocks in chat/content RPCs — hide blocked users' chat messages/events (and vice versa) once 20261030111000 is applied; blocking is storage-only today. [migration written — pending apply: 20261030116000 filters blocked senders from the attendee chat SELECT policy (viewer-side mute; sending stays allowed, host/admin moderation reads keep full transcript); known mismatch: `get_event_chat_unread_counts` is SECURITY DEFINER and still counts blocked senders' messages, so the unread badge can exceed rendered messages; events/content enforcement still open]
+- [x] **[DB]** No global user-block table (only per-event `event_chat_blocks`) — [migration written — pending apply: 20261030111000 `user_blocks` table + blocker-scoped RLS; client wired: Block/Unblock on `screens/UserProfile.tsx` via `socialService.blockUser/unblockUser/isBlocked`, degrades to "Blocking isn't enabled on this server yet." pre-apply (42P01 → NOT_AVAILABLE)]. **Applied on the shared local DB (verified 2026-11-02).**
+- [x] **[DB]** Enforce user_blocks in chat/content RPCs — hide blocked users' chat messages/events (and vice versa) once 20261030111000 is applied; blocking is storage-only today. [migration written — pending apply: 20261030116000 filters blocked senders from the attendee chat SELECT policy (viewer-side mute; sending stays allowed, host/admin moderation reads keep full transcript); known mismatch: `get_event_chat_unread_counts` is SECURITY DEFINER and still counts blocked senders' messages, so the unread badge can exceed rendered messages; events/content enforcement still open] **Applied on the shared local DB (verified 2026-11-02). Notification-side enforcement still open (see Events Tier 0 section).**
 
 ## P1 — High
 
@@ -47,16 +47,16 @@ Items marked **[DB]** require a migration — deferred until migrations can be a
 
 ### Discovery
 - [x] Location permission denial silent → SF default, no banner/CTA (`app/(tabs)/discover.tsx:139-146`) — fixed: dismissible "Location is off — showing San Francisco" banner with Enable (opens settings), `userLocation` stays null on denial, permission re-checked on focus (banner clears + recenters once granted).
-- [ ] 100-event hard cap, no pagination (`services/events.ts:21`); no marker clustering; map WebView full-reloads on recenter (`components/GoogleMapView.tsx:245-257`) — pagination: **[DB]** [migration written — pending apply: 20261030110000 adds p_offset to get_ranked_events; client pages 50/append-on-scroll and falls back to the legacy single 100-event fetch pre-apply]; clustering added via @googlemaps/markerclusterer (CDN, plain markers if it fails); WebView now builds HTML once and pans via injected JS (no reload on recenter).
+- [x] 100-event hard cap, no pagination (`services/events.ts:21`); no marker clustering; map WebView full-reloads on recenter (`components/GoogleMapView.tsx:245-257`) — pagination: **[DB]** [migration written — pending apply: 20261030110000 adds p_offset to get_ranked_events; client pages 50/append-on-scroll and falls back to the legacy single 100-event fetch pre-apply]; clustering added via @googlemaps/markerclusterer (CDN, plain markers if it fails); WebView now builds HTML once and pans via injected JS (no reload on recenter). **Applied on the shared local DB (verified 2026-11-02). Legacy single-fetch fallback removed.**
 - [x] Signed-out "Join Event" silently no-ops (`screens/EventDetail.tsx:926-929`) — fixed: button shows "Sign in to join" and routes to login with a `redirect` return path back to the event.
 - [x] Empty description renders fake marketing copy (`screens/EventDetail.tsx:729`) — fixed: neutral "No description provided." in tertiary text.
 
 ### Attendance / multi-user
-- [ ] **[DB]** No capacity model: no join cap, no waitlist (`services/social.ts:24-45`). [migration written — pending apply: 20261030108000 (events.max_attendees + join_event_with_capacity RPC); tolerant client wired: join tries RPC then falls back to upsert, EventDetail shows X / Y + "Event full", create/edit forms have optional Max attendees with missing-column retry; discovery (get_ranked_events) intentionally untouched — surface remaining capacity there post-apply; waitlist still open]
+- [x] **[DB]** No capacity model: no join cap, no waitlist (`services/social.ts:24-45`). [migration written — pending apply: 20261030108000 (events.max_attendees + join_event_with_capacity RPC); tolerant client wired: join tries RPC then falls back to upsert, EventDetail shows X / Y + "Event full", create/edit forms have optional Max attendees with missing-column retry; discovery (get_ranked_events) intentionally untouched — surface remaining capacity there post-apply; waitlist still open] **Applied on the shared local DB (verified 2026-11-02). Upsert fallback removed; waitlist still open.**
 - [x] Hosts have no UI entry to their own event chat — gated on `user_rsvp === 'going'` (`screens/EventDetail.tsx:662-667`) — fixed: owner "Manage chat" row on EventDetail → `/event-chat/[id]`; chat screen already honors host read+moderation via `get_event_chat_post_status.can_read` and now shows a host-specific read-only notice (posting still requires a 'going' RSVP per the INSERT policy — no new grants).
-- [ ] **[DB]** Anyone can review a business they never attended, incl. the owner (policy only checks `auth.uid() = user_id`). [migration written — pending apply: 20261030103000 eligibility check (past 'going' RSVP, owner excluded)]
+- [x] **[DB]** Anyone can review a business they never attended, incl. the owner (policy only checks `auth.uid() = user_id`). [migration written — pending apply: 20261030103000 eligibility check (past 'going' RSVP, owner excluded)] **Applied on the shared local DB (verified 2026-11-02).**
 - [x] Attendee count / chat unlock not realtime (`screens/EventDetail.tsx:128-157`) — mitigated: 20s focus-scoped poll of rsvp_count (rsvps is not in the realtime publication, so postgres_changes would never fire); true realtime tracked in the [DB] item below.
-- [ ] **[DB]** Add `rsvps` to the `supabase_realtime` publication (only `event_chat_messages` is published — 20260301000000) so EventDetail can replace its 20s attendance poll with a debounced postgres_changes subscription filtered by event_id. [client subscription pre-wired; fires once publication is added — the 20s poll stays as primary/fallback] [migration written — pending apply: 20261030115000 adds rsvps to the publication + REPLICA IDENTITY FULL so DELETE payloads carry event_id]
+- [x] **[DB]** Add `rsvps` to the `supabase_realtime` publication (only `event_chat_messages` is published — 20260301000000) so EventDetail can replace its 20s attendance poll with a debounced postgres_changes subscription filtered by event_id. [client subscription pre-wired; fires once publication is added — the 20s poll stays as primary/fallback] [migration written — pending apply: 20261030115000 adds rsvps to the publication + REPLICA IDENTITY FULL so DELETE payloads carry event_id] **Applied on the shared local DB (verified 2026-11-02). Note: RLS on rsvps is self-scoped, so the subscription only sees the viewer's own rows; the 20s poll remains primary (Tier 1).**
 
 ### Business / premium (beyond consolidation)
 - [x] Event insights blend real counts with `Math.random()` data, barely labeled — now premium-gated and every simulated card carries an explicit "Sample data" badge. TODO(schema): add an event_views/analytics table to replace `getSampleEventAnalytics`.
@@ -83,7 +83,7 @@ Items marked **[DB]** require a migration — deferred until migrations can be a
 
 ### Event creation / editing
 - [x] Edit screen address text and pin can diverge (`screens/EditEvent.tsx:431-445`) — fixed: EditEvent now uses the same select-only `/business-location` picker flow as create.tsx (via `eventLocationStore`); free-typed addresses can no longer save stale coordinates.
-- [ ] Changing start doesn't shift end; Android time-step cancel discards chosen date (`create.tsx:84-85,464-466`; `EditEvent.tsx:123-150`).
+- [x] Changing start doesn't shift end; Android time-step cancel discards chosen date (`create.tsx:84-85,464-466`; `EditEvent.tsx:123-150`). **Already fixed in code: `withShiftedEnd` + Android date-first commit (verified 2026-11-02).**
 - [ ] Submit-only validation, no scroll-to-first-error (`create.tsx:166-176`).
 - [ ] No unsaved-changes guard on Edit (`screens/EditEvent.tsx:259-261`).
 - [ ] No price/capacity/ticket-link fields; `event_links` schema+service unused (`services/events.ts:131-154`).
@@ -97,7 +97,7 @@ Items marked **[DB]** require a migration — deferred until migrations can be a
 - [ ] Pull-to-refresh mid-pan reloads page 1 at the live map center (`discover.tsx:328-336` uses `mapCenterRef`) without committing `center`, so later load-more pages (`discover.tsx:290-294`) query the old center — mixed-center pages can skip items (dupes are de-duped).
 - [x] "Clear filters" misses date filter; empty-state Clear hidden when only date set (`discover.tsx:205-208,693`) — fixed: clearFilters resets date range; empty-state Clear shows for date filters too.
 - [x] No pull-to-refresh / focus refresh on Discover — pull-to-refresh added on the bottom-sheet list (BottomSheetFlatList refreshing/onRefresh); focus refresh intentionally omitted (map region changes already drive reloads).
-- [ ] No joined/saved indication on cards (`types/database.ts:214-229` lacks viewer fields). **[DB]** [migration written — pending apply: 20261030114000 adds `user_rsvp`/`user_saved` to get_ranked_events; discover cards show a Going badge + saved bookmark and degrade gracefully pre-apply (fields undefined → nothing renders)]
+- [x] No joined/saved indication on cards (`types/database.ts:214-229` lacks viewer fields). **[DB]** [migration written — pending apply: 20261030114000 adds `user_rsvp`/`user_saved` to get_ranked_events; discover cards show a Going badge + saved bookmark and degrade gracefully pre-apply (fields undefined → nothing renders)] **Applied on the shared local DB (verified 2026-11-02).**
 - [ ] Recurring events show original stale date + wrong badge in list (`discover.tsx:379,389`).
 - [ ] Marker tap unmounts entire bottom sheet (`discover.tsx:656-720`).
 - [x] Photo carousel missing page dots (`screens/EventDetail.tsx:528-550`; styles 1118-1133 unused) — fixed: dots rendered above the hero title when photo count > 1, active dot tracks onMomentumScrollEnd.
@@ -105,8 +105,8 @@ Items marked **[DB]** require a migration — deferred until migrations can be a
 - [x] Fixed 50 km radius regardless of zoom (`discover.tsx:179`) — radius now derived from the map viewport (half the bounds diagonal, clamped 5–150 km; falls back to 50 km until the map reports bounds).
 
 ### Attendance / notifications
-- [ ] **[DB]** Bans not enforced on rsvps/saves/reviews policies (chat does it right). [migration written — pending apply: 20261030104000 adds `user_is_banned()` to all three INSERT policies]
-- [ ] **[DB]** RSVP to ended events blocked client-side only. [migration written — pending apply: 20261030104000 `event_is_open_for_rsvp()` on rsvps INSERT/UPDATE, recurrence-aware]
+- [x] **[DB]** Bans not enforced on rsvps/saves/reviews policies (chat does it right). [migration written — pending apply: 20261030104000 adds `user_is_banned()` to all three INSERT policies] **Applied on the shared local DB (verified 2026-11-02).**
+- [x] **[DB]** RSVP to ended events blocked client-side only. [migration written — pending apply: 20261030104000 `event_is_open_for_rsvp()` on rsvps INSERT/UPDATE, recurrence-aware] **Applied on the shared local DB (verified 2026-11-02).**
 - [x] Notifications UX: chevron deletes, fake Accept/Decline on FYI RSVPs, "View Past History" marks-all-read (`app/(tabs)/notifications.tsx`) — fixed: X dismiss with a11y label, RSVP rows informational, button relabeled "Mark all as read".
 - [x] `new_follower` shows hardcoded Unsplash stranger avatar (`notifications.tsx`) — fixed: neutral UserPlus icon (notification row carries no follower id; real avatar needs a schema change to store it in `data`).
 - [ ] Chat relock below 2 attendees hides history with no explanation (`app/event-chat/[id].tsx:1235-1252`).
@@ -333,3 +333,282 @@ Google branch. Product call: bring Leaflet to parity, or make Google the default
 - [~] Settings' "Change password" row is shown to OAuth-only accounts too, where it really means "set a password". The screen now handles this correctly, but the row's label still says "Change" — reword based on `hasPasswordIdentity()`.
 - [ ] `authErrorMessage` patterns are matched against English GoTrue strings. If the app is ever localised, or GoTrue rewords an error, the mapping silently degrades to the generic fallback — matching on `error.code` where one exists is more durable, but GoTrue does not populate it for every failure.
 - [ ] `npm audit` reports 70 pre-existing vulnerabilities in the Expo/Metro dependency tree (unrelated to the vitest addition, which is clean at v5). Worth a separate triage pass.
+
+# Events flow review — Tier 0 pass (2026-11-02)
+
+Context: all `20261030*` migrations are applied on the shared local DB, so the
+pre-apply fallbacks were dead code and have been removed from the events path.
+Work is done against the live schema; SQL changes are validated on an isolated
+scratch database only (`SCRATCH_DB=eventmap_scratch_<worktree> scripts/db-scratch.sh`).
+
+## Done in this pass (client)
+
+- [x] Cancelled state rendered: EventDetail banner + "Event cancelled" CTA, calendar/chat/RSVP controls hidden, owner loses Edit/Cancel; MyEvents hides Edit on cancelled rows; EditEvent refuses to open a cancelled event; chat shows a cancelled notice; SavedEvents badges `status === 'cancelled'` (once the RPC exposes it, see below).
+- [x] RSVP errors mapped to specific copy (`utils/rsvpErrors.ts`: full / closed / suspended / not found) and the screen re-fetches the event on state-changing failures instead of keeping a stale Join button.
+- [x] Double-submit on Create closed: `loading` is set before the limit check; limit-reached now offers an Upgrade action.
+- [x] Web: date/time fields use a `datetime-local` input (`components/WebDateTimeInput.web.tsx`); photo upload fetches the picker URI as a Blob instead of the unavailable legacy file-system read.
+- [x] Dead fallbacks removed: `getRankedEventsPage` legacy call, `cancelEvent`→hard-delete, RSVP plain upsert, `max_attendees` missing-column retries, unused `getRankedEvents`. `types/supabase.generated.ts` regenerated; `as any` RPC casts dropped in events/social services.
+- [x] `Event` type carries `status` / `max_attendees`; `RankedEvent` carries optional `status`.
+- [x] Tests: `tests/rsvpErrors.test.ts`, datetime-local round-trip in `tests/eventDatetime.test.ts`.
+
+## Written, NOT applied to the shared DB — `20261102100000_event_lifecycle_followups.sql`
+
+Validated on scratch (applies cleanly; behaviour checked). Apply when the DB can be coordinated.
+
+- [ ] **[DB]** `send_event_reminders` skips cancelled events (was sending "starting soon" for them) and prefers the event address over the business address.
+- [ ] **[DB]** `notify_rsvp_users_on_event_update` ignores cancelled events and clears `event_reminder_sent` when `start_datetime` changes (rescheduled events now get a fresh reminder).
+- [ ] **[DB]** `get_ranked_events` ORDER BY gains a trailing `e.id` tiebreaker (offset pages were unstable).
+- [ ] **[DB]** `get_user_going_events` / `get_user_attendance_counts` exclude cancelled events; `get_user_going_events` and `get_user_saved_events` return `status`; cancelled saves sort with past saves. Client already badges `status` when present.
+
+## Deferred after Tier 0 (superseded by the Tier 1 section below)
+
+- [ ] Events INSERT policy still allows bypassing `create_event_with_limit_check` (monthly limit + premium-recurring gate); capacity not enforced at the `rsvps` table; banned hosts can create events.
+- [ ] Chat INSERT policy requires a going RSVP even for the host; `event_chat_settings` not in the realtime publication; `notify_attendees_on_chat_message` ignores `user_blocks`.
+- [ ] RSVP realtime cannot see other users' rows under the self-scoped rsvps SELECT policy — replace with a broadcast trigger or drop the subscription.
+- [ ] Discovery ranking (premium-first, then distance), date filters hidden in the overlay, recurring events show first-occurrence dates, no recurrence end date in the form, My Events / venue page ordering.
+
+# Events flow review — Tier 1 pass (2026-11-02)
+
+Same rules as Tier 0: no writes to the shared local DB; SQL is prepared as
+migration files and validated on the scratch copy only. Client changes work
+against the current (20261030*) schema and need no migration.
+
+## Done in this pass (client)
+
+- [x] Create: monthly quota pill in the header, inline "limit reached" banner with Upgrade, Publish disabled at the limit; quota refreshed after publishing.
+- [x] Create: lands on the new event page (owner view) instead of Discover with ignored params; a venue picked from the map is no longer overwritten when the business object refreshes.
+- [x] Recurrence end date: "Repeats until" row (`components/RecurrenceEndRow.tsx`) on both forms, stored as `recurrence_pattern.endDate` (`YYYY-MM-DD`, local), honoured by the existing server `event_has_ended`; cadence changes keep the end date. Lapsed-premium hosts can open the picker to turn a series off (`noneOnly`).
+- [x] Edit: sends only changed columns (stops spurious "event updated" blasts), confirms before time/location changes when people are going, warns when lowering capacity below current attendance, and the unsaved-changes guard now covers hardware back and swipe (`usePreventRemove`).
+- [x] My Events: Upcoming / Past tabs (cancelled under Past), LIVE / Repeats / Past badges from `utils/eventStatus`, recurring rows show the next occurrence, silent refresh on focus instead of a full skeleton. `eventsService.getBusinessEvents` gained a `scope`.
+- [x] Profile "Events Created" preview and the venue page list upcoming events only (next occurrence for series). Venue stat relabelled "Upcoming".
+- [x] EventDetail: dead rsvps realtime subscription removed (it could only ever see the viewer's own rows); 20s poll remains, with the swap-in snippet for `event_rsvp_counts` documented inline.
+- [x] Chat: lock copy no longer claims the host can post (today's policy needs a going RSVP); a send refused by RLS removes the optimistic bubble, restores the draft and says why (locked / removed) instead of a dead "tap to retry".
+- [x] Tests: recurrence end-date helpers (`tests/recurrence.test.ts`).
+
+## Written, NOT applied — validated on scratch 2026-11-02
+
+Apply in order after `20261102100000`. All are idempotent re-creations; no data migration beyond the counts backfill.
+
+- [ ] **[DB]** `20261102100000_event_lifecycle_followups.sql` (from Tier 0) now also excludes banned hosts' events from `get_ranked_events`.
+- [ ] **[DB]** `20261102110000_events_write_hardening.sql`: drops the direct events INSERT policy (creation only via `create_event_with_limit_check`, which now checks bans, validates title/coords/dates/recurrence and locks the business row); `status` can only change through `cancel_event` (trigger, admins exempt) and cancelled events are read-only; `cancel_event` also notifies savers and clears pending reminders; capacity enforced by a BEFORE INSERT/UPDATE trigger on `rsvps` (`EVENT_FULL`); public events SELECT policy is recurrence-aware so visitors see ongoing series.
+- [ ] **[DB]** `20261102120000_chat_host_posting_and_blocks.sql`: hosts can post in their own chat without an RSVP (INSERT policy + `get_event_chat_post_status.can_post`); `event_chat_settings` added to the realtime publication (client already subscribes); `notify_attendees_on_chat_message` and `get_event_chat_unread_counts` honour `user_blocks`.
+- [ ] **[DB]** `20261102130000_event_rsvp_counts_realtime.sql`: public `event_rsvp_counts` aggregate table kept by trigger, backfilled, published; `rsvps` removed from the publication. Client follow-up (subscribe in EventDetail) is a ~10-line change described in the file header.
+
+## Post-apply client follow-ups (small)
+
+- [ ] EventDetail: subscribe to `event_rsvp_counts` (see migration header); chat lock copy can say "Only you can post" again once 20261102120000 is live.
+- [ ] Regenerate `types/supabase.generated.ts` after applying (new table/function signatures).
+
+## Superseded by the Tier 2 section below
+
+- [ ] Discovery ranking (premium-first then distance), date filters hidden behind the overlay's location step, `get_ranked_events` performance (no bounding box, full-table aggregates) and `next_start_datetime` for recurring rows.
+- [ ] Event links UI, capacity/spots-left on Discover cards, waitlist, Follow on the organizer row, chat row before RSVP, recurring-aware calendar export, web share fallback.
+- [ ] Chat: sender → profile, block/report from message sheet, Settings blocked-users list, host remove-attendee, moderation/report-outcome notifications; push tap marks read; notification list pagination.
+- [ ] Structure/perf: split the four 1–2k-line screens, memoised list rows, React Query for list screens, one shared event card + date formatter, image resize before upload.
+
+# Events flow review — Tier 2 pass (2026-11-02)
+
+Same rules: no writes to the shared local DB; SQL prepared as migration files
+and validated on the scratch copy only. Client changes work against the
+current schema and need no migration.
+
+## Done in this pass (client)
+
+- [x] **Event links are authorable.** New `components/EventLinksEditor.tsx` (+ pure `utils/eventLinks.ts`) on both create and edit; `eventsService.syncEventLinks` diffs rows so unchanged links keep their id. The `event_links` table, service and the detail screen's Links section already existed — only the UI was missing.
+- [x] **Date filters are discoverable.** Shared presets (`utils/datePresets.ts`: Any time / Today / Tomorrow / This weekend / Next 7 / Next 30) now drive a "When" section at the top of the Filters sheet, a TODAY toggle in the header chip row, and the search overlay — previously dates were reachable only after picking a destination in the overlay.
+- [x] **Calendar export is recurrence-aware.** Exports use the occurrence the header shows (a weekly series no longer exports its original past date) and carry an `RRULE` so Google Calendar and .ics import a series. Added `buildRecurrenceRule`; pure helpers split into `utils/eventIcs.ts` so they are testable.
+- [x] **Share works on desktop web.** `shareEventLink` falls back to copying the link when `navigator.share` is missing or rejects, with a confirmation toast.
+- [x] **Reporting is one cross-platform sheet** (`components/ReportReasonSheet.tsx`): five reasons plus optional free text, replacing the native 4-option Alert / web two-dialog chain where "Other" was unreachable and Cancel meant "next question". A duplicate report now reads as "already reported".
+- [x] **Follow from the event page** — a Follow/Following chip on the organizer row, using the `user_following_business` the RPC already returned.
+- [x] **Chat is visible before RSVP** with a "Join the event to unlock" state, instead of being hidden until you were already going.
+- [x] **Chat: reach the person.** Tap an avatar to open a profile; the message sheet gained View profile / Block / Unblock / Report user. Blocked senders are tracked client-side and the list reloads after a block.
+- [x] **Blocked users list** — `screens/BlockedUsers.tsx` at `/blocked-users`, linked from Settings → Privacy, with unblock. Unblocking no longer requires finding the person's profile again.
+- [x] **Notifications**: tapping a push marks that notification read (the payload has carried `notificationId` since 20260228110000); the centre pages 30 at a time with a Load older button and uses the server-side unread count, so the chip no longer disagrees with the tab badge.
+- [x] Tests: `tests/datePresets.test.ts`, `tests/eventShare.test.ts` (RRULE + ICS), `tests/eventLinks.test.ts`. 322 total.
+
+## Written, NOT applied — validated on scratch 2026-11-02
+
+Apply after the Tier 0/1 files, in timestamp order.
+
+- [ ] **[DB]** `20261102140000_discovery_ranking_and_fields.sql`: replaces the premium-first/distance ordering with a weighted score (proximity + imminence + log-damped popularity, premium as a bounded +0.25 boost); ranks and date-filters recurring events on their **next occurrence**; returns `next_start_datetime`, `max_attendees`, `has_ended` so cards can show spots-left; adds a bounding-box pre-filter and correlated counts (the old body haversined every row three times and aggregated all of `rsvps`/`saves` per call); clamps `result_limit`. Verified: near+soon outranks far+later, a 60-day-old weekly series is matched by a next-30-days filter, and 3 paged calls return 25 distinct ids.
+- [ ] **[DB]** `20261102150000_moderation_feedback_and_attendees.sql`: report dedupe index across **all** target types (was chat_message only) with a pre-dedupe cleanup; reporters notified when an admin resolves/dismisses; users told when a message of theirs is removed or their chat access is cut; new `host_remove_attendee()` (drops the RSVP, blocks the chat, clears reminders, notifies); host RSVP notifications no longer fire on every going↔interested flap and a new DELETE trigger reports leaves. Verified on scratch, including that the message-delete RPC keeps its evidence-stashing behaviour.
+
+## Post-apply client follow-ups (small)
+
+- [ ] Discover cards: render `max_attendees` / spots-left and use `next_start_datetime` instead of recomputing occurrences client-side.
+- [ ] Add a host "Remove attendee" action to the attendees sheet calling `host_remove_attendee`.
+- [ ] Notification centre: icons/copy for the new `moderation` and `report_update` types (they render with the neutral fallback today).
+- [ ] Regenerate `types/supabase.generated.ts` after applying.
+
+## Superseded by the Tier 3 section below
+
+- [ ] Split the four 1–2k-line screens (EventDetail, discover, event-chat, Settings) into hooks + memoised components; memoise Discover list rows and the chat message row; bound the `FadeInDown` stagger.
+- [ ] Move list screens onto React Query (installed, unused) for caching, focus refetch and pagination.
+- [ ] One shared event card + one date formatter (six card variants, four formatters today); image resize before upload with per-photo progress.
+- [ ] Waitlist when an event is full; `pg_trgm` index for keyword search; PostGIS for distance.
+
+# Events flow review — Tier 3 pass (2026-11-02)
+
+Same rules: no writes to the shared local DB; SQL prepared as migration files
+and validated on the scratch copy only. Client changes work against the
+current schema; the waitlist UI is gated on a key the RPC only returns once
+its migration is applied.
+
+## Done in this pass (client)
+
+- [x] **Chat transcript is memoised.** `components/chat/ChatMessageRow.tsx` holds the day / divider / message rows and the linkified body (mention regex cached per message). The screen's `renderRow` is a `useCallback` passing primitives + stable callbacks, so composer keystrokes, typing ticks and the slow-mode countdown no longer re-render every bubble. The bubble's text moved from `accessibilityHint` to the label (hints are read late and truncated).
+- [x] **Discover cards are memoised** (`components/DiscoverEventCard.tsx`) with stable `onPress` handlers, so map pans stop re-rendering every mounted card. The entrance stagger is capped at 6 rows (second-page cards used to sit blank for seconds). Cards now show a going count and, when it changes a decision, "N LEFT" / "FULL" from `max_attendees` (already populated by `get_event_details`; discovery gets it after 20261102140000). Empty state says what was searched/filtered.
+- [x] **One date/distance formatter** (`utils/formatEventWhen.ts`): Discover, Profile, UserProfile, BusinessDetail, Joined, Saved and EventListItem all use it. Device locale throughout (four of them were hard-coded `en-US`); distance follows the region (mi for US/GB/LR/MM, otherwise km/m) instead of always miles. UserProfile shows a series' next occurrence.
+- [x] **List screens on React Query.** `JoinedEvents` and `SavedEvents` use `useInfiniteQuery` (per-tab keys in `hooks/queryKeys.ts`), `useRefetchOnFocus` for stale-while-revalidate on return, and `focusManager` is fed `AppState` in the root layout. Saved is paged (was a single page of 50 with no way to older saves). EventDetail invalidates these caches after RSVP / leave / save, closing the "stale list after RSVP" gap.
+- [x] **Image pipeline.** Photos are resized to a 1600px longest edge before upload (a 12 MP photo was previously base64-encoded at full size); both forms show "Uploading photo N of M…" on the submit button.
+- [x] **Waitlist UI** on EventDetail: when an event is full and the RPC advertises `waitlist`, the primary button becomes "Join waitlist" / "On waitlist · #n · tap to leave", with a hint showing how many are waiting. Hidden until the migration is applied.
+- [x] Tests: `tests/formatEventWhen.test.ts`. 334 total.
+
+## Written, NOT applied — validated on scratch 2026-11-02
+
+- [ ] **[DB]** `20261102160000_waitlist_and_search_index.sql`: `event_waitlist` table (RLS: own rows; writes via RPC only), `join_event_waitlist` (returns position; refuses when there's no cap, a spot is free, or the caller is already going) and `leave_event_waitlist`; a trigger on `rsvps` notifies the earliest waiters (one per freed seat, at most once a day) and drops anyone who joins; cancelling clears and notifies the waitlist without duplicating the RSVP/saves notice; `get_event_details` gains an additive `waitlist` key; `pg_trgm` GIN indexes on event title/description and business name for the ILIKE search. Verified: full lifecycle on a 1-seat event, idempotent join, guards, cancel cleanup, counts table consistency.
+
+## Post-apply client follow-ups
+
+- [ ] Notification centre: icon/copy for the `waitlist` type (neutral fallback today) and deep link straight to the event.
+- [ ] Discover: once 20261102140000 is live, use `next_start_datetime` from the RPC instead of `getNextOccurrences` per card.
+
+## UX / UI issues noticed during Tier 3 (status updated in the UX pass below)
+
+Ordered by how much they'd change what a user does.
+
+- [ ] **Saved: confirm dialog on unsave.** Removing a bookmark is trivially reversible; the confirm adds friction. An undo toast is the better pattern — `utils/notify.ts` has no action-button toast yet, so this needs a small toast extension first.
+- [ ] **Venue page "Upcoming" stat counts only the first 10 fetched rows** (`screens/BusinessDetail.tsx`); needs a count query or a dedicated RPC. Same page has no "Create event" CTA for the owner when the list is empty.
+- [ ] **Module-level `Dimensions.get('window')`** in `EventCardCarousel`, `EventDetail`, `UserProfile` and Discover (`EVENT_CARD_WIDTH`): card widths and the hero pager never update on rotation, split-screen or browser resize. Replace with `useWindowDimensions` and pass widths down.
+- [ ] **Discover floating card unmounts the bottom sheet** (`{!(activeEvent && showFloatingCard) && <BottomSheet …>}`): tapping a pin then closing the preview remounts the list at index 0 with scroll position and animations reset. Needs the sheet to stay mounted and snap instead.
+- [ ] **Discover refetches twice per overlay search** (`setSearchQuery` triggers the effect and `handleSearchFromOverlay` also calls `loadEventsWithCenter`), and date chips in the overlay write to context immediately, refetching behind the modal. Stage overlay selections locally and commit on Search.
+- [ ] **Report flow has no "my reports" view**; reporters only get the outcome notification (after 20261102150000). Low priority.
+- [ ] **Edit event: no photo reorder / "set as cover"**; changing the cover means remove + re-upload.
+- [ ] **Create form scrolls to the top on any validation error**, even when the only error is Capacity or Links at the bottom. Needs per-field `onLayout` + `scrollTo`.
+- [ ] **Timezone is implicit** (device TZ, no label) on both forms and the detail page; a host travelling sets the wrong instant with no hint. Show the TZ abbreviation; longer term store an IANA zone per event.
+- [ ] **Hosts can RSVP to their own event** (no server or client guard); a host's "going" consumes a seat and counts toward the 2-person chat unlock. Decide whether that's intended now that hosts can post in chat without an RSVP (20261102120000).
+- [ ] **Interested doesn't reserve a seat but nothing says so**; a one-line hint under the star on capped events would prevent surprise.
+- [ ] **Push notifications for the new types** (`moderation`, `report_update`, `waitlist`) share the generic channel; consider separate Android channels so users can mute chat without muting moderation notices.
+- [ ] **`screens/Settings.tsx` (≈2,000 lines) and `app/(onboarding)/index.tsx` (≈2,100)** are outside the events flow but are the two largest files left; same hook-extraction treatment applies.
+- [ ] **Design tokens**: `DiscoverEventCard` inherits literal sizes (`fontSize: 22`, `borderRadius: 32`, `fontSize: 12`) from the original card; snap to `Typography.sizes` / `BorderRadius` in the next UI pass along with the remaining ≈120 literals the tracker already lists.
+
+## Remaining structural debt
+
+- [ ] `screens/EventDetail.tsx` (≈2,250 lines) still owns data loading, RSVP/waitlist/save/follow handlers, reviews, share/calendar and ~900 lines of styles. Next split: `useEventDetails(id)`, `useEventReviews(businessId)`, `RsvpActionBar`, `ReviewsSection`, `EventHero`. `app/(tabs)/discover.tsx` (≈1,700) likewise: `useDiscoverEvents` (center/radius/pagination/filters) and `DiscoverFiltersSheet`.
+- [ ] `MyEvents`, `BusinessDetail` and Profile still hand-roll fetch state; move onto React Query with the same pattern as Joined/Saved.
+- [ ] PostGIS (`geography` column + GiST) for discovery distance; the bounding-box prefilter in 20261102140000 is the stop-gap. Needs a decision on enabling the extension in hosted Supabase.
+
+# Events flow review — UX/UI fix pass (2026-11-02)
+
+Works through the Tier 3 UX list in user-impact order. All client-side; no
+database writes, no migrations applied. Typecheck, lint (12 pre-existing
+warnings, none added) and 336 unit tests pass.
+
+## Fixed
+
+- [x] **Map preview no longer resets the list.** The Discover bottom sheet stays mounted and is animated closed when a pin is tapped (`bottomSheetRef.close()`), then snapped back on dismiss. Previously it was conditionally unmounted, so closing a preview rebuilt the list at the top and replayed every card's entrance animation. Closing it also sidesteps the z-order question between the sheet and the floating card.
+- [x] **One fetch per search instead of up to three.** Discover compares a filter signature before refetching, so the programmatic search path and the filter effect are mutually exclusive, and the signature is seeded at mount so the first render no longer fires a throwaway request against the default San Francisco centre. The search overlay now stages its date selection locally and commits it on Search — tapping a date chip used to write straight to context and refetch behind the open modal.
+- [x] **Layouts follow the window.** `useWindowDimensions` replaces module-level `Dimensions.get()` in `EventCardCarousel`, `EventDetail` (hero pager + cover width), `UserProfile` (card width) and Discover (card width, sheet snap points, FAB offset). Rotation, split-screen and browser resize now reflow instead of keeping first-import values.
+- [x] **Validation scrolls to the field that failed.** The create form records each section's Y offset on layout and scrolls to the first failing section; it used to jump to the top even when the only problem was Capacity or Links at the bottom. `validate()` now returns the failing keys rather than a boolean.
+- [x] **Unsave is an undo toast, not a confirm.** `notify.withAction` / `notify.undo` add an inline action to the toast system (7s lifetime for actionable toasts); Saved Events removes the blocking confirm and offers Undo, which re-saves and refetches so ordering stays server-authoritative.
+- [x] **Timezone is labelled.** `timeZoneLabel()` added to `utils/formatEventWhen`; both forms note "Times are in your device timezone (PDT)" above the pickers and the detail page appends the zone to the time row. Storing an IANA zone per event is still open (needs a migration).
+- [x] **Venue "Upcoming" count is real.** `getBusinessEventsCount` takes a scope and the venue page uses it, instead of reporting the length of the first page of 10.
+- [x] **Capacity semantics are stated.** The create form notes that only "going" counts toward the limit, so marking interested doesn't hold a spot.
+- [x] **Cover photo can be changed in place.** Non-first thumbnails get a "Cover" button that promotes them to position 0; changing the cover previously meant removing and re-uploading.
+- [x] **Discover card uses design tokens** (sizes, radii, spacing) instead of the literals inherited from the original inline card.
+
+## Still open from that list
+
+- [ ] **Photo reorder beyond set-as-cover** (drag to arrange) — the editor is now position-aware, so this is a drag-handle away.
+- [ ] **"My reports" view** for reporters; they get an outcome notification once 20261102150000 is applied, but can't browse what they filed.
+- [ ] **Separate push channels** for `moderation` / `report_update` / `waitlist` so chat can be muted without losing moderation notices.
+- [ ] **Hosts can RSVP to their own event** server-side. The UI already hides the RSVP bar for owners, so this is a data-integrity nicety rather than a user-facing bug; it needs a trigger and a product decision now that hosts can post in chat without an RSVP.
+- [ ] **`screens/Settings.tsx` and `app/(onboarding)/index.tsx`** remain the two largest files; outside the events flow.
+
+## New observations from this pass
+
+- [ ] `app/(tabs)/discover.tsx` still has `searchLocation` destructured but unused, and two `Array<T>` style warnings — harmless, but the file is the obvious next candidate for the `useDiscoverEvents` extraction noted in Tier 3.
+- [x] Map/list disagreement and the single-image pager — fixed below.
+
+# Events flow review — map, carousel and photo reorder (2026-11-02)
+
+Client-only; no migrations and no database writes. Typecheck, lint (12
+pre-existing warnings, none added) and 356 unit tests pass.
+
+## Fixed
+
+- [x] **Map and list no longer disagree.** The list is bounds-filtered but the map is injected from the full fetched set (deliberately — bounds-filtering the markers rebuilds the cluster group on every pan, a trade the Pass 4 notes already rejected). So the list could read "nothing here" while pins sat just off-screen. Rather than dropping those markers — which would hide results the user can pan to — the empty state now counts them and offers **"Show them"**, which fits the map to those events. New pure helpers `boundsOfPoints` / `centroidOf` / `zoomForPoints` in `utils/geoBounds.ts`, unit tested.
+- [x] **No pager for a single image.** `EventCardCarousel` renders a plain view when there is one image (or none, the placeholder case) instead of an `Animated.ScrollView` with a scroll handler and an animated child. Every Discover card hits this path, since cards only ever pass the cover image.
+- [x] **Drag to reorder event photos.** The photo grid is now an absolutely-positioned animated grid: hold a thumbnail for ~220 ms to pick it up, drag it, and the other photos animate out of the way live; position 0 is the cover. Long-press activation means the surrounding form still scrolls normally. Index maths lives in pure, unit-tested helpers (`utils/reorder.ts`); `slotIndexAt` / `slotPosition` carry the `'worklet'` directive because the drag gesture calls them on Reanimated's UI thread.
+
+## Implementation notes worth knowing
+
+- The drag gesture is memoised on values that cannot change mid-drag, and the
+  dragged cell is positioned from a slot captured at drag start, so the live
+  reordering of its neighbours never yanks it out from under the finger.
+- Reordering is also exposed as **accessibility actions** ("Move earlier" /
+  "Move later") because dragging is pointer-only, and the existing "Cover"
+  button still promotes any photo to first in one tap.
+- Drag relies on `react-native-gesture-handler` on web, where long-press pan
+  is less well exercised than on native. The Cover button and the
+  accessibility actions are the fallback if it proves unreliable there —
+  worth a manual check on web before release.
+
+## Still open
+
+- [ ] Verify the photo drag on a real device and on web (gesture timing and
+      the 1.06 lift look right in code but are untestable here — the repo has
+      no component renderer).
+- [ ] `useDiscoverEvents` extraction for `app/(tabs)/discover.tsx`.
+
+# Events flow — regression pass (2026-11-02)
+
+Layers: typecheck (app + admin), lint, 358 unit tests, a web bundle export
+(Metro-level breakage), three independent code reviews of the diff by area,
+and an **API-level integration suite against an isolated backend**
+(`scripts/regress-isolated.mjs`): a private PostgREST bound to a fresh scratch
+copy with all seven prepared migrations applied, authenticated with locally
+minted JWTs — so neither the shared database nor the shared auth service is
+touched (no sign-ins, no sign-ups). The suite mirrors the exact table / RPC /
+filter shapes the client services use. 32 checks, all passing; the migrations
+also re-apply idempotently.
+
+## Found and fixed in this pass
+
+Regressions introduced by earlier passes (the ones that mattered most):
+
+- [x] **Overlay search fetched with stale filters.** The filter-signature de-dupe suppressed the corrective refetch that used to mask the stale direct call, so "jazz · this weekend" showed unfiltered results. `loadEventsWithCenter` now takes explicit overrides from the overlay path.
+- [x] **Photo reorder didn't persist on Edit (or Settings).** The drag grid promised reordering but only `cover_image_url` was written. Both save paths now rewrite `sort_order` for moved photos and insert new ones at their position; the cover falls back to the first photo that has a URL instead of nulling out after a failed upload.
+- [x] **Waitlist "spot just opened" path was unreachable.** The `RsvpError` wrapper replaced the server's `spot_available` hint with generic copy, so the auto-join branch never ran. New `SPOT_AVAILABLE` / `ALREADY_GOING` / `WAITLIST_NOT_NEEDED` codes, with tests.
+- [x] **Discover sheet could be left closed** with nothing to reopen it when the previewed event dropped out of a reloaded page; a reconciliation effect restores it, and the active event is looked up in the full set rather than the bounds-filtered one.
+- [x] **Ended recurring series vanished from both My Events tabs**; the past query now matches them and the tab filters with `hasEventEnded`.
+- [x] **US devices could show kilometres** where Hermes lacks `Intl.Locale`; region is parsed from the tag first.
+- [x] **Pull-to-refresh spinner animated on every background refetch** in Joined/Saved; only the pull gesture drives it now, and focus refetches no longer restart an in-flight invalidation fetch.
+- [x] Optimistic unsave could be overwritten by an in-flight refetch (now cancels first and invalidates after); overlay "Clear all" no longer bypasses staging; notification unread chip tracks realtime read updates; load-older button survives a transient error.
+- [x] Chat lock-rejection appends the rejected text to an in-progress draft (was replacing it) and restores mention ids; user reports from chat use the chat reason set; repeat business/review reports read as "already reported".
+- [x] Drag grid: cells are `accessible` on iOS with Remove / Make cover exposed as actions; preview order is synced to the ref before React flushes; a parent list swap mid-drag abandons the preview instead of clobbering it.
+- [x] Recurrence end date is validated against the first occurrence on both forms; "Repeats until" commits the displayed date when opened; link validation errors clear on edit; create inserts photos at their list position.
+
+SQL (unapplied migration files, re-validated on scratch):
+
+- [x] `get_ranked_events` date filter tests **overlap** for recurring series (a daily event is now matched by a "this weekend" window even though its next occurrence is today); one-offs unchanged.
+- [x] Status flips are refused for **everyone** including admins (the admin dashboard never writes status; the exemption was only a loophole). The demo host is an admin, which is how the suite caught it.
+- [x] `notify_business_on_rsvp_delete` skips the host's own removals and never emits a NULL body during an account-deletion cascade; `DROP TRIGGER` name matches; `refresh_event_rsvp_counts` is no longer callable over RPC; `pg_trgm` installs into `extensions`.
+
+## Reviewed and left as-is (recorded, not fixed)
+
+- [ ] `LinkifiedText`'s inner memo is redundant because the row builds `mentionNames` per render — a missed optimisation, not a regression (rows only re-render when the transcript changes).
+- [ ] Edit's "notify attendees?" confirmation gates on the going count only; interested-only events skip the prompt but still notify. Needs an interested count from the details RPC.
+- [ ] Profile "Created" stat and the venue "Upcoming" count include recurring series whose own end date has passed, which the lists drop client-side. Cosmetic until the counts move server-side.
+- [ ] `convertToJpeg` resizes by height when only one dimension is known (web only); still bounded.
+- [ ] Discover's `[profile]` effect re-running `loadInitialData` (categories + events) on any profile identity change is pre-existing.
+- [ ] Returning to Joined/Saved after an RSVP still issues two fetches (invalidation + focus); the second no longer cancels the first.
+
+## How to re-run the isolated suite
+
+```
+SCRATCH_DB=eventmap_scratch_elm scripts/db-scratch.sh refresh
+for f in supabase/migrations/20261102*.sql; do SCRATCH_DB=eventmap_scratch_elm scripts/db-scratch.sh apply "$f"; done
+# private PostgREST on :3999 bound to the scratch DB (see scripts/e2e-isolated-env.sh for the docker run)
+JWT_K=<oct key from PGRST_JWT_SECRET JWKS> node scripts/regress-isolated.mjs
+```

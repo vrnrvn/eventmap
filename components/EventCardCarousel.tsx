@@ -1,4 +1,4 @@
-import { View, Image, StyleSheet, Dimensions } from 'react-native';
+import { View, Image, StyleSheet, useWindowDimensions } from 'react-native';
 import Animated, {
   useAnimatedScrollHandler,
   useSharedValue,
@@ -9,14 +9,14 @@ import Animated, {
 import { Colors } from '@/constants/theme';
 import { EventmapCalendar } from '@/components/icons/EventmapIcons';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const DEFAULT_CARD_WIDTH = SCREEN_WIDTH - 32;
 const DEFAULT_IMAGE_HEIGHT = 180;
+/** Fallback only; the real default comes from useWindowDimensions below. */
+const FALLBACK_CARD_WIDTH = 320;
 
 type EventCardCarouselProps = {
   imageUrls: string[];
   imageHeight?: number;
-  /** Available width for the carousel (defaults to screen width minus 32). */
+  /** Available width for the carousel (defaults to window width minus 32). */
   width?: number;
   /** Optional: subtle skew on images for editorial feel (e.g. alternating cards) */
   applySkew?: boolean;
@@ -25,13 +25,17 @@ type EventCardCarouselProps = {
 export function EventCardCarousel({
   imageUrls,
   imageHeight = DEFAULT_IMAGE_HEIGHT,
-  width = DEFAULT_CARD_WIDTH,
+  width,
   applySkew = false,
 }: EventCardCarouselProps) {
+  // Measured per render so rotation, split-screen and browser resize all
+  // reflow; a module-level Dimensions.get() froze this at first import.
+  const { width: windowWidth } = useWindowDimensions();
+  const fallback = windowWidth > 32 ? windowWidth - 32 : FALLBACK_CARD_WIDTH;
   // A zero/negative width (e.g. measured before layout) would make
   // snapToInterval invalid natively and collapse the scale interpolation's
   // input range to [0, 0, 0].
-  const safeWidth = width > 0 ? width : DEFAULT_CARD_WIDTH;
+  const safeWidth = width != null && width > 0 ? width : fallback;
   const scrollX = useSharedValue(0);
 
   const scrollHandler = useAnimatedScrollHandler({
@@ -42,6 +46,23 @@ export function EventCardCarousel({
 
   const images = imageUrls.length > 0 ? imageUrls : [''];
   const isPlaceholder = images.length === 1 && !images[0];
+
+  // The overwhelmingly common case (one image, or none) needs no pager: a
+  // scroll view per card costs a view and a scroll handler for nothing, and
+  // every Discover card renders one.
+  if (images.length === 1) {
+    return (
+      <View style={[styles.container, { width: safeWidth, height: imageHeight }]}>
+        <StaticImage
+          uri={images[0]}
+          isPlaceholder={isPlaceholder}
+          imageHeight={imageHeight}
+          cardWidth={safeWidth}
+          applySkew={applySkew}
+        />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { width: safeWidth, height: imageHeight }]}>
@@ -72,13 +93,46 @@ export function EventCardCarousel({
   );
 }
 
+/** Single-image variant: same visuals, no animation or scroll machinery. */
+function StaticImage({
+  uri,
+  isPlaceholder,
+  imageHeight,
+  cardWidth,
+  applySkew,
+}: {
+  uri: string;
+  isPlaceholder: boolean;
+  imageHeight: number;
+  cardWidth: number;
+  applySkew: boolean;
+}) {
+  return (
+    <View
+      style={[
+        styles.imageWrapper,
+        { width: cardWidth, height: imageHeight },
+        applySkew ? styles.skewed : null,
+      ]}
+    >
+      {uri && !isPlaceholder ? (
+        <Image source={{ uri }} style={styles.image} resizeMode="cover" />
+      ) : (
+        <View style={[styles.image, styles.placeholder]}>
+          <EventmapCalendar size={40} color={Colors.text.tertiary} />
+        </View>
+      )}
+    </View>
+  );
+}
+
 function CarouselImage({
   uri,
   index,
   scrollX,
   isPlaceholder,
   imageHeight = DEFAULT_IMAGE_HEIGHT,
-  cardWidth = DEFAULT_CARD_WIDTH,
+  cardWidth = FALLBACK_CARD_WIDTH,
   applySkew = false,
 }: {
   uri: string;
@@ -120,12 +174,15 @@ function CarouselImage({
 
 const styles = StyleSheet.create({
   container: {
-    width: DEFAULT_CARD_WIDTH,
+    // Concrete width/height are applied inline from the measured window.
     height: DEFAULT_IMAGE_HEIGHT,
   },
   imageWrapper: {
     overflow: 'hidden',
     borderRadius: 18,
+  },
+  skewed: {
+    transform: [{ skewX: '-0.5deg' }],
   },
   image: {
     width: '100%',

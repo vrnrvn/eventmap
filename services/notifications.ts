@@ -48,25 +48,41 @@ function mapRowToNotification(row: any): Notification {
   };
 }
 
+export const NOTIFICATIONS_PAGE_SIZE = 30;
+
 /**
- * Fetch notifications for the current user.
+ * One page of notifications, newest first. Ordered by (created_at, id) so the
+ * offset is stable when rows share a timestamp.
  */
-export async function getNotifications(): Promise<Notification[]> {
+export async function getNotificationsPage(
+  page: { limit?: number; offset?: number } = {}
+): Promise<{ items: Notification[]; hasMore: boolean }> {
+  const limit = page.limit ?? NOTIFICATIONS_PAGE_SIZE;
+  const offset = page.offset ?? 0;
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return [];
+  if (!user) return { items: [], hasMore: false };
 
   const { data, error } = await supabase
     .from('notifications')
     .select('id, type, title, body, read, event_id, business_id, created_at, data')
     .eq('user_id', user.id)
     .order('created_at', { ascending: false })
-    .limit(100);
+    .order('id', { ascending: false })
+    .range(offset, offset + limit - 1);
 
   if (error) throw error;
+  const items = (data || []).map(mapRowToNotification);
+  return { items, hasMore: items.length >= limit };
+}
 
-  return (data || []).map(mapRowToNotification);
+/**
+ * Fetch the first page of notifications for the current user.
+ */
+export async function getNotifications(): Promise<Notification[]> {
+  const { items } = await getNotificationsPage();
+  return items;
 }
 
 /**

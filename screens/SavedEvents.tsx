@@ -1,4 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useInfiniteQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
+import { queryKeys } from '@/hooks/queryKeys';
+import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
 import {
   View,
   Text,
@@ -6,92 +9,116 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router, useFocusEffect } from 'expo-router';
+import { router } from 'expo-router';
 import { socialService } from '@/services/social';
-import { confirmAction } from '@/utils/confirm';
 import { notify } from '@/utils/notify';
 import { Button } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ui/ErrorState';
-import { EventListItem, formatEventDate } from '@/components/EventListItem';
+import { EventListItem } from '@/components/EventListItem';
+import { formatDistance, formatEventDate } from '@/utils/formatEventWhen';
 import { RankedEvent } from '@/types/database';
 import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
 import {
   ArrowLeft,
-  Calendar,
   Bookmark,
   BookmarkX,
   ChevronRight,
-  Users,
-  Navigation,
   Repeat,
 } from 'lucide-react-native';
 
+const PAGE_SIZE = 30;
+
 export default function SavedEvents() {
   const insets = useSafeAreaInsets();
-  const [events, setEvents] = useState<RankedEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
-  const loadSavedEvents = useCallback(async () => {
-    try {
-      const list = await socialService.getUserSavedEventsWithDetails();
-      setEvents(list);
-      setError(null);
-    } catch {
-      setError('Could not load your saved events.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // Paged + cached. The old screen fetched a single page of 50 with no way
+  // to reach older saves; this pages through all of them.
+  const query = useInfiniteQuery({
+    queryKey: queryKeys.savedEvents(),
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
+      socialService.getUserSavedEventsWithDetails({ limit: PAGE_SIZE, offset: pageParam }),
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length >= PAGE_SIZE ? allPages.reduce((n, page) => n + page.length, 0) : undefined,
+  });
+  // Saves are toggled from event pages; refresh whenever we come back here.
+  useRefetchOnFocus(query.refetch);
+
+  const events = useMemo(() => {
+    const seen = new Set<string>();
+    return (query.data?.pages.flat() ?? []).filter((e) =>
+      seen.has(e.id) ? false : (seen.add(e.id), true)
+    );
+  }, [query.data]);
+  const loading = query.isPending;
+  // Only the pull gesture drives the RefreshControl; background refetches
+  // (focus, invalidation, foreground) must not animate the list.
+  const [pulling, setPulling] = useState(false);
+  const error = query.isError ? 'Could not load your saved events.' : null;
 
   const retryLoad = useCallback(() => {
-    setLoading(true);
-    void loadSavedEvents();
-  }, [loadSavedEvents]);
-
-  // Saves are toggled from event pages; refresh whenever we come back here.
-  useFocusEffect(
-    useCallback(() => {
-      void loadSavedEvents();
-    }, [loadSavedEvents])
-  );
+    void query.refetch();
+  }, [query]);
 
   const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    loadSavedEvents().finally(() => setRefreshing(false));
-  }, [loadSavedEvents]);
+    setPulling(true);
+    void query.refetch().finally(() => setPulling(false));
+  }, [query]);
 
-  const handleUnsave = useCallback(async (event: RankedEvent) => {
-    const ok = await confirmAction({
-      title: 'Remove saved event',
-      message: `Remove "${event.title}" from your saved events?`,
-      confirmLabel: 'Remove',
-      destructive: true,
-    });
-    if (!ok) return;
-    const previous = events;
-    setEvents((prev) => prev.filter((e) => e.id !== event.id));
-    try {
-      await socialService.unsaveEvent(event.id);
-    } catch {
-      setEvents(previous);
-      notify.error('Failed to remove saved event');
-    }
-  }, [events]);
+  /**
+   * Unsaving is one tap to undo, so it gets an undo toast rather than a
+   * blocking confirm: no interruption, and a mistake costs one tap.
+   */
+  const handleUnsave = useCallback(
+    async (event: RankedEvent) => {
+      const key = queryKeys.savedEvents();
+      // Stop an in-flight refetch (focus / invalidation) from writing the old
+      // list back over the optimistic removal.
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData(key);
+      // Optimistic: drop the row from every cached page, restore on failure.
+      queryClient.setQueryData<InfiniteData<RankedEvent[], number>>(key, (old) =>
+        old
+          ? { ...old, pages: old.pages.map((page) => page.filter((e) => e.id !== event.id)) }
+          : old
+      );
+      try {
+        await socialService.unsaveEvent(event.id);
+        void queryClient.invalidateQueries({ queryKey: key });
+        notify.undo(`Removed "${event.title}" from saved`, () => {
+          void (async () => {
+            try {
+              await socialService.saveEvent(event.id);
+            } catch {
+              notify.error('Could not restore the saved event.');
+            } finally {
+              // Re-read rather than splice the row back in: position depends
+              // on the server's upcoming/past ordering.
+              void queryClient.invalidateQueries({ queryKey: key });
+            }
+          })();
+        });
+      } catch {
+        queryClient.setQueryData(key, previous);
+        notify.error('Failed to remove saved event');
+      }
+    },
+    [queryClient]
+  );
 
   const upcoming = events.filter((e) => !e.has_ended);
   const past = events.filter((e) => e.has_ended);
 
   const renderCard = (event: RankedEvent) => {
+    const cancelled = event.status === 'cancelled';
     const ended = !!event.has_ended;
     const when = ended ? event.start_datetime : event.next_start_datetime || event.start_datetime;
     const metaLines: string[] = [];
     if (event.distance_km > 0) {
-      metaLines.push(`${(event.distance_km * 0.621371).toFixed(1)} mi away`);
+      metaLines.push(`${formatDistance(event.distance_km)} away`);
     }
     if (event.rsvp_count > 0 && !ended) {
       metaLines.push(
@@ -105,8 +132,14 @@ export default function SavedEvents() {
           subtitle={event.business_name}
           dateLine={`${formatEventDate(when)}${event.is_recurring && !ended ? ' · repeats' : ''}`}
           thumbnailUrl={event.cover_image_url}
-          dimmed={ended}
-          badge={ended ? { label: 'Ended', tone: 'neutral' } : null}
+          dimmed={ended || cancelled}
+          badge={
+            cancelled
+              ? { label: 'Cancelled', tone: 'danger' }
+              : ended
+                ? { label: 'Ended', tone: 'neutral' }
+                : null
+          }
           dateIcon={
             event.is_recurring ? <Repeat size={12} color={Colors.text.tertiary} /> : undefined
           }
@@ -187,7 +220,7 @@ export default function SavedEvents() {
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
-              refreshing={refreshing}
+              refreshing={pulling}
               onRefresh={onRefresh}
               tintColor={Colors.primary}
               colors={[Colors.primary]}
@@ -228,6 +261,15 @@ export default function SavedEvents() {
                   {past.map(renderCard)}
                 </>
               ) : null}
+              {query.hasNextPage ? (
+                <Button
+                  label={query.isFetchingNextPage ? 'Loading…' : 'Load more saved events'}
+                  onPress={() => void query.fetchNextPage()}
+                  variant="ghost"
+                  disabled={query.isFetchingNextPage}
+                  style={styles.loadMore}
+                />
+              ) : null}
             </>
           )}
         </ScrollView>
@@ -244,6 +286,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background.primary,
   },
 
+  loadMore: {
+    alignSelf: 'center',
+    marginTop: Spacing.sm,
+  },
   groupLabel: {
     marginTop: 8,
     marginBottom: 12,
