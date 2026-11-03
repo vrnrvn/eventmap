@@ -36,4 +36,3 @@ export function normalizeLinkUrl(raw: string): string | null {
   if (!parsed.hostname.includes('.')) return null;
   return parsed.toString();
 }
-

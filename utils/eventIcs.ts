@@ -12,7 +12,6 @@ export function getEventWebUrl(eventId: string): string {
   const base = (process.env.EXPO_PUBLIC_APP_WEB_ORIGIN ?? 'https://eventmap.pro').replace(/\/$/, '');
   return `${base}/event/${eventId}`;
 }
-
 function padUtcGcal(iso: string): string {
   const d = new Date(iso);
   return d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
@@ -160,4 +159,3 @@ export function buildEventIcs(input: IcsEventInput): string {
   lines.push(`URL:${getEventWebUrl(input.id)}`, 'END:VEVENT', 'END:VCALENDAR');
   return lines.map(foldIcsLine).join('\r\n') + '\r\n';
 }
-

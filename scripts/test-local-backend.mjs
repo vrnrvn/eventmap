@@ -178,7 +178,7 @@ try {
   assert.equal(ok(await host.rpc('get_event_chat_post_status', { event_uuid: eventId }))[0].is_admin, false, 'Admin flag cleared for host-only checks');
   assert.ok(ok(await host.from('event_chat_messages').select('id').eq('event_id', eventId)).length >= 1, 'Host can read own event chat without attending');
   const hostStatus = ok(await host.rpc('get_event_chat_post_status', { event_uuid: eventId }))[0];
-  assert.equal(hostStatus.can_read, true); assert.equal(hostStatus.can_post, false, 'Host must RSVP going to post'); assert.equal(hostStatus.is_host, true);
+  assert.equal(hostStatus.can_read, true); assert.equal(hostStatus.can_post, true, 'Host can post without an RSVP'); assert.equal(hostStatus.is_host, true);
 
   const modMsgId = crypto.randomUUID();
   ok(await sam.from('event_chat_messages').insert({ id: modMsgId, event_id: eventId, sender_id: samId, body: 'To be moderated' }));
