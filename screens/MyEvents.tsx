@@ -15,6 +15,8 @@ import { router, useFocusEffect } from 'expo-router';
 import { useApp } from '@/contexts/AppContext';
 import { eventsService } from '@/services/events';
 import { businessesService } from '@/services/businesses';
+import { hostToolsService, type HostEventCounts } from '@/services/hostTools';
+import { summarizeCapacity } from '@/utils/hostEvent';
 import { confirmAction } from '@/utils/confirm';
 import { notify } from '@/utils/notify';
 import { Button } from '@/components/ui/Button';
@@ -40,7 +42,12 @@ import {
 
 const PAGE_SIZE = 30;
 
-type Scope = 'upcoming' | 'past';
+type Scope = 'upcoming' | 'drafts' | 'past';
+const SCOPES: { value: Scope; label: string; a11y: string }[] = [
+  { value: 'upcoming', label: 'Upcoming', a11y: 'Upcoming events' },
+  { value: 'drafts', label: 'Drafts', a11y: 'Draft events' },
+  { value: 'past', label: 'Past', a11y: 'Past and cancelled events' },
+];
 
 /**
  * A recurring series whose own end date has passed comes back from the
@@ -65,9 +72,26 @@ export default function MyEvents() {
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [counts, setCounts] = useState<Map<string, HostEventCounts>>(new Map());
   const hasLoadedRef = useRef(false);
   // Ignore responses from a superseded load (tab switched mid-flight).
   const requestSeq = useRef(0);
+
+  /** Going / waitlist per row; best-effort, the list renders without it. */
+  const loadCounts = useCallback(async (rows: Event[]) => {
+    const ids = rows.filter((e) => e.status !== 'cancelled').map((e) => e.id);
+    if (ids.length === 0) return;
+    try {
+      const fetched = await hostToolsService.getEventsCounts(ids);
+      setCounts((prev) => {
+        const next = new Map(prev);
+        fetched.forEach((v, k) => next.set(k, v));
+        return next;
+      });
+    } catch {
+      // Counts are decoration here; the hub shows them authoritatively.
+    }
+  }, []);
 
   const fetchPage = useCallback(
     async (businessId: string, which: Scope, pageOffset: number) => {
@@ -76,11 +100,13 @@ export default function MyEvents() {
         offset: pageOffset,
         scope: which,
       });
+      void loadCounts(rows);
       if (which === 'upcoming') {
         // A recurring series whose own end date passed still matches the
         // upcoming query (the server can't evaluate it); it belongs in Past.
         return { rows: partitionUpcoming(rows).live, fetched: rows.length };
       }
+      if (which === 'drafts') return { rows, fetched: rows.length };
       // Past: the query also returns ongoing recurring series (their first
       // occurrence has ended); keep only cancelled or genuinely finished ones.
       return {
@@ -88,7 +114,7 @@ export default function MyEvents() {
         fetched: rows.length,
       };
     },
-    []
+    [loadCounts]
   );
 
   /** First page for the current tab. `silent` keeps the list visible. */
@@ -211,8 +237,10 @@ export default function MyEvents() {
   const renderItem = useCallback(
     ({ item }: { item: Event }) => {
       const cancelled = item.status === 'cancelled';
-      const ended = !cancelled && hasEventEnded(item);
-      const live = !cancelled && !ended && isEventInProgress(item);
+      const draft = item.publish_state === 'draft';
+      const postponed = !cancelled && item.status === 'postponed';
+      const ended = !cancelled && !draft && hasEventEnded(item);
+      const live = !cancelled && !ended && !postponed && !draft && isEventInProgress(item);
       // Recurring series: show the next occurrence, not the first one.
       const nextStart =
         item.is_recurring && !ended && !cancelled
@@ -220,6 +248,10 @@ export default function MyEvents() {
           : item.start_datetime;
       const badge = cancelled
         ? { label: 'Cancelled', tone: 'danger' as const }
+        : draft
+          ? { label: 'Draft', tone: 'neutral' as const }
+          : postponed
+            ? { label: 'Postponed', tone: 'danger' as const }
         : live
           ? { label: 'LIVE', tone: 'success' as const }
           : ended
@@ -227,6 +259,16 @@ export default function MyEvents() {
             : item.is_recurring
               ? { label: 'Repeats', tone: 'primary' as const }
               : { label: 'Upcoming', tone: 'primary' as const };
+      const c = counts.get(item.id);
+      const metaLines: string[] = [];
+      if (c && !cancelled) {
+        const cap = summarizeCapacity(c.going, item.max_attendees);
+        const parts = [cap.label];
+        if (cap.isFull) parts.push('Full');
+        if (c.waitlist) parts.push(`${c.waitlist} waiting`);
+        if (c.interested) parts.push(`${c.interested} interested`);
+        metaLines.push(parts.join(' · '));
+      }
 
       return (
         <View style={styles.cardSpacing}>
@@ -237,7 +279,9 @@ export default function MyEvents() {
             dimmed={cancelled || ended}
             badge={badge}
             dateIcon={<Clock size={12} color={Colors.text.tertiary} />}
-            onPress={() => router.push(`/event/${item.id}` as never)}
+            metaLines={metaLines}
+            onPress={() => router.push(`/business/manage-event/${item.id}` as never)}
+            accessibilityLabel={`Manage ${item.title}`}
             actions={
               <>
                 {/* Cancelled events are read-only: no Edit, Notify or Cancel. */}
@@ -256,7 +300,7 @@ export default function MyEvents() {
                   </TouchableOpacity>
                 )}
 
-                {!cancelled && (
+                {!cancelled && !draft && (
                   <TouchableOpacity
                     style={styles.iconActionBtn}
                     onPress={() => handleNotifyFollowers(item)}
@@ -282,7 +326,7 @@ export default function MyEvents() {
                   <BarChart3 size={14} color={Colors.primary} />
                 </TouchableOpacity>
 
-                {!cancelled && (
+                {!cancelled && !draft && (
                   <TouchableOpacity
                     style={styles.deleteBtn}
                     onPress={() => handleCancelEvent(item)}
@@ -300,7 +344,7 @@ export default function MyEvents() {
         </View>
       );
     },
-    [handleCancelEvent, handleNotifyFollowers]
+    [handleCancelEvent, handleNotifyFollowers, counts]
   );
 
   const keyExtractor = useCallback((item: Event) => item.id, []);
@@ -353,14 +397,16 @@ export default function MyEvents() {
             <FileText size={36} color={Colors.primary} />
           </View>
           <Text style={styles.emptyTitle}>
-            {scope === 'past' ? 'Nothing here yet' : 'No Upcoming Events'}
+            {scope === 'past' ? 'Nothing here yet' : scope === 'drafts' ? 'No drafts' : 'No Upcoming Events'}
           </Text>
           <Text style={styles.emptySubtitle}>
             {!hasBusiness
               ? 'You need a business profile to create and manage events.'
               : scope === 'past'
                 ? 'Events that have ended or were cancelled will show up here.'
-                : 'Create your next event to start reaching your local community.'}
+                : scope === 'drafts'
+                  ? 'Save an event as a draft, or duplicate one from Manage event, and it will wait here until you publish it.'
+                  : 'Create your next event to start reaching your local community.'}
           </Text>
           {hasBusiness && scope === 'upcoming' && (
             <Button
@@ -456,7 +502,9 @@ export default function MyEvents() {
             <Text style={styles.headerSubtitle}>
               {loading
                 ? 'Loading…'
-                : `${events.length}${hasMore ? '+' : ''} ${scope === 'upcoming' ? 'upcoming' : 'past or cancelled'}`}
+                : `${events.length}${hasMore ? '+' : ''} ${
+                    scope === 'upcoming' ? 'upcoming' : scope === 'drafts' ? 'drafts' : 'past or cancelled'
+                  }`}
             </Text>
           </View>
         </View>
@@ -464,21 +512,19 @@ export default function MyEvents() {
       </View>
 
       <View style={styles.segmentRow} accessibilityRole="tablist">
-        {(['upcoming', 'past'] as const).map((tab) => {
-          const active = scope === tab;
+        {SCOPES.map((tab) => {
+          const active = scope === tab.value;
           return (
             <TouchableOpacity
-              key={tab}
+              key={tab.value}
               style={[styles.segment, active && styles.segmentActive]}
-              onPress={() => switchScope(tab)}
+              onPress={() => switchScope(tab.value)}
               activeOpacity={0.8}
               accessibilityRole="tab"
               accessibilityState={{ selected: active }}
-              accessibilityLabel={tab === 'upcoming' ? 'Upcoming events' : 'Past and cancelled events'}
+              accessibilityLabel={tab.a11y}
             >
-              <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                {tab === 'upcoming' ? 'Upcoming' : 'Past'}
-              </Text>
+              <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{tab.label}</Text>
             </TouchableOpacity>
           );
         })}

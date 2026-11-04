@@ -31,6 +31,8 @@ import {
   ShieldAlert,
   ShieldCheck,
   Users,
+  Pin,
+  X,
 } from 'lucide-react-native';
 import { socialService, BlockingUnavailableError } from '@/services/social';
 import { complaintsService } from '@/services/complaints';
@@ -68,7 +70,7 @@ import {
   sortMessages,
   typingLabel,
 } from '@/utils/chatMessages';
-import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import {
   ChatListRow,
   type ChatListRowData,
@@ -120,6 +122,7 @@ export default function EventChatScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [actionTarget, setActionTarget] = useState<ChatMessageActionsTarget | null>(null);
   const [postStatus, setPostStatus] = useState<ChatPostStatus | null>(null);
+  const [pinnedMessage, setPinnedMessage] = useState<EventChatMessageWithSender | null>(null);
   /** Senders the viewer has globally blocked (user_blocks). */
   const [blockedSenders, setBlockedSenders] = useState<Set<string>>(new Set());
   const [reportUserTarget, setReportUserTarget] = useState<{ id: string; name: string } | null>(null);
@@ -446,6 +449,46 @@ export default function EventChatScreen() {
       // Keep showing current details on a transient failure.
     }
   }, [id]);
+
+  // The pinned message id travels in post status (and settings changes refresh
+  // it); the body is fetched separately so the banner survives pagination.
+  const pinnedId = postStatus?.pinned_message_id ?? null;
+  const pinnedIdRef = useRef<string | null>(null);
+  pinnedIdRef.current = pinnedId;
+  useEffect(() => {
+    let cancelled = false;
+    if (!pinnedId) {
+      setPinnedMessage(null);
+      return;
+    }
+    eventChatService
+      .getMessage(pinnedId)
+      .then((message) => {
+        if (!cancelled) setPinnedMessage(message);
+      })
+      .catch(() => {
+        if (!cancelled) setPinnedMessage(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pinnedId]);
+
+  const handleTogglePin = useCallback(
+    async (target: ChatMessageActionsTarget) => {
+      if (!id) return;
+      try {
+        const next = pinnedId === target.id ? null : target.id;
+        await eventChatService.setPin(id, next);
+        showNotice(next ? 'Pinned.' : 'Unpinned.');
+        const status = await eventChatService.getPostStatus(id).catch(() => null);
+        if (status) setPostStatus(status);
+      } catch (err) {
+        showNotice(err instanceof Error ? err.message : 'Could not pin the message.');
+      }
+    },
+    [id, pinnedId, showNotice]
+  );
 
   const handlePresence = useCallback((members: { userId: string }[]) => {
     setHereCount(members.length);
@@ -1112,6 +1155,16 @@ export default function EventChatScreen() {
       try {
         const deleted = await eventChatService.deleteMessage(target.id);
         if (!deleted) throw new Error('not deleted');
+        // Deleting the pinned message unpins it server-side; drop the banner
+        // immediately instead of showing moderated content until the next
+        // status refresh.
+        if (pinnedIdRef.current === target.id) {
+          setPinnedMessage(null);
+          if (id) {
+            const status = await eventChatService.getPostStatus(id).catch(() => null);
+            if (status) setPostStatus(status);
+          }
+        }
       } catch {
         showNotice("Couldn't delete the message. Please try again.");
         if (original) {
@@ -1119,7 +1172,7 @@ export default function EventChatScreen() {
         }
       }
     },
-    [markDeleted, showNotice]
+    [markDeleted, showNotice, id]
   );
 
   const handleRetry = useCallback(
@@ -1351,6 +1404,40 @@ export default function EventChatScreen() {
         </View>
       ) : null}
 
+      {canChat && !loading && pinnedMessage ? (
+        <View style={styles.pinnedBanner} accessibilityLabel="Pinned message">
+          <Pin size={14} color={Colors.primary} />
+          <View style={styles.pinnedBody}>
+            <Text style={styles.pinnedLabel}>
+              Pinned · {pinnedMessage.sender?.name ?? 'Host'}
+            </Text>
+            <Text style={styles.pinnedText} numberOfLines={2}>
+              {pinnedMessage.body}
+            </Text>
+          </View>
+          {isModerator ? (
+            <TouchableOpacity
+              onPress={() => {
+                if (!id) return;
+                void eventChatService
+                  .setPin(id, null)
+                  .then(async () => {
+                    showNotice('Unpinned.');
+                    const status = await eventChatService.getPostStatus(id).catch(() => null);
+                    if (status) setPostStatus(status);
+                  })
+                  .catch(() => showNotice('Could not unpin.'));
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel="Unpin message"
+            >
+              <X size={16} color={Colors.text.tertiary} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : null}
+
       <View style={styles.listWrap}>
         <FlatList
           ref={listRef}
@@ -1552,6 +1639,8 @@ export default function EventChatScreen() {
         onReportUser={handleReportUser}
         onRetry={handleRetry}
         onDiscard={handleDiscard}
+        onTogglePin={(target) => void handleTogglePin(target)}
+        pinnedMessageId={pinnedId}
       />
     </KeyboardAvoidingView>
   );
@@ -1597,6 +1686,36 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     color: Colors.text.secondary,
     fontFamily: Typography.labelFontFamilies.medium,
+  },
+  pinnedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginHorizontal: Spacing.md,
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: Colors.primarySoft,
+    borderWidth: 1,
+    borderColor: alpha(Colors.primary, 0.2),
+  },
+  pinnedBody: {
+    flex: 1,
+  },
+  pinnedLabel: {
+    fontSize: Typography.sizes.xxs,
+    fontFamily: Typography.labelFontFamilies.semibold,
+    color: Colors.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginBottom: 2,
+  },
+  pinnedText: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.primary,
+    lineHeight: 18,
   },
   connectionBanner: {
     flexDirection: 'row',

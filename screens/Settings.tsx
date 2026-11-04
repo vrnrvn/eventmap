@@ -51,6 +51,7 @@ import {
   ChevronRight,
   UserRoundX,
   MessageCircle,
+  Megaphone,
   KeyRound,
   LogOut,
   Info,
@@ -143,6 +144,7 @@ export default function SettingsScreen() {
     eventUpdate: true,
     rsvp: true,
     nearbyEvent: true,
+    hostAnnouncement: true,
     chatMessage: true,
     eventReminderEnabled: true,
     interestedReminder: true,
@@ -224,6 +226,7 @@ export default function SettingsScreen() {
         rsvp: prefs.rsvp ?? true,
         nearbyEvent: prefs.nearby_event ?? true,
         chatMessage: prefs.chat_message ?? true,
+        hostAnnouncement: prefs.host_announcement ?? true,
         eventReminderEnabled: profile.event_reminder_enabled ?? true,
         // Respect a saved "off" state: only default to 60 when the reminder is
         // enabled (or never configured) but has no stored minutes.
@@ -410,6 +413,7 @@ export default function SettingsScreen() {
         rsvp: next.rsvp,
         nearby_event: next.nearbyEvent,
         chat_message: next.chatMessage,
+        host_announcement: next.hostAnnouncement,
         interested_reminder: next.interestedReminder,
       };
       const reminderEnabled = next.eventReminderMinutes != null;
@@ -1240,14 +1244,16 @@ export default function SettingsScreen() {
                   <View style={styles.privacyContent}>
                     <Text style={styles.privacyTitle}>Show my event attendance</Text>
                     <Text style={styles.privacyDesc}>
-                      Show your name in the &quot;Who&apos;s Going&quot; list when you RSVP
+                      Show your name in the &quot;Who&apos;s Going&quot; list when you RSVP. Off
+                      shows you as Anonymous to other attendees; event hosts still see your
+                      first name and last initial.
                     </Text>
                   </View>
                   <Switch
                     value={privacyForm.showAttendancePublicly}
                     onValueChange={(v) => handlePrivacyToggle('showAttendancePublicly', v)}
                     accessibilityLabel="Show my event attendance"
-                    accessibilityHint="Show your name in the Who's Going list when you RSVP"
+                    accessibilityHint="Show your name in the Who's Going list when you RSVP. Off shows you as Anonymous to other attendees; event hosts still see your first name and last initial."
                     trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       privacyForm.showAttendancePublicly
@@ -1409,6 +1415,26 @@ export default function SettingsScreen() {
                     trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
                       notificationForm.nearbyEvent ? Colors.primary : Colors.background.secondary
+                    }
+                  />
+                </View>
+                <View style={styles.fieldSeparator} />
+                <View style={styles.privacyRow}>
+                  <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                    <Megaphone size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.privacyContent}>
+                    <Text style={styles.privacyTitle}>Host announcements</Text>
+                    <Text style={styles.privacyDesc}>Updates the host sends to attendees of events you joined</Text>
+                  </View>
+                  <Switch
+                    value={notificationForm.hostAnnouncement}
+                    onValueChange={(v) => handleNotificationToggle('hostAnnouncement', v)}
+                    accessibilityLabel="Host announcements"
+                    accessibilityHint="Updates the host sends to attendees of events you joined"
+                    trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
+                    thumbColor={
+                      notificationForm.hostAnnouncement ? Colors.primary : Colors.background.secondary
                     }
                   />
                 </View>

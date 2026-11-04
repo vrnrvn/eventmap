@@ -22,5 +22,5 @@ export function formatRelativeLabel(date: Date | string, now: Date = new Date())
   if (diffHr < 24) return `${diffHr}h ago`;
   if (diffDay === 1) return 'Yesterday';
   if (diffDay < 7) return `${diffDay} days ago`;
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }

@@ -224,3 +224,46 @@ describe('recurrence end date helpers', () => {
     expect(hasEventEnded(series, new Date(2026, 6, 1, 0, 1))).toBe(true);
   });
 });
+
+describe('time-zone aware series (20261103140000)', () => {
+  it('keeps the event-zone wall clock across a DST change the device does not share', () => {
+    // Weekly 19:00 Lisbon class starting in WET (UTC+0). Lisbon moves to WEST
+    // (UTC+1) on 2026-03-29; the occurrence after that must be 18:00Z = 19:00 local.
+    const event = {
+      start_datetime: '2026-03-04T19:00:00Z',
+      is_recurring: true,
+      recurrence_pattern: { frequency: 'weekly', interval: 1 } as RecurrencePattern,
+      timezone: 'Europe/Lisbon',
+    };
+    const now = new Date('2026-04-01T12:00:00Z');
+    const [next] = getNextOccurrences(event, 1, now);
+    expect(next.toISOString()).toBe('2026-04-01T18:00:00.000Z');
+  });
+
+  it('walks "today" on the event zone calendar, not the device one', () => {
+    // 2026-11-06T03:30Z is still Nov 5 in Los Angeles but Nov 6 in Tokyo.
+    const event = {
+      start_datetime: '2026-10-01T10:00:00Z', // 19:00 Tokyo
+      is_recurring: true,
+      recurrence_pattern: { frequency: 'daily', interval: 1 } as RecurrencePattern,
+      timezone: 'Asia/Tokyo',
+    };
+    const now = new Date('2026-11-06T03:30:00Z');
+    const [next] = getNextOccurrences(event, 1, now);
+    // Next Tokyo occurrence is Nov 6 19:00 JST = 10:00Z (same day in Tokyo, still ahead of now).
+    expect(next.toISOString()).toBe('2026-11-06T10:00:00.000Z');
+  });
+
+  it('ends a series on the event-zone calendar day', () => {
+    const base = {
+      start_datetime: '2026-10-01T10:00:00Z',
+      end_datetime: '2026-10-01T12:00:00Z',
+      is_recurring: true,
+      recurrence_pattern: { frequency: 'daily', interval: 1, endDate: '2026-11-05' } as RecurrencePattern,
+    };
+    // At 2026-11-06T03:30Z it is Nov 6 in Tokyo (series over) but Nov 5 in Los Angeles (last day still on).
+    const now = new Date('2026-11-06T03:30:00Z');
+    expect(hasEventEnded({ ...base, timezone: 'Asia/Tokyo' }, now)).toBe(true);
+    expect(hasEventEnded({ ...base, timezone: 'America/Los_Angeles' }, now)).toBe(false);
+  });
+});

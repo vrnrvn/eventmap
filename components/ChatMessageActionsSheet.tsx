@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Copy, Flag, RotateCcw, ShieldOff, Trash2, Undo2, UserMinus, UserRound, X } from 'lucide-react-native';
+import { Copy, Flag, Pin, RotateCcw, ShieldOff, Trash2, Undo2, UserMinus, UserRound, X } from 'lucide-react-native';
 import {
   CHAT_BLOCK_DURATIONS,
   CHAT_REPORT_REASONS,
@@ -34,6 +34,9 @@ type Props = {
   onReport: (target: ChatMessageActionsTarget, reason: ChatReportReason) => void;
   onDelete: (target: ChatMessageActionsTarget) => void;
   onRestore: (target: ChatMessageActionsTarget) => void;
+  /** Pin/unpin for moderators (20261103160000); omit to hide the row. */
+  onTogglePin?: (target: ChatMessageActionsTarget) => void;
+  pinnedMessageId?: string | null;
   onBlockUser: (target: ChatMessageActionsTarget, durationMinutes: number | null) => void;
   onRetry: (target: ChatMessageActionsTarget) => void;
   onDiscard: (target: ChatMessageActionsTarget) => void;
@@ -58,6 +61,8 @@ export function ChatMessageActionsSheet({
   onReport,
   onDelete,
   onRestore,
+  onTogglePin,
+  pinnedMessageId,
   onBlockUser,
   onRetry,
   onDiscard,
@@ -227,9 +232,17 @@ export function ChatMessageActionsSheet({
         </View>
       );
     }
+    const pinned = pinnedMessageId != null && pinnedMessageId === target.id;
     return (
       <View>
         <ActionRow icon={<Copy size={20} color={Colors.text.primary} />} label="Copy text" onPress={() => run(onCopy)} />
+        {target.canModerate && onTogglePin && !target.sending ? (
+          <ActionRow
+            icon={<Pin size={20} color={Colors.text.primary} />}
+            label={pinned ? 'Unpin message' : 'Pin message'}
+            onPress={() => run(onTogglePin)}
+          />
+        ) : null}
         {/* Previously the only way to reach a participant was to leave the
             chat and find them in the attendee list. */}
         {!target.mine ? (

@@ -26,6 +26,9 @@ import {
   UserPlus,
   Users,
   X,
+  Megaphone,
+  ListOrdered,
+  ShieldAlert,
 } from 'lucide-react-native';
 import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import {
@@ -82,6 +85,13 @@ const getIconMeta = (type: NotificationType) => {
       return { Icon: MessageCircle, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
     case 'chat_mention':
       return { Icon: AtSign, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
+    case 'host_announcement':
+      return { Icon: Megaphone, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
+    case 'waitlist':
+      return { Icon: ListOrdered, bg: alpha(Colors.secondary, 0.12), color: Palette.secondary };
+    case 'moderation':
+    case 'report_update':
+      return { Icon: ShieldAlert, bg: Palette.readIconBg, color: Palette.subtle };
     default:
       return { Icon: Mail, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
   }

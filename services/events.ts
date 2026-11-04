@@ -1,9 +1,36 @@
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
-import { RankedEvent, EventDetails, Event, EventLink } from '@/types/database';
+import type { RankedEvent, EventDetails, Event, EventLink, EventVisibility, AgeRestriction } from '@/types/database';
+
 import { FilterOptions } from '@/types/app';
 import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
+
+/** Optional detail fields a host can set (20261103150000). Empty strings mean "clear". */
+export type EventExtras = {
+  visibility?: EventVisibility;
+  ticketUrl?: string;
+  priceLabel?: string;
+  ageRestriction?: AgeRestriction;
+  accessibilityNotes?: string;
+  whatToBring?: string;
+};
+
+export function extrasToUpdates(extras: EventExtras): Partial<Event> {
+  const u: Partial<Event> = {};
+  const text = (v: string | undefined) => (v === undefined ? undefined : v.trim() ? v.trim() : null);
+  if (extras.visibility !== undefined) u.visibility = extras.visibility;
+  if (extras.ageRestriction !== undefined) u.age_restriction = extras.ageRestriction;
+  const ticket = text(extras.ticketUrl);
+  if (ticket !== undefined) u.ticket_url = ticket;
+  const price = text(extras.priceLabel);
+  if (price !== undefined) u.price_label = price;
+  const access = text(extras.accessibilityNotes);
+  if (access !== undefined) u.accessibility_notes = access;
+  const bring = text(extras.whatToBring);
+  if (bring !== undefined) u.what_to_bring = bring;
+  return u;
+}
 
 export const eventsService = {
   /**
@@ -67,8 +94,16 @@ export const eventsService = {
       interval: number;
       endDate?: string;
     } | null;
-  }): Promise<string> {
-    const { data, error } = await supabase.rpc('create_event_with_limit_check', {
+    /** Going-capacity cap; null/undefined = unlimited. */
+    maxAttendees?: number | null;
+    /** IANA zone the times were entered in (20261103140000). */
+    timezone?: string | null;
+    /** 'draft' keeps the event private and free until publish_event (20261103150000). */
+    publishState?: 'draft' | 'published';
+    /** Optional detail fields (20261103150000); written with a follow-up UPDATE. */
+    extras?: EventExtras;
+  }): Promise<{ id: string; capacityApplied: boolean; timezoneApplied: boolean; extrasApplied: boolean }> {
+    const args = {
       p_business_id: eventData.businessId,
       p_title: eventData.title,
       p_description: eventData.description,
@@ -81,13 +116,111 @@ export const eventsService = {
       p_cover_image_url: eventData.coverImageUrl || undefined,
       p_is_recurring: eventData.isRecurring ?? false,
       p_recurrence_pattern: eventData.recurrencePattern ?? null,
-    });
+    };
+    const wantsCapacity = eventData.maxAttendees != null;
+    const wantsTimezone = !!eventData.timezone;
+    const wantsDraft = eventData.publishState === 'draft';
 
-    if (error) throw error;
-    const eventId =
-      typeof data === 'string' ? data : (data as { id?: string })?.id;
+    // The RPC has grown optional trailing parameters in unapplied migrations:
+    // p_max_attendees (20261103120000) and p_timezone (20261103140000).
+    // PostgREST resolves overloads by argument names, so an unknown name is
+    // reported as a missing function (PGRST202 / 42883). Try the richest
+    // shape first and drop the newest extras until one is accepted; whatever
+    // could not be sent in the create call is written with a follow-up UPDATE.
+    const untyped = supabase.rpc as unknown as (
+      f: string,
+      a: Record<string, unknown>
+    ) => ReturnType<typeof supabase.rpc>;
+    const attempts: { args: Record<string, unknown>; capacity: boolean; timezone: boolean }[] = [];
+    if (wantsDraft) {
+      // Drafts exist only with 20261103150000; there is no older shape that
+      // can express one, so this attempt is not allowed to fall back.
+      const res = await untyped('create_event_with_limit_check', {
+        ...args,
+        p_max_attendees: eventData.maxAttendees ?? null,
+        p_timezone: eventData.timezone ?? null,
+        p_publish_state: 'draft',
+      });
+      if (res.error) {
+        if (res.error.code === '42883' || res.error.code === 'PGRST202') {
+          throw new Error('Drafts need a database update that has not been applied yet.');
+        }
+        throw res.error;
+      }
+      const draftId = typeof res.data === 'string' ? res.data : (res.data as { id?: string })?.id;
+      if (!draftId) throw new Error('Event was created but no ID was returned');
+      const extrasApplied = await this.applyExtras(draftId, eventData.extras);
+      return { id: draftId, capacityApplied: true, timezoneApplied: true, extrasApplied };
+    }
+    if (wantsTimezone) {
+      attempts.push({
+        args: { ...args, p_max_attendees: eventData.maxAttendees ?? null, p_timezone: eventData.timezone },
+        capacity: true,
+        timezone: true,
+      });
+    }
+    if (wantsCapacity) {
+      attempts.push({ args: { ...args, p_max_attendees: eventData.maxAttendees }, capacity: true, timezone: false });
+    }
+    attempts.push({ args, capacity: false, timezone: false });
+
+    let data: unknown;
+    let capacityApplied = !wantsCapacity;
+    let timezoneApplied = !wantsTimezone;
+    for (const attempt of attempts) {
+      const res = await untyped('create_event_with_limit_check', attempt.args);
+      if (!res.error) {
+        data = res.data;
+        if (attempt.capacity) capacityApplied = true;
+        if (attempt.timezone) timezoneApplied = true;
+        break;
+      }
+      const missing = res.error.code === '42883' || res.error.code === 'PGRST202';
+      if (!missing || attempt === attempts[attempts.length - 1]) throw res.error;
+    }
+
+    const eventId = typeof data === 'string' ? data : (data as { id?: string })?.id;
     if (!eventId) throw new Error('Event was created but no ID was returned');
-    return eventId;
+
+    const followUp: Partial<Event> = {};
+    if (!capacityApplied) followUp.max_attendees = eventData.maxAttendees ?? null;
+    if (!timezoneApplied) followUp.timezone = eventData.timezone ?? null;
+    if (Object.keys(followUp).length > 0) {
+      try {
+        await this.updateEvent(eventId, followUp);
+        capacityApplied = true;
+        timezoneApplied = true;
+      } catch {
+        // The timezone column may not exist yet (unapplied migration); retry
+        // the capacity alone so at least that lands. Reported to the caller.
+        if (!capacityApplied && 'timezone' in followUp) {
+          try {
+            await this.updateEvent(eventId, { max_attendees: eventData.maxAttendees ?? null });
+            capacityApplied = true;
+          } catch {
+            // reported below
+          }
+        }
+      }
+    }
+    const extrasApplied = await this.applyExtras(eventId, eventData.extras);
+    return { id: eventId, capacityApplied, timezoneApplied, extrasApplied };
+  },
+
+  /**
+   * Writes the optional detail columns (20261103150000). Returns false when
+   * the columns do not exist yet or the write failed; the event itself is fine.
+   */
+  async applyExtras(eventId: string, extras: EventExtras | undefined): Promise<boolean> {
+    if (!extras) return true;
+    const updates = extrasToUpdates(extras);
+    if (Object.keys(updates).length === 0) return true;
+    try {
+      await this.updateEvent(eventId, updates);
+      return true;
+    } catch {
+      return false;
+    }
   },
 
   async updateEvent(eventId: string, updates: Partial<Event>): Promise<void> {
@@ -135,35 +268,47 @@ export const eventsService = {
    */
   async getBusinessEvents(
     businessId: string,
-    opts?: { limit?: number; offset?: number; scope?: 'upcoming' | 'past' | 'all' }
+    opts?: { limit?: number; offset?: number; scope?: 'upcoming' | 'past' | 'drafts' | 'all' }
   ): Promise<Event[]> {
     const limit = opts?.limit ?? 50;
     const offset = opts?.offset ?? 0;
     const scope = opts?.scope ?? 'all';
     const nowIso = new Date().toISOString();
 
-    let query = supabase.from('events').select('*').eq('business_id', businessId);
+    // `publish_state` arrives with 20261103150000. Until then the column is
+    // unknown to PostgREST (42703); the filters below are retried without it,
+    // which is harmless because no drafts can exist before the migration.
+    const build = (withPublishState: boolean) => {
+      let query = supabase.from('events').select('*').eq('business_id', businessId);
+      if (scope === 'drafts') {
+        return query.eq('publish_state', 'draft').order('updated_at', { ascending: false });
+      }
+      if (withPublishState) query = query.eq('publish_state', 'published');
+      if (scope === 'upcoming') {
+        query = query
+          .in('status', ['active', 'postponed'])
+          .or(`end_datetime.gt.${nowIso},is_recurring.eq.true`)
+          .order('start_datetime', { ascending: true });
+      } else if (scope === 'past') {
+        // Includes active recurring series whose first end has passed; callers
+        // decide with hasEventEnded whether the series itself is over (an
+        // ongoing one belongs in 'upcoming', a finished one here).
+        query = query
+          .or(`status.eq.cancelled,end_datetime.lte.${nowIso}`)
+          .order('start_datetime', { ascending: false });
+      } else {
+        query = query.order('start_datetime', { ascending: true });
+      }
+      return query;
+    };
 
-    if (scope === 'upcoming') {
-      query = query
-        .eq('status', 'active')
-        .or(`end_datetime.gt.${nowIso},is_recurring.eq.true`)
-        .order('start_datetime', { ascending: true });
-    } else if (scope === 'past') {
-      // Includes active recurring series whose first end has passed; callers
-      // decide with hasEventEnded whether the series itself is over (an
-      // ongoing one belongs in 'upcoming', a finished one here).
-      query = query
-        .or(`status.eq.cancelled,end_datetime.lte.${nowIso}`)
-        .order('start_datetime', { ascending: false });
-    } else {
-      query = query.order('start_datetime', { ascending: true });
+    let res = await build(true).range(offset, offset + limit - 1);
+    if (res.error && res.error.code === '42703') {
+      if (scope === 'drafts') return [];
+      res = await build(false).range(offset, offset + limit - 1);
     }
-
-    const { data, error } = await query.range(offset, offset + limit - 1);
-
-    if (error) throw error;
-    return (data || []) as Event[];
+    if (res.error) throw res.error;
+    return (res.data || []) as Event[];
   },
 
   /**

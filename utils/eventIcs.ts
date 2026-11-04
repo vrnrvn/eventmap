@@ -4,6 +4,14 @@
  * under node (see vitest.config.mts) — the platform IO lives in eventShare.ts.
  */
 import type { RecurrencePattern } from '@/utils/recurrence';
+import { isValidTimeZone, utcToWallClock, wallClockToUtc as wallClockToUtcLocal } from '@/utils/timezone';
+
+/** "20261106T190000" — the wall clock of `iso` in `tz`, RFC 5545 local form. */
+function formatIcsLocal(iso: string, tz: string): string {
+  const w = utcToWallClock(new Date(iso), tz);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${w.year}${p(w.month)}${p(w.day)}T${p(w.hour)}${p(w.minute)}${p(w.second)}`;
+}
 
 /**
  * Universal links / web paths for sharing events (see app/event/[id].tsx).
@@ -26,6 +34,8 @@ export function getGoogleCalendarEventUrl(opts: {
   details?: string;
   /** Emitted as the `recur` parameter so repeating events import as a series. */
   recurrence?: string | null;
+  /** Event zone; Google shows the event in this zone (`ctz`) instead of the viewer's. */
+  timezone?: string | null;
 }): string {
   const params = new URLSearchParams({
     action: 'TEMPLATE',
@@ -35,6 +45,7 @@ export function getGoogleCalendarEventUrl(opts: {
   if (opts.address) params.set('location', opts.address);
   if (opts.details) params.set('details', opts.details);
   if (opts.recurrence) params.set('recur', opts.recurrence);
+  if (opts.timezone && isValidTimeZone(opts.timezone)) params.set('ctz', opts.timezone);
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
@@ -45,7 +56,9 @@ export function getGoogleCalendarEventUrl(opts: {
  */
 export function buildRecurrenceRule(
   pattern: RecurrencePattern | null | undefined,
-  isRecurring?: boolean
+  isRecurring?: boolean,
+  /** Event zone: UNTIL becomes the end of that day in this zone (device zone when omitted). */
+  timezone?: string | null
 ): string | null {
   if (!isRecurring || !pattern) return null;
   const freq =
@@ -65,10 +78,17 @@ export function buildRecurrenceRule(
   const endDate = pattern.endDate;
   if (endDate && /^\d{4}-\d{2}-\d{2}/.test(endDate)) {
     const [y, m, d] = endDate.slice(0, 10).split('-').map(Number);
-    // Inclusive final day, in local time, then normalised to UTC.
-    const until = new Date(y, m - 1, d, 23, 59, 59, 0);
-    if (!Number.isNaN(until.getTime())) {
-      parts.push(`UNTIL=${padUtcGcal(until.toISOString())}`);
+    if (timezone && isValidTimeZone(timezone)) {
+      // With a TZID DTSTART the RRULE is evaluated in that zone, and UNTIL
+      // must still be UTC: end of the final day in the event zone.
+      const untilUtc = wallClockToUtcLocal({ year: y, month: m, day: d, hour: 23, minute: 59, second: 59 }, timezone);
+      parts.push(`UNTIL=${padUtcGcal(untilUtc.toISOString())}`);
+    } else {
+      // Inclusive final day, in local time, then normalised to UTC.
+      const until = new Date(y, m - 1, d, 23, 59, 59, 0);
+      if (!Number.isNaN(until.getTime())) {
+        parts.push(`UNTIL=${padUtcGcal(until.toISOString())}`);
+      }
     }
   }
   return `RRULE:${parts.join(';')}`;
@@ -84,6 +104,12 @@ export type IcsEventInput = {
   description?: string;
   /** Full RRULE line (see buildRecurrenceRule); omitted for one-off events. */
   recurrence?: string | null;
+  /**
+   * Event zone. When set, DTSTART/DTEND are written as local wall clock with
+   * TZID so calendar apps keep "7 pm Lisbon" as 7 pm and apply the zone's DST
+   * rules to the series. Without it, times are UTC instants (legacy events).
+   */
+  timezone?: string | null;
 };
 
 /** RFC 5545 TEXT escaping: backslash, semicolon, comma, newlines. */
@@ -128,8 +154,10 @@ function foldIcsLine(line: string): string {
 }
 
 /**
- * Minimal valid single-event ICS. Dates are emitted in UTC basic format
- * (YYYYMMDDTHHMMSSZ); an invalid/missing end falls back to start + 1 hour.
+ * Minimal valid single-event ICS. With a zone, dates are local + TZID (Apple,
+ * Google and Outlook resolve IANA TZIDs without a VTIMEZONE block); otherwise
+ * UTC basic format (YYYYMMDDTHHMMSSZ). An invalid/missing end falls back to
+ * start + 1 hour.
  */
 export function buildEventIcs(input: IcsEventInput): string {
   const start = new Date(input.startIso);
@@ -149,10 +177,17 @@ export function buildEventIcs(input: IcsEventInput): string {
     'BEGIN:VEVENT',
     `UID:event-${input.id}@eventmap.pro`,
     `DTSTAMP:${padUtcGcal(new Date().toISOString())}`,
-    `DTSTART:${padUtcGcal(start.toISOString())}`,
-    `DTEND:${padUtcGcal(end.toISOString())}`,
-    `SUMMARY:${escapeIcsText(input.title)}`,
   ];
+  const tz = input.timezone && isValidTimeZone(input.timezone) ? input.timezone : null;
+  if (tz) {
+    lines.push(
+      `DTSTART;TZID=${tz}:${formatIcsLocal(start.toISOString(), tz)}`,
+      `DTEND;TZID=${tz}:${formatIcsLocal(end.toISOString(), tz)}`
+    );
+  } else {
+    lines.push(`DTSTART:${padUtcGcal(start.toISOString())}`, `DTEND:${padUtcGcal(end.toISOString())}`);
+  }
+  lines.push(`SUMMARY:${escapeIcsText(input.title)}`);
   if (input.recurrence) lines.push(input.recurrence);
   if (input.description) lines.push(`DESCRIPTION:${escapeIcsText(input.description)}`);
   if (input.address) lines.push(`LOCATION:${escapeIcsText(input.address)}`);

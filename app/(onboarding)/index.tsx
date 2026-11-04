@@ -1372,7 +1372,7 @@ function PrivacySetupPage({
         />
         <PrivacyRow
           title="Show me in “Who's going”"
-          description="Appear by name on events you RSVP to. Off means you count but show as Anonymous."
+          description="Appear by name on events you RSVP to. Off means other attendees see you as Anonymous; hosts still see your first name and last initial."
           value={showAttendancePublicly}
           onChange={setShowAttendancePublicly}
           disabled={!showProfileToOthers}

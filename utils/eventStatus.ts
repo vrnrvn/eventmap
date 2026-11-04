@@ -1,10 +1,13 @@
 import type { RecurrencePattern } from '@/utils/recurrence';
+import { dateKeyInZone, isValidTimeZone } from '@/utils/timezone';
 
 export type EventTimingFields = {
   start_datetime: string;
   end_datetime: string;
   is_recurring?: boolean;
   recurrence_pattern?: RecurrencePattern | null;
+  /** Event zone (20261103140000); null/undefined = compare on the device's calendar day. */
+  timezone?: string | null;
 };
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}/;
@@ -26,7 +29,12 @@ export function hasEventEnded(event: EventTimingFields, now: Date = new Date()):
   const endDate = event.recurrence_pattern?.endDate;
   if (!endDate || !DATE_ONLY.test(endDate)) return false;
 
-  // Compare on calendar days in local time, like CURRENT_DATE does server-side.
+  // Compare on calendar days in the event's zone when it has one (mirrors the
+  // 4-arg event_has_ended server helper); otherwise on the device's calendar
+  // day, like the legacy server behaviour.
+  if (event.timezone && isValidTimeZone(event.timezone)) {
+    return endDate.slice(0, 10) < dateKeyInZone(now, event.timezone);
+  }
   const [y, m, d] = endDate.slice(0, 10).split('-').map(Number);
   const endOfLastDay = new Date(y, m - 1, d, 23, 59, 59, 999);
   return endOfLastDay.getTime() < now.getTime();

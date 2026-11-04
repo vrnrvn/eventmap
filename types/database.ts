@@ -11,6 +11,8 @@ export type NotificationPreferences = {
   event_update?: boolean;
   rsvp?: boolean;
   nearby_event?: boolean;
+  /** Announcements sent by hosts of events you RSVP'd to (20261103130000). */
+  host_announcement?: boolean;
 };
 
 export type Profile = {
@@ -112,11 +114,37 @@ export type Event = {
   status?: EventStatus;
   /** Going-capacity cap; null/undefined = unlimited (20261030108000). */
   max_attendees?: number | null;
+  /** Host switch "Accepting RSVPs" off (20261103130000). */
+  rsvp_closed?: boolean;
+  /** 'approval' = the host reviews join requests (20261103170000). */
+  rsvp_mode?: RsvpMode;
+  /** 'off' | 'notify' | 'auto' (20261103130000); undefined = notify. */
+  waitlist_mode?: WaitlistMode;
+  /**
+   * IANA zone the host scheduled in (20261103140000). null/undefined = legacy
+   * event, rendered in the viewer's zone with no "your time" line.
+   */
+  timezone?: string | null;
+  /** Phase 3 (20261103150000). Undefined while the migration is unapplied. */
+  publish_state?: PublishState;
+  visibility?: EventVisibility;
+  ticket_url?: string | null;
+  price_label?: string | null;
+  age_restriction?: AgeRestriction;
+  accessibility_notes?: string | null;
+  what_to_bring?: string | null;
+  /** Host's note for a postponed event. */
+  status_note?: string | null;
   created_at: string;
   updated_at: string;
 };
 
-export type EventStatus = 'active' | 'cancelled';
+/** 'postponed' added by 20261103150000: visible, RSVPs kept, joining closed. */
+export type EventStatus = 'active' | 'cancelled' | 'postponed';
+export type WaitlistMode = 'off' | 'notify' | 'auto';
+export type PublishState = 'draft' | 'published';
+export type EventVisibility = 'public' | 'unlisted';
+export type AgeRestriction = 'none' | '18+' | '21+';
 
 export type EventLink = {
   id: string;
@@ -153,6 +181,9 @@ export type EventPhoto = {
 };
 
 export type RsvpStatus = 'going' | 'interested';
+/** What a viewer's rsvps row can hold once approval mode exists (20261103170000). */
+export type AttendeeRsvpStatus = RsvpStatus | 'requested';
+export type RsvpMode = 'open' | 'approval';
 
 export type Rsvp = {
   id: string;
@@ -233,7 +264,7 @@ export type RankedEvent = Omit<Event, 'updated_at'> & {
   has_ended?: boolean;
   saved_at?: string;
   /** Viewer fields added by 20261030114000. */
-  user_rsvp?: RsvpStatus | null;
+  user_rsvp?: AttendeeRsvpStatus | null;
   user_saved?: boolean;
   /** Set by the attendance RPCs once 20261102100000 is applied. */
   status?: EventStatus;
@@ -247,7 +278,7 @@ export type EventDetails = {
   photos: EventPhoto[];
   rsvp_count: number;
   save_count: number;
-  user_rsvp: RsvpStatus | null;
+  user_rsvp: AttendeeRsvpStatus | null;
   user_saved: boolean;
   user_following_business: boolean;
   /**

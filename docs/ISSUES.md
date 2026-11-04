@@ -612,3 +612,301 @@ for f in supabase/migrations/20261102*.sql; do SCRATCH_DB=eventmap_scratch_elm s
 # private PostgREST on :3999 bound to the scratch DB (see scripts/e2e-isolated-env.sh for the docker run)
 JWT_K=<oct key from PGRST_JWT_SECRET JWKS> node scripts/regress-isolated.mjs
 ```
+
+# Host tools — Manage event hub, phase 1 foundations (2026-11-03)
+
+Rules this pass: the shared local DB is owned by another dev session. Nothing
+was applied or reset there; SQL was validated on a per-worktree scratch copy
+(`SCRATCH_DB=eventmap_scratch_oak scripts/db-scratch.sh …`) only. Plan and
+remaining scope: `docs/HOST_TOOLS_PLAN.md`.
+
+## Observation about the shared DB
+
+The scratch copy dumped from `postgres` on 2026-11-03 already lists every
+`20261102*` file in `supabase_migrations.schema_migrations`, and
+`host_remove_attendee`, `event_waitlist`, `event_rsvp_counts` exist there. So the
+"Written, NOT applied" labels above for that set are stale: someone applied them.
+Re-applying `20261102100000` on top fails with "cannot change return type of
+existing function" — harmless for the shared DB (already applied) but worth
+knowing if a scratch run replays the whole set.
+
+## Done in this pass (client, works against the current schema)
+
+- [x] **`/business/manage-event/[id]`** (`screens/ManageEvent.tsx`): host-only hub with Overview · Attendees · Chat tabs. Overview shows phase badge, next occurrence, capacity bar with spots left, going / interested / waitlist / saves / views, and the quick actions that used to be scattered (Edit, Notify followers, Insights, public page, Cancel). Attendees tab lists going / interested / waitlist with name search, paging and **Remove attendee** (calls `host_remove_attendee`). Chat tab exposes lock, slow mode, and opens the existing `ChatModerationSheet` and the chat screen.
+- [x] Entry points: My Events rows now open the hub (the action icons are unchanged); Event Detail shows a "Manage event" button above Edit / Cancel for the owner.
+- [x] Shared primitives extracted so later host settings don't re-roll styles: `components/ui/SegmentedControl.tsx`, `SettingsSection.tsx`, `SettingsRow.tsx` (nav / switch / static variants, same look as `screens/Settings.tsx`).
+- [x] `services/hostTools.ts`: tries the new host RPCs first and falls back to `get_event_details` / `get_event_attendees_page` when Postgres reports them missing (42883 / PGRST202). Each result carries `source` so the UI can explain reduced data instead of failing.
+- [x] Pure helpers in `utils/hostEvent.ts` (phase, capacity summary, allowed actions, count line) with `tests/hostEvent.test.ts` (13 cases; suite 371 passing).
+
+## Written, NOT applied — validated on scratch 2026-11-03
+
+- [ ] **[DB]** `20261103100000_host_event_tools.sql`: `get_event_host_overview(p_event_id)` (going / interested / waitlist / saves / views total + 7d / chat lock, slow mode, message, block and open-report counts) and `get_event_host_attendees_page(p_event_id, p_status, p_limit, p_offset, p_search)` (real ids + RSVP status + joined_at + chat_blocked for going / interested / waitlist; private profiles keep their name but drop avatar and bio). Both host-or-admin only; verified on scratch: host gets correct counts and rows, attendee and anon callers are refused, invalid status and unknown event raise. Until applied, the hub shows going + saves only, and anonymised rows cannot be removed.
+- [ ] Regenerate `types/supabase.generated.ts` after applying and drop the `untypedRpc` cast in `services/hostTools.ts`.
+
+## Phase 1, second pass (2026-11-03, later the same day)
+
+Same rules: nothing applied to the shared DB; SQL validated on the scratch copy
+`eventmap_scratch_oak` (re-applies idempotently on top of 20261103100000).
+
+### Decision: what hosts see of private profiles
+
+Investigated before deciding. In this app the two toggles promise anonymity
+from *other attendees* ("Off means you count but show as Anonymous"; "Let
+others view your profile"), not from the organiser, and the host already gets
+the attendee's full name in the "X is going to your event" notification
+(`notify_business_on_rsvp`, no privacy check). Luma, Meetup, Partiful and
+Eventbrite all give hosts full identity of registrants; their privacy controls
+only govern what other guests or the public see.
+
+Decision: hosts see private-profile attendees as **first name + last initial**
+("Sam K."), no avatar, no bio, not tappable, with a "Private" tag. Implemented
+server-side (`host_display_name`, used by the host attendee page) and mirrored
+client-side (`abbreviateName`). Toggle copy in Settings and onboarding now says
+so. Follow-up: make the RSVP notification use the same abbreviated name for
+private profiles so the two surfaces agree.
+
+- [x] `20261103100000_host_event_tools.sql` updated (unapplied, so edited in place): `host_display_name(name, private)`; attendee page uses it. Verified: a private "Demo Sam" lists as "Demo S." with null avatar/bio.
+- [x] Client: `abbreviateName` + tests; hub rows show the Private tag and don't open the (private) profile; Settings + onboarding copy.
+
+### Event bans and waitlist promote
+
+- [x] **[DB, NOT applied]** `20261103110000_event_bans_and_waitlist_promote.sql`: `event_bans` table (host/admin/subject SELECT, RPC-only writes); `host_remove_attendee` gains `p_ban boolean DEFAULT true` (3-arg overload dropped to keep PostgREST unambiguous) and also clears the waitlist row; `host_unban_attendee` lifts the ban and the removal's chat block; `join_event_with_capacity`, `join_event_waitlist` and the rsvps INSERT/UPDATE policies refuse banned users with `removed_from_event`; `get_event_host_attendees_page` accepts `p_status = 'removed'` (with the host's reason) and the overview returns `removed`; `host_promote_from_waitlist` moves a waitlisted user to going under the event row lock, raising `EVENT_FULL` / `not_on_waitlist` / `event_closed`, and notifies them ("You're in"). Verified on scratch: remove → Alex refused on RPC join, waitlist join and direct insert → allow back → Alex rejoins and chat block is gone; promote refused when full, when not listed, and for a non-host; succeeds otherwise with the waitlist row removed and the notification written.
+- [x] Client: `REMOVED` RSVP error code and copy ("The host removed you…", triggers a refresh) with tests; `hostToolsService.unbanAttendee` / `promoteFromWaitlist`; `removeAttendee` tries the 4-arg shape then falls back to the 3-arg one that exists today. Hub attendee tab: a **Removed** segment appears once someone has been removed, waitlist rows get a "Move to going" action, removed rows get "Allow back"; EVENT_FULL on promote tells the host to raise capacity first.
+- [ ] Regenerate `types/supabase.generated.ts` after applying both 20261103 files.
+
+## Phase 1, third pass (2026-11-03): capacity hardening, private-name guard, row counts
+
+Same rules. Scratch copy refreshed from the shared DB and all three 20261103 files re-applied in order; scenarios below verified there.
+
+### Found on the shared DB with no migration file
+
+The fresh dump contains `guard_event_capacity_shrink()` + trigger `b_guard_event_capacity_shrink` (refuses lowering `max_attendees` below current going unless `eventmap.allow_capacity_shrink = 'on'`), `host_set_event_capacity(p_event_id, p_max_attendees)` (sets that flag; granted to PUBLIC/anon too, which is harmless since it checks `auth.uid()` but worth tightening) and `get_user_past_event_count()`. None is recorded in `supabase_migrations.schema_migrations` or in any file in this tree, so the other session applied them by hand. The capacity pair is now reproduced **verbatim** in `20261103120000` so a DB built from files gets it and re-applying on the shared DB is a no-op; the client calls `host_set_event_capacity`. `get_user_past_event_count` is left alone — whoever added it should file it.
+
+### Private-name leak audit
+
+Checked every read of `profiles.name` in SQL and every client fetch of profile data. Findings and fixes (all in `20261103120000`, NOT applied):
+
+- [x] **`get_profiles_display(user_ids)` returned full name + avatar for any profile to any signed-in user.** It backs chat sender names and the blocked-users list; `services/social.ts` even carried a comment claiming it respected privacy. Private profiles now come back as "First L." with `avatar_url = null` and `is_private = true`; the caller still sees their own full profile.
+- [x] Host RSVP notifications ("X is going to…", "X is no longer going…") and chat pushes ("X: …", "X mentioned you in …") used the full name. All use `host_display_name` now; the chat trigger body is otherwise identical to 20261102120000.
+- [x] Host attendee search matched the *full* name of private rows, so a hidden surname could be probed letter by letter. Both 20261103100000 and 20261103110000 (unapplied, edited in place) now match the abbreviated name for private rows. Verified: "Sam" finds nothing for private "Demo Sam"; "Demo S" finds them.
+- [x] Already correct and left as-is: `get_public_profile` (returns only `is_private`), `get_event_attendees_public` / `get_event_attendees_page` (Anonymous + hashed id), `can_view_user_events`, profile table SELECT (owner only), chat sender display (goes through `get_profiles_display`, so fixed above), moderation log / reported messages (host + admin only, agreed).
+- [ ] Not changed: a private user who *posts* in a chat is shown to other attendees as "First L." now, not full name. That is a visible UX change for them; flagging in case the product answer is "posting is opting in".
+
+### Capacity
+
+- [x] **[DB, NOT applied]** `create_event_with_limit_check` gains `p_max_attendees` (body otherwise identical to 20261102110000; old 12-arg signature dropped). Verified: creation with cap 25 stores 25; cap 0 is refused.
+- [x] **[DB, NOT applied]** `notify_event_waitlist_free_seats()` + trigger `trigger_notify_waitlist_on_capacity_change`: raising or removing the cap pings the waitlist exactly like a leave does (bounded to 100 when the cap is removed, once per person per day). Verified: cap 1 → 3 with one waitlisted user → one `waitlist` notification and `notified_at` set.
+- [x] Verified the shared guard on scratch: plain UPDATE to 1 with 2 going → `capacity_below_going`; lowering to exactly the going count is allowed; `host_set_event_capacity` lowers below with the flag; a non-host is refused.
+- [x] Client: `eventsService.createEvent` passes the cap in the RPC and returns `{ id, capacityApplied }` (pre-migration it retries the 12-arg shape and does the second write itself); `create.tsx` lost its second write. `EditEvent` routes a confirmed below-attendance lowering through `hostToolsService.setCapacity` (→ `host_set_event_capacity`) and, if the going count moved under it, shows "More people are going than the new limit allows. Reload the event and confirm again."
+
+### My Events row counts
+
+- [x] **[DB, NOT applied]** `get_host_events_counts(p_event_ids)` → going / interested / waitlist for the caller's events only (verified: the host gets both rows, an attendee gets `[]`).
+- [x] Client: rows show "12 / 40 going · Full · 2 waiting · 3 interested" via `EventListItem.metaLines`; falls back to the public `event_rsvp_counts` table (no waitlist) while the RPC is missing. Best-effort: the list renders without it.
+
+## Phase 1, fourth pass (2026-11-03): settings tab, announcements, cleanup — Phase 1 complete
+
+Same rules. Scratch refreshed from the shared DB; all four 20261103 files applied in order; scenarios verified there.
+
+### Drift note
+
+This refresh of the shared DB **no longer** had the hand-applied trigger `b_guard_event_capacity_shrink` (the apply logged "trigger does not exist, skipping"), while the `guard_event_capacity_shrink()` and `host_set_event_capacity()` functions were still present. The other session appears to be reworking it. `20261103120000` recreates the trigger from the same source, so whichever way they land, applying the file converges on the guarded state. `get_user_past_event_count()` remains unfiled.
+
+### Done
+
+- [x] **[DB, NOT applied]** `20261103130000_event_settings_and_announcements.sql`: `events.rsvp_closed` and `events.waitlist_mode` (`off` | `notify` | `auto`); `host_set_event_settings`; join RPCs and the rsvps INSERT policy refuse new joins while closed (`rsvps_closed`) but let existing attendees switch going ↔ interested; `join_event_waitlist` refuses when the waitlist is off (`waitlist_off`); seat-freed handling (`handle_event_seats_freed`) is mode-aware — **auto** moves the first in line to going and tells them "You're in", **notify** pings as before, **off** does nothing; reopening RSVPs runs the same handler. `host_announcements` + `send_event_announcement(p_event_id, p_body, p_audience)`: 1–500 chars, 3 per event per day, recipients = going (or going + interested) minus the host, honouring a new `host_announcement` notification preference and user blocks; the text is also posted into the chat as the host. Overview returns `announcements_today`. Verified: close → attendee refused on RPC and direct insert, existing attendee can switch, reopen admits; invalid mode refused; waitlist off refused; auto promotes on leave with notification; notify mode leaves them in line and pings; announcements: non-host refused, going-only reaches 1, "all" skips the opted-out user, empty refused, fourth refused, chat mirror written, overview count 3.
+- [x] **[DB, edited in place]** `20261103120000`: `REVOKE … FROM PUBLIC, anon` on `host_set_event_capacity`.
+- [x] Hub **Settings tab**: capacity stepper (−/+, free text, "No limit", Save) going through `host_set_event_capacity` with the below-attendance confirm; "Accepting RSVPs" switch; waitlist mode chips (disabled until a capacity is set). Shows a clear note while the columns are missing.
+- [x] Hub **Announce** quick action: sheet with 500-char body, audience chips with live counts, "N left today", confirm, result toast; limit and unavailable errors mapped.
+- [x] Event Detail: owner block is now just "Manage event" (Edit / Cancel moved to the hub; the dead cancel handler and imports removed). Attendee join bar shows **RSVPs closed** when the host closed them (existing attendees still see their state and can leave).
+- [x] Notifications: `host_announcement`, `waitlist`, `moderation`, `report_update` typed with icons; Settings gains a **Host announcements** toggle; `RSVPS_CLOSED` / `WAITLIST_OFF` RSVP error codes with copy and tests.
+
+### Deliberately not done here
+
+- [ ] **Regenerate `types/supabase.generated.ts` and drop the `untypedRpc` casts.** This must happen *after* the four 20261103 files are applied to the DB the types are generated from; generating from the scratch copy now would make the shared types claim functions the shared DB does not have. One command once applied: `npm run backend:types`, then replace `untypedRpc(...)` in `services/hostTools.ts` / `services/events.ts` with `supabase.rpc(...)`.
+
+## Phase 1 is complete; what remains is Phases 2–4 (see `docs/HOST_TOOLS_PLAN.md` §11).
+
+
+# Phase 2 — time zones (2026-11-03)
+
+Same rules: nothing applied to the shared DB; `20261103140000_event_timezones.sql`
+validated on the per-worktree scratch copy after the four 20261103 files.
+Plan reference: `docs/HOST_TOOLS_PLAN.md` §4D.
+
+## Model decision (plan §9 Q4, resolved)
+
+`events.timezone` is **nullable with no backfill**. A guessed zone (business
+location, single default) would silently move legacy events for viewers in other
+zones; NULL instead means "render in the viewer's zone, compute days in UTC",
+which is exactly today's behaviour. Hosts see "Time zone: Not set" on Edit with a
+one-line nudge; new events get the device zone from the form. Nothing changes for
+anyone until a host touches the zone.
+
+## Done
+
+- [x] **`utils/timezone.ts`** (pure, 13 tests): device zone, IANA validation (named zones only; `+02:00` and abbreviations rejected), zone list with a curated fallback when `Intl.supportedValuesOf` is missing, wall-clock ↔ instant conversion that handles DST gaps/overlaps, picker helpers (`instantToPickerDate` / `pickerDateToInstant`: native pickers edit *local* components, so form dates are wall-clock values in the event zone), labels ("Lisbon (GMT+1)"), search, and `describeEventTime` — the display rule: event-zone time, plus "2:00 PM your time (Nov 7)" when the viewer's zone reads differently.
+- [x] **`components/TimeZonePicker.tsx`**: searchable sheet, device zone and current value pinned, sorted by offset, accepts a full id typed in.
+- [x] **Create / Edit**: a Time zone row above Start (device zone by default; Edit shows "Not set · yours is …" for legacy events and leaves the column untouched unless the host picks one). Start/end are converted with the chosen zone on validate and on save, so a host travelling in New York can schedule 7 pm Lisbon. Hard-coded `en-US` removed from both forms' date labels and from `utils/relativeTime.ts`.
+- [x] **Event Detail**: date and time render in the event zone; when the viewer's zone differs the time line gets the zone abbreviation and a second line "… your time" (with the viewer's date when it rolls over). Legacy events render exactly as before. Cards and lists elsewhere keep showing the viewer's local time by design (that *is* "your time"); the detail page is where the event's own clock matters.
+- [x] **Calendar export**: ICS writes `DTSTART;TZID=<zone>:<local>` (Apple/Google/Outlook resolve IANA TZIDs without a VTIMEZONE block) so "7 pm Lisbon" imports as 7 pm and the series follows that zone's DST; RRULE `UNTIL` is the end of the final day *in the event zone*; Google Calendar link gets `ctz=`. Legacy events keep UTC instants. 4 new tests.
+- [x] **`eventsService.createEvent`** sends `p_timezone` and falls back through the 13- and 12-argument shapes while migrations are unapplied, then writes what it could not send with one follow-up UPDATE (and retries capacity alone if the `timezone` column is missing). The create screen warns when the zone could not be saved.
+- [x] **[DB, NOT applied]** `20261103140000_event_timezones.sql`: `events.timezone` + `is_valid_time_zone()` + validation trigger; 4-arg `event_has_ended(…, tz)` (recurrence end compared on the event's *local* date) and `event_next_occurrence(…, tz)` (days stepped on the wall clock, so 19:00 stays 19:00 across DST); the 3-arg forms delegate with NULL = UTC so untouched callers keep today's behaviour; public SELECT policy, `event_is_open_for_rsvp`, `get_ranked_events`, `get_user_going_events`, `get_user_saved_events`, `get_user_attendance_counts` re-created from their latest bodies with `e.timezone` passed through; `create_event_with_limit_check` gains `p_timezone` (13-arg dropped). Verified on scratch: validation accepts `Europe/Lisbon`/`UTC`, rejects `+02:00`, `CET`, junk; bad zone on UPDATE and on create raises; create stores the zone; a weekly series started in WET and stepped into WEST stays 19:00 local with the zoned arithmetic where UTC stepping gave 20:00; an Auckland series whose end date is "yesterday local" is ended while a Honolulu one ending "today local" is not; patched RPCs run.
+
+## Left in Phase 2 (small)
+
+- [ ] `send_event_reminders`: the "still interested?" nudge is "a day before" in absolute time; with a zone it could fire at a sensible local hour. Not started.
+- [ ] All-day / multi-day display (plan §4D follow-on).
+- [ ] Remaining `en-US` outside event times: `screens/Followers.tsx`, `components/ReviewCard.tsx`, `app/premium/manage.tsx` (cosmetic; not touched).
+- [ ] After apply: `npm run backend:types`; drop the fallback chain in `eventsService.createEvent`.
+
+
+# Phase 3 — publishing, lifecycle, details (2026-11-03)
+
+Same rules: nothing applied to the shared DB; `20261103150000_event_publishing_and_lifecycle.sql`
+validated on the per-worktree scratch copy after a fresh dump and all five earlier
+20261103 files. Plan reference: `docs/HOST_TOOLS_PLAN.md` §4B–C, §4G.
+
+## Drift note — the other session is applying Phase 3 by hand
+
+The fresh dump already carried: the seven detail/publishing columns, two extra
+CHECKs (`events_notes_len`, `events_price_label_len` ≤ 80), `publish_event(uuid)→void`,
+`postpone_event(uuid)→void`, `reschedule_event(uuid,tstz,tstz,text)→void` and a
+`duplicate_event` that keeps the original dates — none recorded in
+`schema_migrations` or in a file. `20261103150000` converges: it drops the older
+overloads (PostgREST cannot resolve `postpone_event(uuid)` next to
+`postpone_event(uuid, text DEFAULT)`), drops the duplicate CHECKs in favour of the
+named ones, and replaces the void RPCs with json-returning ones (supabase-js callers
+that ignore the result keep working). The shared DB should be brought under
+migration control before Phase 4; applying the six 20261103 files in order does it.
+
+## Time-zone follow-ups fixed in this pass
+
+- [x] `getNextOccurrences` and `hasEventEnded` were still walking the *device* calendar for zoned events; both now use the event zone (3 new tests, including a WET→WEST week where UTC stepping gave 20:00 and zoned stepping keeps 19:00).
+- [x] `zoneDisplayLabel('UTC')` read "UTC (GMT)"; now "UTC". The host hub hero shows the event-zone time with the viewer reading in brackets when it differs.
+
+## Done
+
+- [x] **[DB, NOT applied]** `20261103150000_event_publishing_and_lifecycle.sql`: columns `publish_state`, `visibility`, `ticket_url`, `price_label`, `age_restriction`, `accessibility_notes`, `what_to_bring`, `status_note`; `status` gains `postponed`. Public SELECT policy = published + public + active/postponed + not ended. `get_event_details` refuses drafts to non-hosts (unlisted stays reachable by id — the share link). `get_ranked_events` excludes drafts and unlisted. `event_is_open_for_rsvp` requires published + active. `create_event_with_limit_check` gains `p_publish_state` (drafts skip the allowance and the counter). `publish_event` checks the allowance, increments, flips state and notifies followers through `notify_followers_for_event` (deduped; the INSERT trigger now uses the same helper and skips drafts/unlisted). Guards: `business_id` frozen; `publish_state` only draft→published and only via the RPC; `d_guard_event_time_changes` refuses plain time/place updates once anyone is going (`reschedule_required`). `reschedule_event(…, p_note, p_address, p_lat, p_lng)` is the sanctioned path: resets reminders, re-arms the waitlist, resumes a postponed event, sends one "Event rescheduled"/"location changed" notice (time in the event zone, host note appended) and suppresses the generic "Event updated". `postpone_event(p_event_id, p_note)` keeps RSVPs, closes joining, notifies going/interested/savers/waitlist. `duplicate_event` → new draft a week later with links/photos/settings. Verified on scratch: draft doesn't count or ping; hidden from attendee by RPC and table; direct publish refused; `publish_event` counts, pings the follower, is idempotent; unpublish refused; unlisted hidden from ranked and table but opens by id; plain time update refused with one going while a title edit passes; reschedule notifies 2 (attendee + waitlist), generic notice suppressed, waitlist re-armed; postpone sets status + note, join refused `event_closed`, still visible, reschedule resumes and clears the note; duplicate is a future-dated draft with links, refused for non-hosts.
+- [x] **Create**: "More options" card (`components/EventExtrasFields.tsx`: Unlisted switch, tickets link, price, age chips, accessibility, what to bring; validated) and a **Save as draft** button that skips the allowance check, sends `p_publish_state = 'draft'` and lands on the hub. Pre-migration: drafts fail with a clear message; extras are written with a follow-up update and reported if the columns are missing.
+- [x] **Edit**: same "More options" (auto-expanded when anything is set; diffed per field); time/place changes with anyone going — or on a postponed event — go through `rescheduleEvent` after the confirm (copy now says "rescheduled"; postponed says "Set the new date?"); `reschedule_required` from a race is explained.
+- [x] **Event Detail**: Draft (owner), Unlisted (owner) and Postponed notices; Tickets row (price + "Get tickets" link), Age row, "What to bring" and "Accessibility" blocks; join bar reads "Postponed · new date coming / your spot is kept".
+- [x] **My Events**: Drafts segment (newest first), Draft/Postponed badges, no Notify/Cancel on drafts, empty copy.
+- [x] **Hub**: Draft section with **Publish**; **Duplicate**; **Schedule** section with **Reschedule** (→ Edit) / **Set the new date** for postponed, and **Postpone**; Settings tab gains an **Unlisted** switch. `getHostActions` knows draft/postponed phases (tests).
+- [x] `eventsService.getBusinessEvents` gains `scope: 'drafts'`, excludes drafts from Upcoming, and retries without the column while the migration is unapplied.
+
+## Phase 3 items not done here (next pass)
+
+- [ ] RSVP modes `approval` / `invite` (`requested` rsvp status, `host_review_rsvp`, `event_invites`, Requested segment in the hub).
+- [ ] Chat: `chat_mode` (open / announcements / off) replacing `locked`, `chat_open_policy`, pinned message; wire announcements to the pin.
+- [ ] Extracting a shared `EventForm` from `create.tsx` / `EditEvent.tsx` (the More-options block is shared via `EventExtrasFields`, so the duplication did not grow).
+- [ ] After apply: `npm run backend:types`; drop the create-RPC fallback chain and the `42703` retry.
+
+
+# Phase 3 (continued) — chat mode + pins, RSVP approval (2026-11-03)
+
+## Correction: the "shared DB drift" was a scratch-name collision
+
+This worktree had been validating on `SCRATCH_DB=eventmap_scratch_oak` — a name
+the other session evidently also uses (this repo has an `oak` worktree). The
+hand-applied objects reported in the earlier drift notes (phase-3 columns,
+`publish_event(uuid)→void`, the capacity guard pair, `get_user_past_event_count`,
+and today an entire approval-mode implementation) were the **other session's
+scratch work**, not the shared DB. A fresh dump confirms the shared `postgres`
+DB is exactly at `20261102160000` with none of it; all eight 20261103 files
+apply cleanly on that true state. This worktree now uses
+`SCRATCH_DB=eventmap_scratch_elm_host3`. Earlier drift notes in this file
+should be read with that correction; the convergence work they motivated is
+still harmless (DROP IF EXISTS of overloads that may never exist). Follow-up
+for both sessions: suffix SCRATCH_DB with your own worktree name.
+
+## Done
+
+- [x] **[DB, NOT applied]** `20261103160000_chat_mode_policy_and_pins.sql`: `event_chat_settings` gains `chat_mode` (open / announcements / off), `open_policy` (`two_going` = today's rule, `any_going` = chat works from the first going attendee) and `pinned_message_id`. `locked` stays in sync and the legacy `set_event_chat_settings(p_locked)` maps onto the mode, so pre-migration clients keep working. Attendees post only in `open`; host/admins post unless `off`; `off` hides the chat from attendees while the host keeps read + moderation. `set_event_chat_mode`, `set_event_chat_pin` (one pin per event; deleting a message unpins it via trigger; moderation log gains mode/open_policy/pin/unpin). `get_event_chat_post_status` re-created with `chat_mode`, `open_policy`, `pinned_message_id`. `send_event_announcement` pins its chat mirror. Verified on scratch: two-going default, any_going opens with one attendee, announcements = host-only posting, off blocks everyone and hides from attendees while the host still reads, legacy lock round-trips, pin/unpin permissions, foreign/deleted-message pins refused, announcement auto-pin, attendee sees the pin id.
+- [x] **[DB, NOT applied]** `20261103170000_rsvp_approval_mode.sql`: `events.rsvp_mode` (open / approval), `rsvps.status` + `requested`. Under approval a Join tap lands as a request (join RPC now RETURNS text so the client knows); a guard trigger stops the direct-table bypass; host-driven paths (review, waitlist promote, auto-promote) pre-approve via a flag. `host_review_rsvp(approve|decline)` re-checks capacity under the event lock, notifies either way; host gets "Request to join your event"; approving stays quiet. Requests are invisible in public counts/lists/chat; the hub attendee page + overview + `host_set_event_settings` re-created with `requested` / `p_rsvp_mode`. Verified end to end on scratch (request, bypass refusals, interested unaffected, hidden from public surfaces, approve → "You're in", decline → row gone + notice, EVENT_FULL at approval, non-host refused, mode back to open lets the requester join directly).
+- [x] Client, chat: `eventChatService.setMode` / `setPin` (legacy-lock fallback), hub Chat tab gains mode chips + "Open from the first attendee" switch (lock switch remains pre-migration), chat screen shows a pinned banner (host can unpin from it) and the message long-press sheet gains Pin/Unpin for moderators.
+- [x] Client, approval: `createOrUpdateRsvp` returns the resulting status; Event Detail shows "Request to join" / "Request pending · host will review" with a Cancel request action; `APPROVAL_REQUIRED` error code; hub gains a **Requests** segment with approve/decline, a requested count, and an "Approve new attendees" switch in Settings (4-arg settings RPC with 3-arg fallback).
+
+## Phase 3 remaining (deferred)
+
+- [ ] Invite-only mode (`event_invites`) — plan §9; approval mode covers the main gate.
+- [ ] Shared `EventForm` extraction (pure refactor; `EventExtrasFields` keeps the duplication from growing).
+- [ ] Requested events in the attendee's own Joined lists (today only the event page shows the pending state).
+- [ ] After apply: `npm run backend:types`; drop the untyped casts and fallback chains.
+
+
+# Host tools — final regression round (2026-11-03)
+
+Everything below ran against isolated scratch copies only (`SCRATCH_DB=eventmap_scratch_elm_host3`);
+the shared DB was never touched. Two durable test artifacts now exist and should be
+re-run at apply time:
+
+- **`scripts/test-host-tools.sql`** — 90+ assertions in 11 sections (host views &
+  auth, private names, remove/ban/unban, capacity, closed RSVPs + waitlist modes,
+  announcements, time zones, publishing/visibility/lifecycle, chat mode/policy/pins,
+  approval mode, review-driven hardening). Fails loudly via ASSERT; rolls back.
+  Run: refresh scratch → apply the eight 20261103 files in order → apply this file.
+- **`scripts/regress-host-tools.mjs`** (+ `regress-host-tools.fixture.sql`) — 19
+  PostgREST-layer checks mirroring the exact named-argument shapes the client
+  services send (overload resolution, undefined-key dropping, return-type decoding).
+  Run against a private PostgREST bound to the scratch (docker run in this section's
+  shell history / e2e-isolated-env.sh pattern; `JWT_K` = the oct key from the
+  stack's `PGRST_JWT_SECRET` JWKS).
+
+Final state: SQL suite ALL CHECKS PASSED on a clean slate; PostgREST 19/19;
+`tsc` clean; vitest 397/397 (27 files); eslint 0 errors on every touched file
+(12 pre-existing warnings in MyEvents/Settings, untouched).
+
+## Fixed during this round (small issues, per instructions)
+
+Server (all in the unapplied 20261103 files; every fix has a suite assertion in §11):
+- [x] Requested users were missing from cancel / reschedule / postpone / generic-update notification audiences.
+- [x] **RSVP event-move bypass**: `UPDATE rsvps SET event_id = …` slid a row past closed/approval/full checks; the guard trigger now refuses event moves outright (11.1).
+- [x] **Waitlist bypassed approval mode**: waitlist join on approval events now raises `approval_required`; seat-freed handling never auto-admits on approval events (11.2–11.3).
+- [x] Direct `'requested'` inserts on open-mode events refused (11.4).
+- [x] `duplicate_event` dropped `rsvp_mode` (defined before the column existed); re-created with it (11.5).
+- [x] Legacy `set_event_chat_settings(p_locked)` broke the `locked = (chat_mode <> 'open')` invariant on `'off'` chats and logged spurious unlocks (11.6).
+- [x] Announcement chat mirror is SECURITY DEFINER and bypassed the posting policy: it now skips (and doesn't pin into) a switched-off chat (11.7).
+- [x] **Postponed events stranded attendees**: going→interested downgrades now work (RPC + direct upsert), while new rows and self-upgrades still raise `event_closed` — enforced in the guard trigger because RLS can't compare old/new; note the upsert arrives as INSERT, so "existing row" marks a downgrade (11.8).
+- [x] `publish_event` now refuses recurring drafts whose series already ended; `is_valid_time_zone` STABLE (depends on tzdata).
+
+Client:
+- [x] **Stuck RSVP states**: Leave / Cancel request / un-star / leave-waitlist survive "RSVPs closed" and postponed (only cancelled/ended/draft freeze them); a pending request takes label/tap precedence over "Event full · Join waitlist".
+- [x] **Pinned banner showed moderated content**: deleting the pinned message now clears the banner and refreshes post status immediately.
+- [x] **Attendee list race**: segment/search switches mid-flight no longer let a stale page land under the wrong segment (requestSeq guard, totals reset); one row action at a time; waitlist "#N in line" hidden while searching; empty-state no longer flashes pre-load.
+- [x] `wallClockToUtc` resolved spring-forward-gap times an hour EARLY; now resolves forward (02:30 → 03:30 EDT) like calendars, with an exact test.
+- [x] A timezone-only edit skipped the "start must be in the future" check (picker values compared instead of instants).
+- [x] Announce audience count includes pending requests ("Everyone (N)"), matching the SQL.
+
+## Flagged, NOT fixed (larger / needs product input)
+
+- [ ] **Event Detail's chat entry ignores `chat_mode` / `open_policy`** (`screens/EventDetail.tsx` `chatIsOpen`): with `any_going` a sole attendee sees "unlocks with 2 attendees" though the room is open; with mode `off` a going user sees an entry that opens a no-access screen. Needs chat settings in `get_event_details` (one more field in the RPC) or a post-status call from the detail page.
+- [ ] **Device-zone DST-gap picker round-trip**: if an event-zone wall time happens to be nonexistent in the *device* zone on that date, `instantToPickerDate` shifts it and edits drift an hour. Rare double-DST corner; fix would need a picker that edits wall-clock fields directly.
+- [ ] Approval + closed RSVPs: a user with an existing interested row can still produce new join requests while "Accepting RSVPs" is off (the existing-row exception). Defensible but worth a product decision.
+- [ ] `get_event_host_overview.chat` doesn't carry `chat_mode`/`open_policy`/`pinned_message_id`; the hub makes a second call (`get_event_chat_post_status`) — works, mildly wasteful.
+- [ ] ChatModerationSheet failure path can double-toast and routes an error text through the success-styled `onNotice`.
+- [ ] Nitpicks: stale "status can only be changed through cancel_event" error text (postpone/reschedule are legitimate now); `allow_capacity_shrink` uses `'on'` while other flags use `'true'`; `refetchAll` identity churn re-subscribes the focus hook each render.
+
+## Consolidated: remaining unfinished implementations (whole task)
+
+**Blocked on applying the migrations** (owner of the shared DB; apply the eight
+20261103 files in order, then):
+- [ ] `npm run backend:types`; drop the `untypedRpc` casts and fallback ladders in `services/hostTools.ts`, `services/events.ts`, `services/eventChat.ts`, `services/social.ts`; re-run both regression artifacts against the shared schema.
+- [ ] Note: re-applying an OLDER 20261103 file after a NEWER one fails loudly on return-type changes (safe), but a stray re-run of 20261103130000 after 170000 would recreate a 3-arg `host_set_event_settings` overload (PostgREST ambiguity) before failing — drop it if that ever happens. One-shot ordered application has no such issue.
+
+**Phase 3 leftovers**:
+- [ ] Invite-only RSVP mode (`event_invites`) — plan §9.
+- [ ] Shared `EventForm` extraction from `create.tsx` / `EditEvent.tsx` (pure refactor; `EventExtrasFields` already shares the new fields).
+- [ ] Requested events in the attendee's own Joined lists (only the event page shows the pending state).
+
+**Phase 2 leftovers**: local-hour reminder windows; all-day / multi-day display;
+`en-US` leftovers outside event times (`screens/Followers.tsx`, `components/ReviewCard.tsx`,
+`app/premium/manage.tsx`).
+
+**Phase 1 leftovers**: dedicated Android push channel / icon for `host_announcement`
+(currently `default`); `get_user_past_event_count()` exists only on scratch copies, unfiled.
+
+**Phase 4 (not started)** — plan §11: event-size presets, check-in + QR, CSV export,
+`event_sections`, recurrence weekdays/count + per-occurrence overrides, real insights
+with server-side tier gating. **Cross-cutting**: co-hosts need `business_members` and
+touch every `user_is_event_host` check.

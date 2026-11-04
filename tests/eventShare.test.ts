@@ -72,3 +72,47 @@ describe('buildEventIcs with recurrence', () => {
     expect(unfold(ics)).toContain('SUMMARY:Weekly Trivia');
   });
 });
+
+describe('time zones in calendar exports', () => {
+  it('writes local wall clock with TZID when the event has a zone', () => {
+    const ics = unfold(
+      buildEventIcs({
+        id: 'tz1',
+        title: 'Lisbon show',
+        startIso: '2026-07-15T18:00:00Z', // 19:00 WEST
+        endIso: '2026-07-15T20:00:00Z',
+        timezone: 'Europe/Lisbon',
+      })
+    );
+    expect(ics).toContain('DTSTART;TZID=Europe/Lisbon:20260715T190000');
+    expect(ics).toContain('DTEND;TZID=Europe/Lisbon:20260715T210000');
+    expect(ics).not.toContain('DTSTART:2026');
+  });
+
+  it('keeps UTC instants for legacy events without a zone', () => {
+    const ics = unfold(
+      buildEventIcs({ id: 'tz2', title: 'x', startIso: '2026-07-15T18:00:00Z', endIso: '2026-07-15T20:00:00Z' })
+    );
+    expect(ics).toContain('DTSTART:20260715T180000Z');
+  });
+
+  it('ignores an invalid zone rather than emitting a broken TZID', () => {
+    const ics = unfold(
+      buildEventIcs({
+        id: 'tz3',
+        title: 'x',
+        startIso: '2026-07-15T18:00:00Z',
+        endIso: '2026-07-15T20:00:00Z',
+        timezone: 'Mars/Olympus',
+      })
+    );
+    expect(ics).toContain('DTSTART:20260715T180000Z');
+  });
+
+  it('computes UNTIL at the end of the final day in the event zone', () => {
+    // New York, 2026-07-31 23:59:59 EDT = 2026-08-01T03:59:59Z
+    expect(
+      buildRecurrenceRule({ frequency: 'weekly', interval: 1, endDate: '2026-07-31' }, true, 'America/New_York')
+    ).toBe('RRULE:FREQ=WEEKLY;UNTIL=20260801T035959Z');
+  });
+});

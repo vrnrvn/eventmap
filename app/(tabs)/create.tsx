@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useFocusEffect, router } from 'expo-router';
 import {
   View,
@@ -49,7 +49,14 @@ import { eventLocationStore } from '@/stores/eventLocationStore';
 import { parseRecurrenceEndDate, type RecurrenceOption } from '@/utils/recurrence';
 import { notify, notifyConfirm } from '@/utils/notify';
 import { withShiftedEnd } from '@/utils/eventDatetime';
-import { timeZoneLabel } from '@/utils/formatEventWhen';
+import { getDeviceTimeZone, pickerDateToInstant, zoneDisplayLabel } from '@/utils/timezone';
+import { TimeZonePicker } from '@/components/TimeZonePicker';
+import {
+  EventExtrasFields,
+  EMPTY_EXTRAS,
+  validateExtras,
+  type EventExtrasDraft,
+} from '@/components/EventExtrasFields';
 
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
 const MAX_EVENT_DATE = new Date();
@@ -57,6 +64,7 @@ MAX_EVENT_DATE.setFullYear(MAX_EVENT_DATE.getFullYear() + 10);
 
 /** Which form section each validation key belongs to (for scroll-to-error). */
 const FIELD_SECTION: Record<string, string> = {
+  extras: 'extras',
   title: 'basic',
   description: 'basic',
   categoryId: 'category',
@@ -121,9 +129,16 @@ export default function CreateScreen() {
     images: [] as ImageAsset[],
     maxAttendees: '',
     links: [] as EventLinkDraft[],
+    // Dates above are wall-clock values in this zone (the picker edits local
+    // components; pickerDateToInstant converts on submit).
+    timezone: getDeviceTimeZone(),
+    extras: EMPTY_EXTRAS as EventExtrasDraft,
   });
   const [linkErrors, setLinkErrors] = useState<Record<number, string>>({});
-  const tzLabel = useMemo(() => timeZoneLabel(), []);
+  const [extrasErrors, setExtrasErrors] = useState<Partial<Record<keyof EventExtrasDraft, string>>>({});
+  const [showExtras, setShowExtras] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [tzPickerOpen, setTzPickerOpen] = useState(false);
   const recurrencePickerRef = useRef<RecurrencePickerHandle>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   /**
@@ -236,7 +251,7 @@ export default function CreateScreen() {
     if (!formData.title.trim()) e.title = 'Title is required';
     if (!formData.description.trim()) e.description = 'Description is required';
     if (!formData.categoryId) e.categoryId = 'Select a category';
-    if (formData.startDatetime.getTime() <= Date.now()) {
+    if (pickerDateToInstant(formData.startDatetime, formData.timezone).getTime() <= Date.now()) {
       e.startDatetime = 'Start must be in the future';
     }
     if (formData.endDatetime <= formData.startDatetime) {
@@ -266,11 +281,17 @@ export default function CreateScreen() {
     });
     setLinkErrors(linkIssues);
     if (Object.keys(linkIssues).length > 0) e.links = 'Fix the links below';
+    const extraIssues = validateExtras(formData.extras);
+    setExtrasErrors(extraIssues);
+    if (Object.keys(extraIssues).length > 0) {
+      e.extras = 'Check the fields under More options';
+      setShowExtras(true);
+    }
     setErrors(e);
     return Object.keys(e);
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (mode: 'publish' | 'draft' = 'publish') => {
     const problems = validate();
     if (problems.length > 0) {
       // Scroll to the first failing section rather than the top, so the
@@ -307,8 +328,11 @@ export default function CreateScreen() {
       : (businessLocation?.lng ?? formData.lng);
 
     try {
+      // Drafts are free; the allowance is checked again at publish time.
       const { canCreate, currentCount, maxCount } =
-        await businessesService.checkEventLimit(userBusiness.id);
+        mode === 'draft'
+          ? { canCreate: true, currentCount: 0, maxCount: 0 }
+          : await businessesService.checkEventLimit(userBusiness.id);
       if (!canCreate) {
         notifyConfirm({
           title: 'Monthly event limit reached',
@@ -322,35 +346,38 @@ export default function CreateScreen() {
 
       // Create the event FIRST so a create failure never leaves orphaned
       // uploads; images are uploaded and attached afterwards, non-fatally.
-      const eventId = await eventsService.createEvent({
+      const maxAttendeesValue = formData.maxAttendees.trim()
+        ? Number(formData.maxAttendees.trim())
+        : null;
+      if (mode === 'draft') setSavingDraft(true);
+      const { id: eventId, capacityApplied, timezoneApplied, extrasApplied } = await eventsService.createEvent({
         businessId: userBusiness.id,
         title: formData.title.trim(),
         description: formData.description.trim(),
         categoryId: formData.categoryId,
-        startDatetime: formData.startDatetime.toISOString(),
-        endDatetime: formData.endDatetime.toISOString(),
+        startDatetime: pickerDateToInstant(formData.startDatetime, formData.timezone).toISOString(),
+        endDatetime: pickerDateToInstant(formData.endDatetime, formData.timezone).toISOString(),
+        timezone: formData.timezone,
         address,
         lat,
         lng,
         coverImageUrl: null,
         isRecurring: formData.recurrence != null,
         recurrencePattern: formData.recurrence ?? undefined,
+        maxAttendees: maxAttendeesValue,
+        publishState: mode === 'draft' ? 'draft' : 'published',
+        extras: {
+          visibility: formData.extras.visibility,
+          ticketUrl: formData.extras.ticketUrl,
+          priceLabel: formData.extras.priceLabel,
+          ageRestriction: formData.extras.ageRestriction,
+          accessibilityNotes: formData.extras.accessibilityNotes,
+          whatToBring: formData.extras.whatToBring,
+        },
       });
-
-      // Optional capacity. create_event_with_limit_check has no capacity
-      // parameter, so this is a second write; a failure is non-fatal (the
-      // event is live) and is reported honestly below.
-      let capacityFailed = false;
-      const maxAttendeesValue = formData.maxAttendees.trim()
-        ? Number(formData.maxAttendees.trim())
-        : null;
-      if (maxAttendeesValue != null) {
-        try {
-          await eventsService.updateEvent(eventId, { max_attendees: maxAttendeesValue });
-        } catch {
-          capacityFailed = true;
-        }
-      }
+      // The service sets the cap in the create RPC (or, pre-migration, in a
+      // second write); a failure there is non-fatal and reported below.
+      const capacityFailed = !capacityApplied;
 
       // Upload and attach photos; failures are non-fatal (event stays
       // published, successes are kept).
@@ -410,6 +437,8 @@ export default function CreateScreen() {
         images: [],
         maxAttendees: '',
         links: [],
+        timezone: getDeviceTimeZone(),
+        extras: EMPTY_EXTRAS,
       });
       setErrors({});
       setLinkErrors({});
@@ -428,16 +457,24 @@ export default function CreateScreen() {
       if (linksFailed) {
         warnings.push('some links could not be saved — add them again by editing the event.');
       }
+      if (!timezoneApplied) {
+        warnings.push('the time zone could not be saved yet — times will show in each viewer\'s own zone.');
+      }
+      if (!extrasApplied) {
+        warnings.push('the extra details (tickets, age, accessibility) could not be saved yet — add them by editing the event.');
+      }
       notify.success(
         warnings.length > 0
-          ? `Event published, but ${warnings.join(' Also, ')}`
-          : 'Event created!'
+          ? `${mode === 'draft' ? 'Draft saved' : 'Event published'}, but ${warnings.join(' Also, ')}`
+          : mode === 'draft'
+            ? 'Draft saved. Publish it from Manage event when ready.'
+            : 'Event created!'
       );
       // Keep the quota pill current for the next event.
       void refreshSubscription();
       // Land on the new event (owner view with Edit / Insights) so the host
       // sees exactly what they published.
-      router.push(`/event/${eventId}` as never);
+      router.push((mode === 'draft' ? `/business/manage-event/${eventId}` : `/event/${eventId}`) as never);
     } catch (err: unknown) {
       const message =
         err instanceof Error
@@ -447,12 +484,13 @@ export default function CreateScreen() {
       notify.error(message);
     } finally {
       setLoading(false);
+      setSavingDraft(false);
       setUploadProgress(null);
     }
   };
 
   const formatDateTime = (d: Date) =>
-    d.toLocaleString('en-US', {
+    d.toLocaleString(undefined, {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
@@ -642,13 +680,25 @@ export default function CreateScreen() {
         {/* ── Section: Date & Time ── */}
         <Text style={styles.sectionLabel} onLayout={captureSection('datetime')}>Date & Time</Text>
         <View style={styles.card}>
-          <View style={styles.fieldRow}>
-            <Text style={styles.locationNote}>
-              {tzLabel
-                ? `Times are in your device timezone (${tzLabel}).`
-                : 'Times are in your device timezone.'}
-            </Text>
-          </View>
+          <TouchableOpacity
+            style={styles.dateRow}
+            activeOpacity={0.6}
+            onPress={() => setTzPickerOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`Time zone: ${zoneDisplayLabel(formData.timezone, formData.startDatetime)}. Change`}
+          >
+            <View style={styles.dateTextBlock}>
+              <Text style={styles.dateLabel}>Time zone</Text>
+              <Text style={styles.dateValue}>{zoneDisplayLabel(formData.timezone, formData.startDatetime)}</Text>
+              <Text style={styles.locationNote}>
+                {formData.timezone === getDeviceTimeZone()
+                  ? 'Your device zone. Times below are entered in it.'
+                  : 'Times below are entered in this zone, not your device zone.'}
+              </Text>
+            </View>
+            <ChevronRight size={18} color={Colors.text.tertiary} />
+          </TouchableOpacity>
+          <View style={styles.fieldSeparator} />
           {/* Start */}
           <TouchableOpacity
             style={styles.dateRow}
@@ -914,6 +964,46 @@ export default function CreateScreen() {
           </View>
         </View>
 
+        {/* ── Section: More options ── */}
+        <Text style={styles.sectionLabel} onLayout={captureSection('extras')}>More options</Text>
+        <View style={styles.card}>
+          <TouchableOpacity
+            style={styles.dateRow}
+            onPress={() => setShowExtras((v) => !v)}
+            activeOpacity={0.6}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showExtras }}
+            accessibilityLabel="More options: visibility, tickets, age, accessibility"
+          >
+            <View style={styles.dateTextBlock}>
+              <Text style={styles.dateLabel}>Visibility, tickets, age, accessibility</Text>
+              <Text style={styles.dateValue}>{showExtras ? 'Hide' : 'Show options'}</Text>
+            </View>
+            <ChevronRight
+              size={18}
+              color={Colors.text.tertiary}
+              style={showExtras ? { transform: [{ rotate: '90deg' }] } : undefined}
+            />
+          </TouchableOpacity>
+          {showExtras ? (
+            <>
+              <View style={styles.fieldSeparator} />
+              <View style={styles.fieldRow}>
+                <View style={styles.fieldContent}>
+                  <EventExtrasFields
+                    value={formData.extras}
+                    errors={extrasErrors}
+                    onChange={(extras) => {
+                      setExtrasErrors({});
+                      setFormData((f) => ({ ...f, extras }));
+                    }}
+                  />
+                </View>
+              </View>
+            </>
+          ) : null}
+        </View>
+
         {/* ── Section: Links ── */}
         <Text style={styles.sectionLabel} onLayout={captureSection('links')}>Links</Text>
         <View style={styles.card}>
@@ -953,17 +1043,37 @@ export default function CreateScreen() {
           label={
             uploadProgress ?? (atEventLimit ? 'Monthly limit reached' : 'Publish Event')
           }
-          onPress={handleSubmit}
-          loading={loading}
-          disabled={atEventLimit}
+          onPress={() => void handleSubmit('publish')}
+          loading={loading && !savingDraft}
+          disabled={atEventLimit || loading}
           size="lg"
           fullWidth
           gradient
           icon={<Sparkles size={18} color="#FFFFFF" />}
           style={styles.submitWrap}
         />
+        <Button
+          label="Save as draft"
+          variant="secondary"
+          onPress={() => void handleSubmit('draft')}
+          loading={savingDraft}
+          disabled={loading}
+          fullWidth
+          accessibilityLabel="Save as draft: only you can see it and it does not count toward your monthly events"
+          style={styles.draftWrap}
+        />
+        <Text style={styles.draftHint}>
+          Drafts are private and free; publish from Manage event when ready.
+        </Text>
       </ScrollView>
 
+      <TimeZonePicker
+        visible={tzPickerOpen}
+        value={formData.timezone}
+        referenceDate={formData.startDatetime}
+        onSelect={(tz) => setFormData((f) => ({ ...f, timezone: tz }))}
+        onClose={() => setTzPickerOpen(false)}
+      />
       <RecurrencePicker
         ref={recurrencePickerRef}
         selectedValue={formData.recurrence}
@@ -1262,6 +1372,16 @@ const styles = StyleSheet.create({
   },
 
   /* ── Submit ── */
+  draftWrap: {
+    marginTop: Spacing.sm,
+  },
+  draftHint: {
+    marginTop: Spacing.sm,
+    textAlign: 'center',
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
+  },
   submitWrap: {
     marginTop: Spacing.xl,
     ...Platform.select({

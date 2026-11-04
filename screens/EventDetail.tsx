@@ -42,8 +42,12 @@ import {
   ArrowLeft,
   ArrowRight,
   ExternalLink,
-  Pencil,
-  Trash2,
+  Settings2,
+  FileText,
+  EyeOff,
+  PauseCircle,
+  Ticket,
+  ShieldCheck,
   Star,
   Flag,
   Repeat,
@@ -69,7 +73,7 @@ import { DeferredMount } from '@/components/DeferredMount';
 import { complaintsService } from '@/services/complaints';
 import { getNextOccurrences, getRecurrenceLabel } from '@/utils/recurrence';
 import { hasEventEnded, isEventInProgress } from '@/utils/eventStatus';
-import { timeZoneLabel } from '@/utils/formatEventWhen';
+import { describeEventTime, formatInZone, getDeviceTimeZone, isValidTimeZone, zoneAbbreviation } from '@/utils/timezone';
 import {
   buildRecurrenceRule,
   getEventWebUrl,
@@ -88,7 +92,7 @@ export default function EventDetail() {
   // window resize.
   const { width: windowWidth } = useWindowDimensions();
   // Times render in the viewer's own zone; say which one.
-  const tzLabel = useMemo(() => timeZoneLabel(), []);
+  const viewerTz = useMemo(() => getDeviceTimeZone(), []);
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user, isBanned } = useAuth();
   const { userBusiness } = useApp();
@@ -319,19 +323,22 @@ export default function EventDetail() {
     if (saving) return;
     setSaving(true);
     try {
-      await socialService.createOrUpdateRsvp(id, status);
+      const result = await socialService.createOrUpdateRsvp(id, status);
       invalidateLists();
+      if (result === 'requested') {
+        notify.success('Request sent. The host will review it.');
+      }
       setDetails((d) =>
         d
           ? {
               ...d,
-              user_rsvp: status,
+              user_rsvp: result,
               rsvp_count: Math.max(
                 0,
                 d.rsvp_count +
-                  (d.user_rsvp !== 'going' && status === 'going'
+                  (d.user_rsvp !== 'going' && result === 'going'
                     ? 1
-                    : d.user_rsvp === 'going' && status !== 'going'
+                    : d.user_rsvp === 'going' && result !== 'going'
                       ? -1
                       : 0)
               ),
@@ -457,11 +464,14 @@ export default function EventDetail() {
   // first. The interested-star toggle still removes silently via
   // handleRemoveRsvp — only the explicit "Leave" button confirms.
   const handleLeaveEvent = () => {
+    const cancellingRequest = details?.user_rsvp === 'requested';
     notifyConfirm({
-      title: 'Leave event?',
-      message: "You'll lose access to the event chat for this event.",
-      confirmLabel: 'Leave',
-      cancelLabel: 'Stay',
+      title: cancellingRequest ? 'Cancel request?' : 'Leave event?',
+      message: cancellingRequest
+        ? 'The host will no longer see your request to join.'
+        : "You'll lose access to the event chat for this event.",
+      confirmLabel: cancellingRequest ? 'Cancel request' : 'Leave',
+      cancelLabel: cancellingRequest ? 'Keep it' : 'Stay',
       destructive: true,
       onConfirm: () => void handleRemoveRsvp(),
     });
@@ -487,29 +497,6 @@ export default function EventDetail() {
     } finally {
       setTogglingSave(false);
     }
-  };
-
-  const handleCancelEvent = () => {
-    if (!id) return;
-    notifyConfirm({
-      title: 'Cancel Event',
-      message:
-        'Cancel this event? Attendees will be notified and the event will no longer be visible to the public. This cannot be undone.',
-      cancelLabel: 'Keep event',
-      confirmLabel: 'Cancel event',
-      destructive: true,
-      onConfirm: async () => {
-        try {
-          await eventsService.cancelEvent(id);
-          // Stay on the page: the owner sees the cancelled state immediately
-          // (banner, actions hidden) instead of being bounced to the list.
-          setDetails((d) => (d ? { ...d, event: { ...d.event, status: 'cancelled' } } : d));
-          notify.success('Event cancelled. Attendees have been notified.');
-        } catch {
-          notify.error('Failed to cancel event');
-        }
-      },
-    });
   };
 
   const handleShareEvent = async () => {
@@ -561,7 +548,12 @@ export default function EventDetail() {
     return {
       start,
       end,
-      recurrence: buildRecurrenceRule(details.event.recurrence_pattern, details.event.is_recurring),
+      recurrence: buildRecurrenceRule(
+        details.event.recurrence_pattern,
+        details.event.is_recurring,
+        details.event.timezone ?? null
+      ),
+      timezone: details.event.timezone ?? null,
     };
   };
 
@@ -576,6 +568,7 @@ export default function EventDetail() {
       address: details.event.address,
       details: `${getEventWebUrl(details.event.id)}\n\nHosted by ${details.business.name}`,
       recurrence: times.recurrence,
+      timezone: times.timezone,
     });
     void Linking.openURL(url).catch(() => notify.error('Could not open Google Calendar.'));
   };
@@ -591,6 +584,7 @@ export default function EventDetail() {
         startIso: times.start,
         endIso: times.end,
         recurrence: times.recurrence,
+        timezone: times.timezone,
         address: details.event.address,
         description: [
           details.event.description?.trim(),
@@ -623,34 +617,42 @@ export default function EventDetail() {
 
   const handleReportEvent = () => setReportSheetOpen(true);
 
+  // Dates and times render in the event's zone when it has one (20261103140000);
+  // legacy events fall back to the viewer's zone, exactly as before.
+  const eventTz =
+    details?.event.timezone && isValidTimeZone(details.event.timezone) ? details.event.timezone : null;
+  const displayTz = eventTz ?? viewerTz;
   const formatDate = (dateString: string) =>
-    new Date(dateString).toLocaleDateString('en-US', {
+    formatInZone(new Date(dateString), displayTz, {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
       year: 'numeric',
     });
-  const formatDateTime = (dateString: string) =>
-    new Date(dateString).toLocaleString('en-US', {
+  const formatDateTime = (dateString: string, tz: string = displayTz) =>
+    formatInZone(new Date(dateString), tz, {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
     });
-  const formatClock = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const formatClock = (d: Date, tz: string = displayTz) =>
+    formatInZone(d, tz, { hour: 'numeric', minute: '2-digit' });
+  const dayKey = (d: Date, tz: string) =>
+    formatInZone(d, tz, { year: 'numeric', month: '2-digit', day: '2-digit' });
   // "1:00 PM – 3:00 PM"; for a recurring event the displayed start may be a later
   // occurrence, so the end is shifted by the original duration.
-  const formatTimeRange = (startIso: string, endIso: string, originalStartIso: string) => {
+  const formatTimeRange = (startIso: string, endIso: string, originalStartIso: string, tz: string = displayTz) => {
     const start = new Date(startIso);
     const originalStart = new Date(originalStartIso);
     const end = new Date(endIso);
     if (Number.isNaN(start.getTime())) return '';
-    if (Number.isNaN(end.getTime()) || Number.isNaN(originalStart.getTime())) return formatClock(start);
+    if (Number.isNaN(end.getTime()) || Number.isNaN(originalStart.getTime())) return formatClock(start, tz);
     const shiftedEnd = new Date(start.getTime() + (end.getTime() - originalStart.getTime()));
-    if (shiftedEnd.getTime() <= start.getTime()) return formatClock(start);
-    const multiDay = shiftedEnd.toDateString() !== start.toDateString();
-    return `${formatClock(start)} – ${multiDay ? formatDateTime(shiftedEnd.toISOString()) : formatClock(shiftedEnd)}`;
+    if (shiftedEnd.getTime() <= start.getTime()) return formatClock(start, tz);
+    const multiDay = dayKey(shiftedEnd, tz) !== dayKey(start, tz);
+    return `${formatClock(start, tz)} – ${multiDay ? formatDateTime(shiftedEnd.toISOString(), tz) : formatClock(shiftedEnd, tz)}`;
   };
 
   if (loading) {
@@ -739,10 +741,18 @@ export default function EventDetail() {
   const venueLng = Number.isFinite(event.lng) ? event.lng : business.lng;
   const canOpenEventChat = details.user_rsvp === 'going' && details.rsvp_count >= 2;
   const hasJoinedEvent = details.user_rsvp === 'going';
+  const hasRequested = details.user_rsvp === 'requested';
+  const approvalMode = event.rsvp_mode === 'approval';
   const eventEnded = hasEventEnded(event);
   const eventCancelled = event.status === 'cancelled';
+  const eventPostponed = event.status === 'postponed';
+  const eventDraft = event.publish_state === 'draft';
+  const eventUnlisted = event.visibility === 'unlisted';
+  // Host switched "Accepting RSVPs" off (20261103130000). People already in
+  // keep their seat and may still leave; nobody new can join.
+  const rsvpsClosedByHost = !!event.rsvp_closed && !hasJoinedEvent;
   // "Closed" = no RSVP changes possible, for whichever reason.
-  const eventClosed = eventEnded || eventCancelled;
+  const eventClosed = eventEnded || eventCancelled || eventPostponed || eventDraft || rsvpsClosedByHost;
   const eventLive = !eventCancelled && isEventInProgress(event);
   const maxAttendees = event.max_attendees ?? null;
   const eventFull =
@@ -752,7 +762,14 @@ export default function EventDetail() {
   // disabled button.
   const waitlist = details.waitlist;
   const onWaitlist = !!waitlist && (waitlist.position ?? 0) > 0;
-  const canWaitlist = !!user && !!waitlist && eventFull && !eventClosed;
+  // Joining the waitlist needs an open event; LEAVING it must survive the
+  // host closing RSVPs or postponing (the row is the user's own). A pending
+  // request takes precedence over the waitlist CTA.
+  const canWaitlist =
+    !!user &&
+    !!waitlist &&
+    !hasRequested &&
+    ((eventFull && !eventClosed) || (onWaitlist && !eventCancelled && !eventEnded && !eventDraft));
   // Recurring events that already started show their next occurrence in the
   // header; everything else shows the scheduled start.
   const displayStartIso = (() => {
@@ -878,6 +895,43 @@ export default function EventDetail() {
         />
 
         <View style={styles.contentCard}>
+          {eventDraft && isOwner ? (
+            <View style={styles.infoNotice} accessibilityRole="alert">
+              <FileText size={18} color={Colors.text.secondary} />
+              <View style={styles.cancelledNoticeBody}>
+                <Text style={styles.infoNoticeTitle}>Draft — only you can see this</Text>
+                <Text style={styles.cancelledNoticeText}>
+                  Publish it from Manage event when it is ready. Drafts do not count toward your monthly events.
+                </Text>
+              </View>
+            </View>
+          ) : null}
+          {eventUnlisted && isOwner && !eventDraft ? (
+            <View style={styles.infoNotice}>
+              <EyeOff size={18} color={Colors.text.secondary} />
+              <View style={styles.cancelledNoticeBody}>
+                <Text style={styles.infoNoticeTitle}>Unlisted</Text>
+                <Text style={styles.cancelledNoticeText}>Hidden from Discover and search. Anyone with the link can open it.</Text>
+              </View>
+            </View>
+          ) : null}
+          {eventPostponed ? (
+            <View style={styles.cancelledNotice} accessibilityRole="alert">
+              <PauseCircle size={18} color={Colors.error} />
+              <View style={styles.cancelledNoticeBody}>
+                <Text style={styles.cancelledNoticeTitle}>Postponed — new date coming</Text>
+                <Text style={styles.cancelledNoticeText}>
+                  {event.status_note?.trim()
+                    ? event.status_note.trim()
+                    : isOwner
+                      ? 'Attendees have been told. Set the new date from Manage event to resume.'
+                      : hasJoinedEvent || details.user_rsvp === 'interested'
+                        ? 'Your RSVP is kept. You will be notified when the new date is set.'
+                        : 'Joining reopens once the host sets a new date.'}
+                </Text>
+              </View>
+            </View>
+          ) : null}
           {eventCancelled ? (
             <View style={styles.cancelledNotice} accessibilityRole="alert">
               <Ban size={18} color={Colors.error} />
@@ -920,10 +974,27 @@ export default function EventDetail() {
               </View>
               <View style={styles.metaBody}>
                 <Text style={styles.metaLabel}>Time</Text>
-                <Text style={styles.metaValue}>
-                  {formatTimeRange(displayStartIso, event.end_datetime, event.start_datetime)}
-                  {tzLabel ? ` (${tzLabel})` : ''}
-                </Text>
+                {(() => {
+                  const when = describeEventTime(displayStartIso, eventTz, viewerTz);
+                  const zoneSuffix =
+                    when.differs && eventTz ? ` ${zoneAbbreviation(eventTz, new Date(displayStartIso))}` : '';
+                  return (
+                    <>
+                      <Text style={styles.metaValue}>
+                        {formatTimeRange(displayStartIso, event.end_datetime, event.start_datetime)}
+                        {zoneSuffix}
+                      </Text>
+                      {when.differs ? (
+                        <Text style={styles.metaSubValue}>
+                          {formatTimeRange(displayStartIso, event.end_datetime, event.start_datetime, viewerTz)} your time
+                          {dayKey(new Date(displayStartIso), viewerTz) !== dayKey(new Date(displayStartIso), displayTz)
+                            ? ` (${formatInZone(new Date(displayStartIso), viewerTz, { month: 'short', day: 'numeric' })})`
+                            : ''}
+                        </Text>
+                      ) : null}
+                    </>
+                  );
+                })()}
               </View>
             </View>
             {event.address && (
@@ -937,6 +1008,38 @@ export default function EventDetail() {
                 </View>
               </View>
             )}
+            {event.price_label || event.ticket_url ? (
+              <View style={styles.metaRow}>
+                <View style={styles.metaIconWrap}>
+                  <Ticket size={18} color={Colors.primary} />
+                </View>
+                <View style={styles.metaBody}>
+                  <Text style={styles.metaLabel}>Tickets</Text>
+                  <Text style={styles.metaValue}>{event.price_label?.trim() || 'See ticket link'}</Text>
+                  {event.ticket_url ? (
+                    <TouchableOpacity
+                      onPress={() => void Linking.openURL(event.ticket_url!).catch(() => notify.error('Could not open the ticket link.'))}
+                      accessibilityRole="link"
+                      accessibilityLabel="Open ticket link"
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    >
+                      <Text style={styles.metaLink}>Get tickets</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
+            {event.age_restriction && event.age_restriction !== 'none' ? (
+              <View style={styles.metaRow}>
+                <View style={styles.metaIconWrap}>
+                  <ShieldCheck size={18} color={Colors.primary} />
+                </View>
+                <View style={styles.metaBody}>
+                  <Text style={styles.metaLabel}>Age</Text>
+                  <Text style={styles.metaValue}>{event.age_restriction} only</Text>
+                </View>
+              </View>
+            ) : null}
           </View>
 
           {!eventCancelled ? (
@@ -1149,6 +1252,18 @@ export default function EventDetail() {
             ) : (
               <Text style={styles.noDescriptionText}>No description provided.</Text>
             )}
+            {event.what_to_bring?.trim() ? (
+              <View style={styles.extraBlock}>
+                <Text style={styles.extraTitle}>What to bring</Text>
+                <Text style={styles.descriptionText}>{event.what_to_bring.trim()}</Text>
+              </View>
+            ) : null}
+            {event.accessibility_notes?.trim() ? (
+              <View style={styles.extraBlock}>
+                <Text style={styles.extraTitle}>Accessibility</Text>
+                <Text style={styles.descriptionText}>{event.accessibility_notes.trim()}</Text>
+              </View>
+            ) : null}
           </View>
 
           {event.is_recurring && event.recurrence_pattern && (
@@ -1256,24 +1371,15 @@ export default function EventDetail() {
               </TouchableOpacity>
               {/* A cancelled event is read-only for the host too: no Edit or
                   second Cancel. Insights above stay available. */}
-              {!eventCancelled ? (
-                <View style={styles.ownerActions}>
-                  <Button
-                    label="Edit Event"
-                    variant="secondary"
-                    onPress={() => router.push(`/business/edit-event/${event.id}` as any)}
-                    icon={<Pencil size={18} color={Colors.primary} />}
-                    style={styles.ownerActionBtn}
-                  />
-                  <Button
-                    label="Cancel Event"
-                    variant="destructive"
-                    onPress={handleCancelEvent}
-                    icon={<Trash2 size={18} color="#FFFFFF" />}
-                    style={styles.ownerActionBtn}
-                  />
-                </View>
-              ) : null}
+              {/* Edit / Cancel / attendees / chat controls live in the hub now. */}
+              <Button
+                label="Manage event"
+                onPress={() => router.push(`/business/manage-event/${event.id}` as never)}
+                icon={<Settings2 size={18} color={Colors.white} />}
+                fullWidth
+                style={styles.manageBtn}
+                accessibilityLabel="Open the host tools for this event"
+              />
             </>
           )}
 
@@ -1399,19 +1505,19 @@ export default function EventDetail() {
                   else handleJoinWaitlist();
                   return;
                 }
-                if (saving || hasJoinedEvent || eventClosed || eventFull) return;
+                if (saving || hasJoinedEvent || hasRequested || eventClosed || eventFull) return;
                 handleRsvp('going');
               }}
               disabled={
                 user
-                  ? saving || hasJoinedEvent || eventClosed || (eventFull && !canWaitlist)
+                  ? saving || hasJoinedEvent || hasRequested || eventClosed || (eventFull && !canWaitlist)
                   : eventClosed || eventFull
               }
               activeOpacity={0.9}
               accessibilityRole="button"
               accessibilityState={{
                 disabled: user
-                  ? saving || hasJoinedEvent || eventClosed || (eventFull && !canWaitlist)
+                  ? saving || hasJoinedEvent || hasRequested || eventClosed || (eventFull && !canWaitlist)
                   : eventClosed || eventFull,
               }}
               accessibilityLabel={
@@ -1429,6 +1535,14 @@ export default function EventDetail() {
                   ? hasJoinedEvent
                     ? 'You attended'
                     : 'Event ended'
+                  : eventPostponed
+                  ? hasJoinedEvent
+                    ? 'Postponed · your spot is kept'
+                    : 'Postponed · new date coming'
+                  : hasRequested
+                  ? 'Request pending · host will review'
+                  : rsvpsClosedByHost
+                  ? 'RSVPs closed'
                   : eventFull
                     ? canWaitlist
                       ? onWaitlist
@@ -1439,9 +1553,11 @@ export default function EventDetail() {
                       ? 'Sign in to join'
                       : hasJoinedEvent
                         ? 'Event Joined'
-                        : maxAttendees != null
-                          ? `Join Event (${details.rsvp_count} / ${maxAttendees})`
-                          : 'Join Event'}
+                        : approvalMode
+                            ? 'Request to join'
+                            : maxAttendees != null
+                              ? `Join Event (${details.rsvp_count} / ${maxAttendees})`
+                              : 'Join Event'}
               </Text>
               {eventClosed || (eventFull && !canWaitlist) ? null : hasJoinedEvent ? (
                 <Text style={styles.joinArrow}>✓</Text>
@@ -1452,8 +1568,22 @@ export default function EventDetail() {
 
             {/* One secondary control replaces the old Going / Interested / Remove row:
                 star = mark or unmark interest, "Leave" = drop a "going" RSVP. */}
-            {user && !eventClosed ? (
-              hasJoinedEvent ? (
+            {/* Leaving (or cancelling a request / un-starring) must survive
+                "RSVPs closed" and postponed states: the row is the user's own.
+                Only cancelled/ended/draft events freeze it. */}
+            {user && !eventCancelled && !eventEnded && !eventDraft ? (
+              hasRequested ? (
+                <TouchableOpacity
+                  style={styles.secondaryActionButton}
+                  onPress={handleLeaveEvent}
+                  disabled={saving}
+                  activeOpacity={0.8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel your request to join"
+                >
+                  <Text style={styles.secondaryActionText}>Cancel request</Text>
+                </TouchableOpacity>
+              ) : hasJoinedEvent ? (
                 <TouchableOpacity
                   style={styles.secondaryActionButton}
                   onPress={handleLeaveEvent}
@@ -1731,6 +1861,42 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
+  },
+  metaLink: {
+    marginTop: 4,
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    color: Colors.primary,
+  },
+  infoNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    backgroundColor: Colors.neutralSoft,
+  },
+  infoNoticeTitle: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    color: Colors.text.primary,
+    marginBottom: 2,
+  },
+  extraBlock: {
+    marginTop: Spacing.md,
+  },
+  extraTitle: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    color: Colors.text.secondary,
+    marginBottom: 4,
+  },
+  metaSubValue: {
+    marginTop: 2,
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
   },
   calendarRow: {
     flexDirection: 'row',
@@ -2034,13 +2200,8 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
-  ownerActions: {
-    flexDirection: 'row',
-    gap: Spacing.md,
+  manageBtn: {
     marginBottom: Spacing.lg,
-  },
-  ownerActionBtn: {
-    flex: 1,
   },
   followChip: {
     paddingHorizontal: 14,

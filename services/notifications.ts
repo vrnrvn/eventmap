@@ -14,7 +14,11 @@ export type NotificationType =
   | 'nearby_event'
   | 'promotion'
   | 'chat_message'
-  | 'chat_mention';
+  | 'chat_mention'
+  | 'waitlist'
+  | 'moderation'
+  | 'report_update'
+  | 'host_announcement';
 
 export interface Notification {
   id: string;

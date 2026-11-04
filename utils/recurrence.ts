@@ -1,3 +1,5 @@
+import { instantToPickerDate, isValidTimeZone, pickerDateToInstant } from '@/utils/timezone';
+
 export type RecurrenceFrequency = 'daily' | 'weekly' | 'monthly';
 
 export type RecurrencePattern = {
@@ -119,23 +121,47 @@ export function isEventOnDate(
   }
 }
 
-/** Get the next N occurrence dates for a recurring event, starting from today */
+/**
+ * Get the next N occurrence dates for a recurring event, starting from today.
+ *
+ * With an event zone (20261103140000) the series is walked on that zone's
+ * calendar: the pattern is applied to the start's wall clock *in the event
+ * zone* and each occurrence is converted back to an instant, so a 7 pm Lisbon
+ * class stays 7 pm Lisbon for a viewer in New York across either zone's DST
+ * change. Without a zone the device calendar is used (legacy behaviour).
+ */
 export function getNextOccurrences(
   event: {
     start_datetime: string;
     is_recurring?: boolean;
     recurrence_pattern?: RecurrencePattern | null;
+    timezone?: string | null;
   },
-  maxCount: number = 5
+  maxCount: number = 5,
+  now: Date = new Date()
 ): Date[] {
   if (!event.is_recurring || !event.recurrence_pattern) return [];
+
+  const zone = event.timezone && isValidTimeZone(event.timezone) ? event.timezone : null;
+  if (zone) {
+    // Re-express the start as a device-local Date carrying the event-zone
+    // wall clock, run the same local-day walk from "today in the event zone",
+    // then map each result back to a real instant.
+    const zonedStart = instantToPickerDate(new Date(event.start_datetime), zone);
+    const zonedNow = instantToPickerDate(now, zone);
+    return getNextOccurrences(
+      { ...event, start_datetime: zonedStart.toISOString(), timezone: null },
+      maxCount,
+      zonedNow
+    ).map((wall) => pickerDateToInstant(wall, zone));
+  }
 
   const start = new Date(event.start_datetime);
   const pattern = event.recurrence_pattern;
   const endDate = pattern.endDate ? parseDateOnly(pattern.endDate) : null;
 
   const results: Date[] = [];
-  const from = new Date();
+  const from = new Date(now);
   from.setHours(0, 0, 0, 0);
 
   // Cap the day-walk so a malformed pattern (e.g. interval 0 or a start far in

@@ -19,6 +19,23 @@ describe('classifyRsvpError', () => {
     );
   });
 
+  it('maps a host removal (event ban) to REMOVED', () => {
+    expect(classifyRsvpError({ code: 'P0001', message: 'removed_from_event' })).toBe('REMOVED');
+    expect(rsvpErrorMessage('REMOVED')).toMatch(/host removed you/);
+    expect(rsvpErrorNeedsRefresh('REMOVED')).toBe(true);
+  });
+
+  it('maps the host settings refusals', () => {
+    expect(classifyRsvpError({ code: 'P0001', message: 'rsvps_closed' })).toBe('RSVPS_CLOSED');
+    expect(classifyRsvpError({ code: 'P0001', message: 'waitlist_off' })).toBe('WAITLIST_OFF');
+    expect(rsvpErrorNeedsRefresh('RSVPS_CLOSED')).toBe(true);
+  });
+
+  it('maps approval mode to APPROVAL_REQUIRED', () => {
+    expect(classifyRsvpError({ code: 'P0001', message: 'approval_required: the host approves who joins this event' })).toBe('APPROVAL_REQUIRED');
+    expect(rsvpErrorNeedsRefresh('APPROVAL_REQUIRED')).toBe(true);
+  });
+
   it('maps the waitlist RPC hints', () => {
     expect(classifyRsvpError({ code: 'P0001', message: 'spot_available' })).toBe('SPOT_AVAILABLE');
     expect(classifyRsvpError({ code: 'P0001', message: 'already_going' })).toBe('ALREADY_GOING');

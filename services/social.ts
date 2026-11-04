@@ -59,7 +59,7 @@ export const socialService = {
   async createOrUpdateRsvp(
     eventId: string,
     status: RsvpStatus
-  ): Promise<void> {
+  ): Promise<RsvpStatus | 'requested'> {
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -68,11 +68,18 @@ export const socialService = {
     // Capacity-aware join (20261030108000): the RPC locks the event row and
     // enforces ban / cancelled / ended / capacity server-side. Every failure
     // is surfaced as a typed RsvpError so screens can show specific copy.
-    const { error } = await supabase.rpc('join_event_with_capacity', {
+    // With 20261103170000 it returns the resulting status: under approval
+    // mode a "going" tap lands as 'requested' (void before that = assume
+    // the asked-for status).
+    const { data, error } = await supabase.rpc('join_event_with_capacity', {
       p_event_id: eventId,
       p_status: status,
     });
     if (error) throw new RsvpError(classifyRsvpError(error), error);
+    const result = data as unknown;
+    return result === 'requested' || result === 'going' || result === 'interested'
+      ? result
+      : status;
   },
 
   /** Join the waitlist of a full event; resolves to the 1-based position. */
@@ -470,8 +477,8 @@ export const socialService = {
     const ids = (data ?? []).map((row) => row.blocked_id);
     if (ids.length === 0) return [];
 
-    // get_profiles_display respects profile privacy and returns a safe
-    // display name for private accounts.
+    // With 20261103120000 applied, get_profiles_display returns "First L."
+    // and no avatar for private accounts (full name before that).
     const { data: profiles, error: profileError } = await supabase.rpc('get_profiles_display', {
       user_ids: ids,
     });

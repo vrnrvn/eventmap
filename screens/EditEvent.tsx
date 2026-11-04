@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -37,14 +37,27 @@ import {
 import { parseRecurrenceEndDate, type RecurrenceOption } from '@/utils/recurrence';
 import { notify, notifyConfirm } from '@/utils/notify';
 import { confirmAction } from '@/utils/confirm';
-import { eventsService } from '@/services/events';
+import { eventsService, extrasToUpdates } from '@/services/events';
+import { hostToolsService, isCapacityBelowAttendanceError, isRescheduleRequiredError } from '@/services/hostTools';
+import {
+  EventExtrasFields,
+  EMPTY_EXTRAS,
+  validateExtras,
+  type EventExtrasDraft,
+} from '@/components/EventExtrasFields';
 import { eventLocationStore } from '@/stores/eventLocationStore';
 import { categoriesService } from '@/services/categories';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { Category, Event, EventPhoto } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { withShiftedEnd } from '@/utils/eventDatetime';
-import { timeZoneLabel } from '@/utils/formatEventWhen';
+import {
+  getDeviceTimeZone,
+  instantToPickerDate,
+  pickerDateToInstant,
+  zoneDisplayLabel,
+} from '@/utils/timezone';
+import { TimeZonePicker } from '@/components/TimeZonePicker';
 
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
 const MAX_EVENT_DATE = new Date();
@@ -66,7 +79,18 @@ type EventFormData = {
   recurrence: RecurrenceOption;
   maxAttendees: string;
   links: EventLinkDraft[];
+  /**
+   * Zone the dates above are expressed in. null = legacy event with no stored
+   * zone: dates are edited in the device zone and saving leaves it unset
+   * unless the host picks one.
+   */
+  timezone: string | null;
+  /** Phase 3 detail fields (20261103150000). */
+  extras: EventExtrasDraft;
 };
+
+/** Zone used to convert picker dates to instants (device zone for legacy events). */
+const effectiveZone = (f: Pick<EventFormData, 'timezone'>) => f.timezone ?? getDeviceTimeZone();
 
 /** Serialize the form fields that count as "changes" for the unsaved guard. */
 const snapshotOf = (f: EventFormData) =>
@@ -83,6 +107,8 @@ const snapshotOf = (f: EventFormData) =>
     recurrence: f.recurrence,
     maxAttendees: f.maxAttendees,
     links: f.links.map((link) => `${link.id ?? ''}|${link.label}|${link.url}`),
+    timezone: f.timezone,
+    extras: f.extras,
   });
 
 export default function EditEvent() {
@@ -114,16 +140,19 @@ export default function EditEvent() {
     recurrence: null as RecurrenceOption,
     maxAttendees: '',
     links: [] as EventLinkDraft[],
+    timezone: null as string | null,
+    extras: EMPTY_EXTRAS,
   });
   const [linkErrors, setLinkErrors] = useState<Record<number, string>>({});
-  const tzLabel = useMemo(() => timeZoneLabel(), []);
+  const [extrasErrors, setExtrasErrors] = useState<Partial<Record<keyof EventExtrasDraft, string>>>({});
+  const [showExtras, setShowExtras] = useState(false);
+  const [tzPickerOpen, setTzPickerOpen] = useState(false);
   const recurrencePickerRef = useRef<RecurrencePickerHandle>(null);
   /** Track the original photos loaded from DB to detect removals */
   const originalPhotoIds = useRef<string[]>([]);
   /** Saved sort_order per existing photo, so only moved ones are rewritten. */
   const originalPhotoOrder = useRef<Map<string, number>>(new Map());
   /** Original start time, so saves of other fields aren't blocked for past events */
-  const originalStartMs = useRef<number | null>(null);
   const originalHadCap = useRef(false);
   /** The saved row as loaded, so the update only sends fields that changed. */
   const originalEvent = useRef<Event | null>(null);
@@ -210,7 +239,8 @@ export default function EditEvent() {
         originalPhotoOrder.current = new Map(
           (details.photos || []).map((p: EventPhoto) => [p.id, p.sort_order])
         );
-        originalStartMs.current = new Date(e.start_datetime).getTime();
+        const loadedZone = e.timezone ?? null;
+        const zoneForPicker = loadedZone ?? getDeviceTimeZone();
         originalHadCap.current = e.max_attendees != null;
         originalEvent.current = e;
         goingCount.current = details.rsvp_count ?? 0;
@@ -219,8 +249,8 @@ export default function EditEvent() {
           title: e.title,
           description: e.description,
           categoryId: e.category_id,
-          startDatetime: new Date(e.start_datetime),
-          endDatetime: new Date(e.end_datetime),
+          startDatetime: instantToPickerDate(new Date(e.start_datetime), zoneForPicker),
+          endDatetime: instantToPickerDate(new Date(e.end_datetime), zoneForPicker),
           address: e.address,
           lat: e.lat,
           lng: e.lng,
@@ -232,7 +262,22 @@ export default function EditEvent() {
             label: link.label ?? '',
             url: link.url,
           })),
+          timezone: loadedZone,
+          extras: {
+            visibility: e.visibility ?? 'public',
+            ticketUrl: e.ticket_url ?? '',
+            priceLabel: e.price_label ?? '',
+            ageRestriction: e.age_restriction ?? 'none',
+            accessibilityNotes: e.accessibility_notes ?? '',
+            whatToBring: e.what_to_bring ?? '',
+          },
         };
+        // Open the section when anything in it is already filled in.
+        setShowExtras(
+          !!(e.ticket_url || e.price_label || e.accessibility_notes || e.what_to_bring) ||
+            e.visibility === 'unlisted' ||
+            (e.age_restriction ?? 'none') !== 'none'
+        );
         setFormData(loaded);
         initialSnapshot.current = snapshotOf(loaded);
       } catch {
@@ -297,12 +342,16 @@ export default function EditEvent() {
     if (!formData.title.trim()) e.title = 'Title is required';
     if (!formData.description.trim()) e.description = 'Description is required';
     if (!formData.categoryId) e.categoryId = 'Select a category';
-    // Only enforce a future start when the start was actually changed, so an
-    // event that already started can still have its other fields edited.
-    const startChanged =
-      originalStartMs.current == null ||
-      formData.startDatetime.getTime() !== originalStartMs.current;
-    if (startChanged && formData.startDatetime.getTime() <= Date.now()) {
+    // Only enforce a future start when the start INSTANT actually changed, so
+    // an event that already started can still have its other fields edited.
+    // Compared as instants: changing only the time zone keeps the picker value
+    // but moves the real start.
+    const candidateStartMs = pickerDateToInstant(formData.startDatetime, effectiveZone(formData)).getTime();
+    const originalInstantMs = originalEvent.current
+      ? new Date(originalEvent.current.start_datetime).getTime()
+      : null;
+    const startChanged = originalInstantMs == null || candidateStartMs !== originalInstantMs;
+    if (startChanged && candidateStartMs <= Date.now()) {
       e.startDatetime = 'Start must be in the future';
     }
     if (formData.endDatetime <= formData.startDatetime) {
@@ -332,6 +381,12 @@ export default function EditEvent() {
     });
     setLinkErrors(linkIssues);
     if (Object.keys(linkIssues).length > 0) e.links = 'Fix the links below';
+    const extraIssues = validateExtras(formData.extras);
+    setExtrasErrors(extraIssues);
+    if (Object.keys(extraIssues).length > 0) {
+      e.extras = 'Check the fields under More options';
+      setShowExtras(true);
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -351,12 +406,14 @@ export default function EditEvent() {
       ? Number(formData.maxAttendees.trim())
       : null;
 
+    const zone = effectiveZone(formData);
     const candidate: Partial<Event> = {
       title: formData.title.trim(),
       description: formData.description.trim(),
       category_id: formData.categoryId,
-      start_datetime: formData.startDatetime.toISOString(),
-      end_datetime: formData.endDatetime.toISOString(),
+      start_datetime: pickerDateToInstant(formData.startDatetime, zone).toISOString(),
+      end_datetime: pickerDateToInstant(formData.endDatetime, zone).toISOString(),
+      timezone: formData.timezone,
       address,
       lat,
       lng,
@@ -389,6 +446,21 @@ export default function EditEvent() {
     if ((candidate.max_attendees ?? null) !== (original.max_attendees ?? null)) {
       updates.max_attendees = candidate.max_attendees;
     }
+    // Only send the column when the host actually set/changed a zone: the
+    // column may not exist yet (unapplied 20261103140000) and a legacy event
+    // must stay untouched when nothing else about its zone changed.
+    if ((candidate.timezone ?? null) !== (original.timezone ?? null)) {
+      updates.timezone = candidate.timezone;
+    }
+    // Detail fields: send only what changed (columns may not exist yet).
+    const extraUpdates = extrasToUpdates(formData.extras);
+    const orig = original as Partial<Event>;
+    if (extraUpdates.visibility !== undefined && extraUpdates.visibility !== (orig.visibility ?? 'public')) updates.visibility = extraUpdates.visibility;
+    if (extraUpdates.age_restriction !== undefined && extraUpdates.age_restriction !== (orig.age_restriction ?? 'none')) updates.age_restriction = extraUpdates.age_restriction;
+    if (extraUpdates.ticket_url !== undefined && (extraUpdates.ticket_url ?? null) !== (orig.ticket_url ?? null)) updates.ticket_url = extraUpdates.ticket_url;
+    if (extraUpdates.price_label !== undefined && (extraUpdates.price_label ?? null) !== (orig.price_label ?? null)) updates.price_label = extraUpdates.price_label;
+    if (extraUpdates.accessibility_notes !== undefined && (extraUpdates.accessibility_notes ?? null) !== (orig.accessibility_notes ?? null)) updates.accessibility_notes = extraUpdates.accessibility_notes;
+    if (extraUpdates.what_to_bring !== undefined && (extraUpdates.what_to_bring ?? null) !== (orig.what_to_bring ?? null)) updates.what_to_bring = extraUpdates.what_to_bring;
     return updates;
   };
 
@@ -397,6 +469,10 @@ export default function EditEvent() {
 
     const updates = buildUpdates();
     const newCap = updates.max_attendees;
+    // A plain UPDATE that lowers the cap below attendance is refused by the
+    // server (guard_event_capacity_shrink); after the host confirms here the
+    // change goes through the explicit host_set_event_capacity RPC instead.
+    let confirmedLowerCap: number | null | undefined;
     if (newCap != null && newCap < goingCount.current) {
       const proceed = await confirmAction({
         title: 'Cap below current attendance',
@@ -405,24 +481,29 @@ export default function EditEvent() {
         cancelLabel: 'Keep editing',
       });
       if (!proceed) return;
+      confirmedLowerCap = newCap;
+      delete updates.max_attendees;
     }
 
-    // Time or place changes notify every going/interested attendee (DB
-    // trigger). Make sure the host means it before pinging the room.
-    const notifies =
-      'start_datetime' in updates ||
-      'end_datetime' in updates ||
-      'address' in updates ||
-      'lat' in updates ||
-      'lng' in updates;
-    if (notifies && goingCount.current > 0) {
+    // Time or place changes once people are going go through reschedule_event
+    // (the server refuses a plain update with `reschedule_required`): one
+    // "Event rescheduled" notice instead of the generic "updated" one, and a
+    // postponed event resumes. Make sure the host means it first.
+    const placeChanged = 'address' in updates || 'lat' in updates || 'lng' in updates;
+    const timePlaceChanged = 'start_datetime' in updates || 'end_datetime' in updates || placeChanged;
+    const isPostponed = originalEvent.current?.status === 'postponed';
+    let viaReschedule = false;
+    if (timePlaceChanged && (goingCount.current > 0 || isPostponed)) {
       const proceed = await confirmAction({
-        title: 'Notify attendees?',
-        message: `Changing the time or location sends an "event updated" notification to everyone who's going or interested (${goingCount.current} going). Save anyway?`,
-        confirmLabel: 'Save and notify',
+        title: isPostponed ? 'Set the new date?' : 'Notify attendees?',
+        message: isPostponed
+          ? 'This reopens joining and tells everyone the event is back on at the new time.'
+          : `Changing the time or location sends a "rescheduled" notification to everyone who's going or interested (${goingCount.current} going). Save anyway?`,
+        confirmLabel: isPostponed ? 'Set date' : 'Save and notify',
         cancelLabel: 'Keep editing',
       });
       if (!proceed) return;
+      viaReschedule = true;
     }
 
     setSaving(true);
@@ -430,8 +511,26 @@ export default function EditEvent() {
       // Save the event fields FIRST: if this fails, nothing has been uploaded
       // or deleted, so there are no orphans. Photos are handled afterwards
       // and photo failures are non-fatal.
+      if (viaReschedule) {
+        const zone = effectiveZone(formData);
+        await hostToolsService.rescheduleEvent(id, {
+          startIso: pickerDateToInstant(formData.startDatetime, zone).toISOString(),
+          endIso: pickerDateToInstant(formData.endDatetime, zone).toISOString(),
+          address: placeChanged ? (updates.address ?? originalEvent.current?.address ?? null) : null,
+          lat: placeChanged ? (updates.lat ?? originalEvent.current?.lat ?? null) : null,
+          lng: placeChanged ? (updates.lng ?? originalEvent.current?.lng ?? null) : null,
+        });
+        delete updates.start_datetime;
+        delete updates.end_datetime;
+        delete updates.address;
+        delete updates.lat;
+        delete updates.lng;
+      }
       if (Object.keys(updates).length > 0) {
         await eventsService.updateEvent(id, updates);
+      }
+      if (confirmedLowerCap !== undefined) {
+        await hostToolsService.setCapacity(id, confirmedLowerCap);
       }
 
       // Detect removed photos and delete them (non-fatal)
@@ -527,6 +626,16 @@ export default function EditEvent() {
       initialSnapshot.current = snapshotOf(formData);
       router.back();
     } catch (err: unknown) {
+      // The going count moved under us (someone joined since the screen
+      // loaded) and the server refused to strand them.
+      if (isCapacityBelowAttendanceError(err)) {
+        notify.error('More people are going than the new limit allows. Reload the event and confirm again.');
+        return;
+      }
+      if (isRescheduleRequiredError(err)) {
+        notify.error('Someone joined while you were editing. Reload and save again to reschedule them properly.');
+        return;
+      }
       notify.error(err instanceof Error ? err.message : 'Failed to update event');
     } finally {
       setSaving(false);
@@ -535,7 +644,7 @@ export default function EditEvent() {
   };
 
   const formatDateTime = (d: Date) =>
-    d.toLocaleString('en-US', {
+    d.toLocaleString(undefined, {
       month: 'short',
       day: 'numeric',
       hour: 'numeric',
@@ -625,10 +734,28 @@ export default function EditEvent() {
           <Text style={styles.errorText}>{errors.categoryId}</Text>
         )}
 
+        <Text style={styles.label}>Time zone</Text>
+        <TouchableOpacity
+          style={styles.dateButton}
+          onPress={() => setTzPickerOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel={
+            formData.timezone
+              ? `Time zone: ${zoneDisplayLabel(formData.timezone, formData.startDatetime)}. Change`
+              : 'Time zone not set. Choose one'
+          }
+        >
+          <Text style={styles.dateButtonText}>
+            {formData.timezone
+              ? zoneDisplayLabel(formData.timezone, formData.startDatetime)
+              : `Not set · yours is ${zoneDisplayLabel(getDeviceTimeZone(), formData.startDatetime)}`}
+          </Text>
+          <ChevronRight size={18} color={Colors.text.tertiary} />
+        </TouchableOpacity>
         <Text style={styles.tapHint}>
-          {tzLabel
-            ? `Times are in your device timezone (${tzLabel}).`
-            : 'Times are in your device timezone.'}
+          {formData.timezone
+            ? 'Start and end below are entered in this zone.'
+            : 'Set the zone so attendees elsewhere see the right local time. Until then times are in your device zone.'}
         </Text>
         <Text style={styles.label}>Start</Text>
         <TouchableOpacity
@@ -798,6 +925,32 @@ export default function EditEvent() {
           error={errors.maxAttendees}
         />
 
+        <TouchableOpacity
+          style={styles.dateButton}
+          onPress={() => setShowExtras((v) => !v)}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: showExtras }}
+          accessibilityLabel="More options: visibility, tickets, age, accessibility"
+        >
+          <Text style={styles.dateButtonText}>More options</Text>
+          <ChevronRight
+            size={18}
+            color={Colors.text.tertiary}
+            style={showExtras ? { transform: [{ rotate: '90deg' }] } : undefined}
+          />
+        </TouchableOpacity>
+        {showExtras ? (
+          <EventExtrasFields
+            value={formData.extras}
+            errors={extrasErrors}
+            onChange={(extras) => {
+              setExtrasErrors({});
+              setFormData((f) => ({ ...f, extras }));
+            }}
+          />
+        ) : null}
+        {errors.extras ? <Text style={styles.errorText}>{errors.extras}</Text> : null}
+
         <Text style={styles.label}>Links</Text>
         <EventLinksEditor
           links={formData.links}
@@ -852,7 +1005,14 @@ export default function EditEvent() {
             </Text>
           </View>
         </TouchableOpacity>
-        <RecurrencePicker
+        <TimeZonePicker
+        visible={tzPickerOpen}
+        value={formData.timezone ?? getDeviceTimeZone()}
+        referenceDate={formData.startDatetime}
+        onSelect={(tz) => setFormData((f) => ({ ...f, timezone: tz }))}
+        onClose={() => setTzPickerOpen(false)}
+      />
+      <RecurrencePicker
           ref={recurrencePickerRef}
           selectedValue={formData.recurrence}
           noneOnly={!isPremiumBusiness}

@@ -53,6 +53,9 @@ export type ChatSubscription = {
   sendTyping: (typing: boolean) => void;
 };
 
+export type ChatMode = 'open' | 'announcements' | 'off';
+export type ChatOpenPolicy = 'two_going' | 'any_going';
+
 export type ChatPostStatus = {
   can_read: boolean;
   can_post: boolean;
@@ -66,7 +69,21 @@ export type ChatPostStatus = {
   block_expires_at: string | null;
   last_read_at: string | null;
   last_post_at: string | null;
+  /** Present once 20261103160000 is applied; undefined before. */
+  chat_mode?: ChatMode | null;
+  open_policy?: ChatOpenPolicy | null;
+  pinned_message_id?: string | null;
 };
+
+/** 42883 = undefined_function, PGRST202 = not in the PostgREST schema cache. */
+const isMissingRpc = (error: { code?: string } | null): boolean =>
+  !!error && (error.code === '42883' || error.code === 'PGRST202');
+
+const untypedRpc = (fn: string, args: Record<string, unknown>) =>
+  (supabase.rpc as unknown as (f: string, a: Record<string, unknown>) => ReturnType<typeof supabase.rpc>)(
+    fn,
+    args
+  );
 
 export const CHAT_SLOW_MODE_OPTIONS = [0, 10, 30, 60, 300] as const;
 export type ChatSlowModeSeconds = (typeof CHAT_SLOW_MODE_OPTIONS)[number];
@@ -445,6 +462,43 @@ export const eventChatService = {
       p_slow_mode_seconds: settings.slowModeSeconds,
     });
     if (error) throw error;
+  },
+
+  /**
+   * Host/admin: chat mode (open / announcements / off) and when the room
+   * opens (`two_going` = today's rule, `any_going` = from the first attendee).
+   * Pre-20261103160000 the mode falls back to the legacy lock (announcements =
+   * locked); `off` and the open policy need the migration.
+   */
+  async setMode(
+    eventId: string,
+    settings: { mode?: ChatMode; openPolicy?: ChatOpenPolicy }
+  ): Promise<void> {
+    const { error } = await untypedRpc('set_event_chat_mode', {
+      p_event_id: eventId,
+      p_chat_mode: settings.mode,
+      p_open_policy: settings.openPolicy,
+    });
+    if (!error) return;
+    if (!isMissingRpc(error)) throw error;
+    if (settings.mode === 'open' || settings.mode === 'announcements') {
+      await this.setSettings(eventId, { locked: settings.mode === 'announcements' });
+      if (!settings.openPolicy) return;
+    }
+    throw new Error('This chat setting needs a database update that has not been applied yet.');
+  },
+
+  /** Host/admin: pin one message (null unpins). Needs 20261103160000. */
+  async setPin(eventId: string, messageId: string | null): Promise<void> {
+    const { error } = await untypedRpc('set_event_chat_pin', {
+      p_event_id: eventId,
+      p_message_id: messageId,
+    });
+    if (!error) return;
+    if (isMissingRpc(error)) {
+      throw new Error('Pinned messages need a database update that has not been applied yet.');
+    }
+    throw error;
   },
 
   /** Host/admin: bring back a removed message. */
