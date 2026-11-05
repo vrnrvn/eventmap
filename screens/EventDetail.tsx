@@ -510,6 +510,7 @@ export default function EventDetail() {
       // Desktop browsers mostly lack navigator.share, so the link is copied
       // instead — say so, otherwise the button looks broken.
       if (outcome === 'copied') notify.success('Event link copied to clipboard.');
+      if (outcome !== 'dismissed') eventsService.trackEventInteraction(id, 'share');
     } catch {
       notify.error('Could not share this event.');
     }
@@ -570,6 +571,7 @@ export default function EventDetail() {
       recurrence: times.recurrence,
       timezone: times.timezone,
     });
+    eventsService.trackEventInteraction(details.event.id, 'calendar');
     void Linking.openURL(url).catch(() => notify.error('Could not open Google Calendar.'));
   };
 
@@ -593,6 +595,7 @@ export default function EventDetail() {
           .filter(Boolean)
           .join('\n\n'),
       });
+      eventsService.trackEventInteraction(details.event.id, 'calendar');
     } catch {
       notify.error('Could not create the calendar file.');
     }
@@ -1018,7 +1021,10 @@ export default function EventDetail() {
                   <Text style={styles.metaValue}>{event.price_label?.trim() || 'See ticket link'}</Text>
                   {event.ticket_url ? (
                     <TouchableOpacity
-                      onPress={() => void Linking.openURL(event.ticket_url!).catch(() => notify.error('Could not open the ticket link.'))}
+                      onPress={() => {
+                        eventsService.trackEventInteraction(event.id, 'ticket');
+                        void Linking.openURL(event.ticket_url!).catch(() => notify.error('Could not open the ticket link.'));
+                      }}
                       accessibilityRole="link"
                       accessibilityLabel="Open ticket link"
                       hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
@@ -1288,7 +1294,10 @@ export default function EventDetail() {
               {event.address ? (
                 <TouchableOpacity
                   style={styles.directionsBtn}
-                  onPress={() => Linking.openURL(`https://www.google.com/maps?q=${encodeURIComponent(event.address || `${event.lat},${event.lng}`)}`)}
+                  onPress={() => {
+                    eventsService.trackEventInteraction(event.id, 'directions');
+                    void Linking.openURL(`https://www.google.com/maps?q=${encodeURIComponent(event.address || `${event.lat},${event.lng}`)}`);
+                  }}
                   accessibilityRole="button"
                   accessibilityLabel="Get directions"
                   hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}

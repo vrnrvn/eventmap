@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import {
   View,
   Text,
@@ -10,27 +11,45 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router, useFocusEffect } from 'expo-router';
+import { router } from 'expo-router';
 import {
   BarChart3,
   CalendarClock,
+  CalendarPlus,
   Crown,
   Eye,
   Heart,
+  MapPin,
+  Share2,
   Star,
+  Ticket,
   TrendingUp,
   UserRound,
   Users,
 } from 'lucide-react-native';
 import { useApp } from '@/contexts/AppContext';
 import { usePremium } from '@/contexts/PremiumContext';
-import { analyticsService, type AnalyticsTopEvent, type AnalyticsTrendPoint } from '@/services/analytics';
+import {
+  analyticsService,
+  type AnalyticsTopEvent,
+  type AnalyticsTrendPoint,
+  type BusinessAnalytics,
+} from '@/services/analytics';
+import { queryKeys } from '@/hooks/queryKeys';
+import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
+import { TrendBars } from '@/components/analytics/TrendBars';
+import { KpiTile } from '@/components/analytics/KpiTile';
+import { ProUpsellCard } from '@/components/analytics/ProUpsellCard';
+import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Business } from '@/types/database';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 
 const PERIOD_OPTIONS = [7, 30, 90] as const;
 type PeriodDays = (typeof PERIOD_OPTIONS)[number];
+type PeriodKey = '7' | '30' | '90';
+// Same selector as event insights.
+const PERIOD_SEGMENTS = PERIOD_OPTIONS.map((days) => ({ value: String(days) as PeriodKey, label: `${days} days` }));
 
 type AnalyticsData = {
   totalPosts: number;
@@ -48,6 +67,11 @@ type AnalyticsData = {
   profileCompleteness: number;
   topEvents: AnalyticsTopEvent[];
   trend: AnalyticsTrendPoint[];
+  /** Server tier (20261104100000); null on older backends (client gating then). */
+  tier: 'free' | 'premium' | null;
+  periodDays: number;
+  /** Premium window tap totals (20261104090000); null otherwise. */
+  interactionTotals: BusinessAnalytics['interactionTotals'];
 };
 
 function emptyAnalytics(): AnalyticsData {
@@ -67,6 +91,9 @@ function emptyAnalytics(): AnalyticsData {
     profileCompleteness: 0,
     topEvents: [],
     trend: [],
+    tier: null,
+    periodDays: 30,
+    interactionTotals: null,
   };
 }
 
@@ -77,76 +104,49 @@ export default function ProfileAnalyticsScreen() {
 
   const canAccessAnalytics = isPremium && canUse('analytics');
   const [period, setPeriod] = useState<PeriodDays>(30);
-  const [loading, setLoading] = useState(true);
-  // True while a refetch (period change, re-focus) is in flight after the
-  // first load; shows an inline indicator instead of replacing the dashboard.
-  const [fetching, setFetching] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [data, setData] = useState<AnalyticsData>(emptyAnalytics());
-  const hasLoadedOnceRef = useRef(false);
-
   const isBusinessMode = userMode === 'business';
 
-  const loadAnalytics = useCallback(async () => {
-    if (!userBusiness || !canAccessAnalytics) {
-      setData(emptyAnalytics());
-      setErrorMessage(null);
-      setLoading(false);
-      setFetching(false);
-      setRefreshing(false);
-      return;
-    }
-
-    try {
-      setErrorMessage(null);
-      const analytics = await analyticsService.getBusinessAnalytics(
-        userBusiness.id,
-        period
-      );
-
-      setData({
-        ...analytics,
-        profileCompleteness: getProfileCompleteness(
-          userBusiness,
-          analytics.totalPosts
-        ),
-        topEvents: analytics.topEvents.slice(0, 3),
-      });
-    } catch (error) {
-      console.error('Failed to load analytics data', error);
-      setErrorMessage(
-        error instanceof Error ? error.message : 'Failed to load analytics data.'
-      );
-      setData(emptyAnalytics());
-    } finally {
-      hasLoadedOnceRef.current = true;
-      setLoading(false);
-      setFetching(false);
-      setRefreshing(false);
-    }
-  }, [userBusiness, canAccessAnalytics, period]);
-
-  useFocusEffect(
-    useCallback(() => {
-      // Only the very first load replaces the dashboard with a spinner; period
-      // changes and re-focuses refetch behind the existing content.
-      if (!hasLoadedOnceRef.current) {
-        setLoading(true);
-      } else {
-        setFetching(true);
-      }
-      loadAnalytics();
-    }, [loadAnalytics])
-  );
-
+  // Every owner loads: with 20261104100000 the server returns totals to free
+  // businesses and keeps the premium sections empty. Previous data stays on
+  // screen while a new period loads.
+  const query = useQuery({
+    queryKey: queryKeys.businessAnalytics(userBusiness?.id, period),
+    enabled: !!userBusiness && isBusinessMode,
+    queryFn: () => analyticsService.getBusinessAnalytics(userBusiness!.id, period),
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+  });
+  useRefetchOnFocus(query.refetch, !!userBusiness && isBusinessMode);
+  const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    loadAnalytics();
-  }, [loadAnalytics]);
+    void query.refetch().finally(() => setRefreshing(false));
+  }, [query]);
 
-  const trendMax = useMemo(
-    () => Math.max(...data.trend.map((point) => point.views), 0),
+  const loading = query.isPending && query.fetchStatus !== 'idle';
+  const fetching = query.isFetching && !loading;
+  const errorMessage = query.isError
+    ? query.error instanceof Error
+      ? query.error.message
+      : 'Failed to load analytics data.'
+    : null;
+  const data = useMemo<AnalyticsData>(() => {
+    if (!query.data || !userBusiness) return emptyAnalytics();
+    return {
+      ...query.data,
+      profileCompleteness: getProfileCompleteness(userBusiness, query.data.totalPosts),
+      topEvents: query.data.topEvents.slice(0, 3),
+    };
+  }, [query.data, userBusiness]);
+
+  // Server tier wins (an expired plan is free even if the client still thinks
+  // otherwise); older backends report no tier and keep the client gate.
+  const premiumView = data.tier ? data.tier === 'premium' : canAccessAnalytics;
+  const fullyLocked = data.tier === null && !canAccessAnalytics;
+  const shownPeriod = premiumView ? period : data.periodDays;
+
+  const trendPoints = useMemo(
+    () => data.trend.map((point) => ({ date: point.date, value: point.views })),
     [data.trend]
   );
 
@@ -187,7 +187,12 @@ export default function ProfileAnalyticsScreen() {
             ctaLabel="Switch Mode"
             onPress={() => setUserMode('business')}
           />
-        ) : !canAccessAnalytics ? (
+        ) : loading ? (
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+            <Text style={styles.loadingText}>Loading analytics...</Text>
+          </View>
+        ) : fullyLocked ? (
           <LockedAnalytics planName={currentPlan?.name ?? 'Premium'} />
         ) : errorMessage ? (
           <ErrorStateCard
@@ -196,13 +201,9 @@ export default function ProfileAnalyticsScreen() {
             ctaLabel="Try Again"
             onPress={onRefresh}
           />
-        ) : loading ? (
-          <View style={styles.loadingWrap}>
-            <ActivityIndicator size="large" color={Colors.primary} />
-            <Text style={styles.loadingText}>Loading analytics...</Text>
-          </View>
         ) : (
           <>
+            {premiumView ? (
             <View style={styles.section}>
               <View style={styles.sectionTitleRow}>
                 <Text style={[styles.sectionTitle, styles.sectionTitleInRow]}>
@@ -212,29 +213,19 @@ export default function ProfileAnalyticsScreen() {
                   <ActivityIndicator size="small" color={Colors.primary} />
                 ) : null}
               </View>
-              <View style={styles.periodRow}>
-                {PERIOD_OPTIONS.map((option) => (
-                  <TouchableOpacity
-                    key={option}
-                    style={[
-                      styles.periodChip,
-                      period === option && styles.periodChipActive,
-                    ]}
-                    onPress={() => setPeriod(option)}
-                    activeOpacity={0.8}
-                  >
-                    <Text
-                      style={[
-                        styles.periodChipText,
-                        period === option && styles.periodChipTextActive,
-                      ]}
-                    >
-                      {option} days
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <SegmentedControl<PeriodKey>
+                options={PERIOD_SEGMENTS}
+                value={String(period) as PeriodKey}
+                onChange={(next) => setPeriod(Number(next) as PeriodDays)}
+              />
             </View>
+            ) : (
+              <View style={styles.section}>
+                <Text style={styles.freeWindowNote}>
+                  All-time totals; posts and followers also show the last {data.periodDays} days.
+                </Text>
+              </View>
+            )}
 
             {/* Dim (don't unmount) the dashboard while a refetch is in flight. */}
             <View style={fetching ? styles.contentFetching : null}>
@@ -242,7 +233,7 @@ export default function ProfileAnalyticsScreen() {
               <Text style={styles.sectionTitle}>Posts</Text>
               <View style={styles.kpiGrid}>
                 <KpiCard icon={<CalendarClock size={16} color={Colors.primary} />} label="Total Posts" value={formatNumber(data.totalPosts)} />
-                <KpiCard icon={<TrendingUp size={16} color={Colors.primary} />} label={`Posted (${period}d)`} value={formatNumber(data.postsThisPeriod)} />
+                <KpiCard icon={<TrendingUp size={16} color={Colors.primary} />} label={`Posted (${shownPeriod}d)`} value={formatNumber(data.postsThisPeriod)} />
                 <KpiCard icon={<BarChart3 size={16} color={Colors.primary} />} label="Recurring" value={formatNumber(data.recurringPosts)} />
                 <KpiCard icon={<CalendarClock size={16} color={Colors.primary} />} label="Upcoming" value={formatNumber(data.upcomingEvents)} />
               </View>
@@ -262,12 +253,14 @@ export default function ProfileAnalyticsScreen() {
               <Text style={styles.sectionTitle}>Profile</Text>
               <View style={styles.kpiGrid}>
                 <KpiCard icon={<Users size={16} color={Colors.accentDark} />} label="Followers" value={formatNumber(data.followerTotal)} />
-                <KpiCard icon={<TrendingUp size={16} color={Colors.accentDark} />} label={`New (${period}d)`} value={formatNumber(data.followersThisPeriod)} />
+                <KpiCard icon={<TrendingUp size={16} color={Colors.accentDark} />} label={`New (${shownPeriod}d)`} value={formatNumber(data.followersThisPeriod)} />
                 <KpiCard icon={<Star size={16} color={Colors.accentDark} />} label="Avg Rating" value={data.reviewCount > 0 ? data.averageRating.toFixed(1) : '—'} />
                 <KpiCard icon={<UserRound size={16} color={Colors.accentDark} />} label="Profile Health" value={`${data.profileCompleteness}%`} />
               </View>
             </View>
 
+            {premiumView ? (
+            <>
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Top Events</Text>
               <View style={styles.card}>
@@ -275,12 +268,15 @@ export default function ProfileAnalyticsScreen() {
                   <Text style={styles.emptyInlineText}>No event data yet.</Text>
                 ) : (
                   data.topEvents.map((event, index) => (
-                    <View
+                    <TouchableOpacity
                       key={event.id}
                       style={[
                         styles.topEventRow,
                         index < data.topEvents.length - 1 && styles.topEventSeparator,
                       ]}
+                      onPress={() => router.push(`/business/event-insights/${event.id}` as never)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${event.title}: open event insights`}
                     >
                       <View style={styles.topEventMain}>
                         <Text style={styles.topEventTitle} numberOfLines={1}>
@@ -296,11 +292,23 @@ export default function ProfileAnalyticsScreen() {
                           {event.conversion.toFixed(1)}%
                         </Text>
                       </View>
-                    </View>
+                    </TouchableOpacity>
                   ))
                 )}
               </View>
             </View>
+
+            {data.interactionTotals ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Taps ({shownPeriod}d)</Text>
+                <View style={styles.kpiGrid}>
+                  <KpiCard icon={<Share2 size={16} color={Colors.primary} />} label="Shares" value={formatNumber(data.interactionTotals.share)} />
+                  <KpiCard icon={<CalendarPlus size={16} color={Colors.primary} />} label="Calendar adds" value={formatNumber(data.interactionTotals.calendar)} />
+                  <KpiCard icon={<MapPin size={16} color={Colors.primary} />} label="Directions" value={formatNumber(data.interactionTotals.directions)} />
+                  <KpiCard icon={<Ticket size={16} color={Colors.primary} />} label="Ticket link" value={formatNumber(data.interactionTotals.ticket)} />
+                </View>
+              </View>
+            ) : null}
 
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Engagement Trend</Text>
@@ -309,35 +317,24 @@ export default function ProfileAnalyticsScreen() {
                   <Text style={styles.emptyInlineText}>No trend data available yet.</Text>
                 ) : (
                   <>
-                    <View style={styles.trendBars}>
-                      {data.trend.slice(-10).map((point) => (
-                        <View key={point.date} style={styles.trendBarWrap}>
-                          <Text style={styles.trendBarValue}>
-                            {formatNumber(point.views)}
-                          </Text>
-                          <View
-                            style={[
-                              styles.trendBar,
-                              {
-                                // Zero stays visibly zero (a hairline nub on the
-                                // axis) instead of an 8pt bar that fakes data.
-                                height:
-                                  point.views === 0
-                                    ? 2
-                                    : Math.max(8, (point.views / trendMax) * 84),
-                              },
-                            ]}
-                          />
-                        </View>
-                      ))}
+                    <View style={styles.trendChart}>
+                      <TrendBars points={trendPoints} metricLabel="views" color={Colors.primary} />
                     </View>
-                    <Text style={styles.trendCaption}>
-                      Last {Math.min(10, data.trend.length)} periods from top events
-                    </Text>
+                    <Text style={styles.trendCaption}>Daily views, last {data.trend.length} days</Text>
                   </>
                 )}
               </View>
             </View>
+            </>
+            ) : (
+              <View style={styles.section}>
+                <ProUpsellCard
+                  title="More with Pro"
+                  description="Each event's own counts stay free in its insights."
+                  items={['Your top events', 'Daily engagement trend', 'Shares, calendar adds and directions', 'A custom time window']}
+                />
+              </View>
+            )}
             </View>
           </>
         )}
@@ -391,7 +388,7 @@ function LockedAnalytics({ planName }: { planName: string }) {
           </View>
           <Text style={styles.lockedTitle}>Unlock analytics for your business</Text>
           <Text style={styles.lockedDescription}>
-            Upgrade to premium to see real views, saves, RSVPs, and follower
+            Upgrade to Pro to see real views, saves, RSVPs, and follower
             growth for your posts and profile.
           </Text>
           <TouchableOpacity
@@ -399,7 +396,7 @@ function LockedAnalytics({ planName }: { planName: string }) {
             onPress={() => router.push('/premium/plans' as never)}
             activeOpacity={0.85}
           >
-            <Text style={styles.lockedButtonText}>Upgrade to Premium</Text>
+            <Text style={styles.lockedButtonText}>View Pro plans</Text>
           </TouchableOpacity>
           <Text style={styles.lockedFootnote}>Current plan: {planName}</Text>
         </View>
@@ -452,22 +449,8 @@ function ErrorStateCard({
   );
 }
 
-function KpiCard({
-  icon,
-  label,
-  value,
-}: {
-  icon: ReactNode;
-  label: string;
-  value: string;
-}) {
-  return (
-    <View style={styles.kpiCard}>
-      <View style={styles.kpiIcon}>{icon}</View>
-      <Text style={styles.kpiValue}>{value}</Text>
-      <Text style={styles.kpiLabel}>{label}</Text>
-    </View>
-  );
+function KpiCard({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+  return <KpiTile icon={icon} label={label} value={value} style={styles.kpiCard} />;
 }
 
 function getProfileCompleteness(
@@ -541,34 +524,6 @@ const styles = StyleSheet.create({
   contentFetching: {
     opacity: 0.6,
   },
-  periodRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-  },
-  periodChip: {
-    flex: 1,
-    alignItems: 'center',
-    borderRadius: BorderRadius.md,
-    paddingVertical: 10,
-    backgroundColor: Colors.background.secondary,
-    borderWidth: 1,
-    borderColor: Colors.border.light,
-  },
-  periodChipActive: {
-    backgroundColor: Colors.primarySoft,
-    borderColor: alpha(Colors.primary, 0.35),
-  },
-  periodChipText: {
-    color: Colors.text.secondary,
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-  },
-  periodChipTextActive: {
-    color: Colors.primary,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-  },
   kpiGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -576,34 +531,6 @@ const styles = StyleSheet.create({
   },
   kpiCard: {
     width: '48.5%',
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.md,
-    borderWidth: 1,
-    borderColor: Colors.border.light,
-    ...Shadows.sm,
-  },
-  kpiIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.primarySoft,
-    marginBottom: 10,
-  },
-  kpiValue: {
-    fontSize: 20,
-    color: Colors.text.primary,
-    fontFamily: Typography.displayFontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-  },
-  kpiLabel: {
-    marginTop: 2,
-    color: Colors.text.tertiary,
-    fontSize: Typography.sizes.xs,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
   },
   card: {
     backgroundColor: Colors.surface,
@@ -649,6 +576,11 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
   },
+  freeWindowNote: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.text.tertiary,
+    lineHeight: 18,
+  },
   trendBars: {
     paddingHorizontal: Spacing.md,
     paddingTop: Spacing.md,
@@ -678,6 +610,10 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
     color: Colors.text.tertiary,
+  },
+  trendChart: {
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.md,
   },
   trendCaption: {
     paddingHorizontal: Spacing.md,

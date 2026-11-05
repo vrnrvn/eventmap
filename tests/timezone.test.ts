@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   dateKeyInZone,
+  describeEventDateTime,
   describeEventTime,
   formatOffset,
   getZoneOffsetMinutes,
@@ -130,5 +131,31 @@ describe('describeEventTime', () => {
 
   it('is empty for unparseable input', () => {
     expect(describeEventTime('nope', 'Europe/Lisbon', 'UTC')).toEqual({ primary: '', secondary: null, differs: false });
+  });
+});
+
+describe('describeEventDateTime', () => {
+  const now = new Date('2026-11-04T12:00:00Z');
+  const instant = '2026-11-06T19:00:00Z'; // 7 pm Lisbon (WET), 2 pm New York
+
+  it('shows the event-zone date and a your-time line when zones differ', () => {
+    const r = describeEventDateTime(instant, 'Europe/Lisbon', 'America/New_York', 'en-US', now);
+    expect(r.primary.startsWith('Fri, Nov 6, 7:00 PM ')).toBe(true);
+    expect(r.secondary).toBe('2:00 PM your time');
+  });
+
+  it('has no second line when zones agree or the event has no zone', () => {
+    expect(describeEventDateTime(instant, 'Europe/Lisbon', 'Europe/Lisbon', 'en-US', now)).toEqual({
+      primary: 'Fri, Nov 6, 7:00 PM',
+      secondary: null,
+    });
+    expect(describeEventDateTime(instant, null, 'America/New_York', 'en-US', now)).toEqual({
+      primary: 'Fri, Nov 6, 2:00 PM',
+      secondary: null,
+    });
+  });
+
+  it('adds the year only when it differs', () => {
+    expect(describeEventDateTime('2027-01-08T19:00:00Z', 'Europe/Lisbon', 'Europe/Lisbon', 'en-US', now).primary).toContain('2027');
   });
 });

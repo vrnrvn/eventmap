@@ -1,0 +1,21 @@
+# Calendar smoke: maestro test .maestro/calendar.yaml
+# Needs a device/simulator with the app installed and an attendee account
+# already signed in (user mode). Not run in CI; written 2026-11-04 alongside
+# scripts/calendar-visual.mjs, which covers the same path on the web build.
+
+appId: com.eventmap.app
+---
+- launchApp
+- tapOn: "Profile"
+- tapOn: "Calendar"
+- assertVisible: "Month"
+- assertVisible: "Agenda"
+- assertVisible: "Going"
+- tapOn: "Next month"
+- tapOn: "Previous month"
+- tapOn: "Go to today"
+- assertVisible: "Today"
+- tapOn: "Agenda view"
+- assertVisible:
+    text: "Show 8 more weeks|Nothing in the next 8 weeks"
+- tapOn: "Month view"

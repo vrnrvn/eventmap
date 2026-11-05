@@ -31,7 +31,8 @@ function throwBlockError(error: { code?: string }): never {
   throw error;
 }
 
-export type GoingEventsScope = 'upcoming' | 'past' | 'interested';
+/** 'requested' (pending host approval) needs 20261104120000; gate on AttendanceCounts.requested. */
+export type GoingEventsScope = 'upcoming' | 'past' | 'interested' | 'requested';
 
 /**
  * RPCs shipped in prepared-but-unapplied migrations aren't in the generated
@@ -53,6 +54,11 @@ export type AttendanceCounts = {
   saved: number;
   /** Owner-only; 0 for other viewers. */
   interested: number;
+  /**
+   * Owner-only pending approval requests; null when the backend predates
+   * 20261104120000 (the 'requested' scope isn't available then).
+   */
+  requested: number | null;
 };
 
 export const socialService = {
@@ -209,12 +215,14 @@ export const socialService = {
       attended_count?: number;
       saved_count?: number;
       interested_count?: number;
+      requested_count?: number;
     };
     return {
       upcoming: Number(raw.upcoming_count ?? 0),
       attended: Number(raw.attended_count ?? 0),
       saved: Number(raw.saved_count ?? 0),
       interested: Number(raw.interested_count ?? 0),
+      requested: raw.requested_count === undefined ? null : Number(raw.requested_count),
     };
   },
 

@@ -153,13 +153,16 @@ function foldIcsLine(line: string): string {
   return parts.join('\r\n');
 }
 
-/**
- * Minimal valid single-event ICS. With a zone, dates are local + TZID (Apple,
- * Google and Outlook resolve IANA TZIDs without a VTIMEZONE block); otherwise
- * UTC basic format (YYYYMMDDTHHMMSSZ). An invalid/missing end falls back to
- * start + 1 hour.
- */
-export function buildEventIcs(input: IcsEventInput): string {
+const ICS_HEADER = [
+  'BEGIN:VCALENDAR',
+  'VERSION:2.0',
+  'PRODID:-//EventMap//EventMap//EN',
+  'CALSCALE:GREGORIAN',
+  'METHOD:PUBLISH',
+];
+
+/** The VEVENT block for one event (unfolded lines). Throws on an invalid start. */
+function buildVEventLines(input: IcsEventInput, stamp: string): string[] {
   const start = new Date(input.startIso);
   if (Number.isNaN(start.getTime())) {
     throw new Error('Invalid event start date');
@@ -168,16 +171,7 @@ export function buildEventIcs(input: IcsEventInput): string {
   if (Number.isNaN(end.getTime()) || end.getTime() <= start.getTime()) {
     end = new Date(start.getTime() + 60 * 60 * 1000);
   }
-  const lines = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//EventMap//EventMap//EN',
-    'CALSCALE:GREGORIAN',
-    'METHOD:PUBLISH',
-    'BEGIN:VEVENT',
-    `UID:event-${input.id}@eventmap.pro`,
-    `DTSTAMP:${padUtcGcal(new Date().toISOString())}`,
-  ];
+  const lines = ['BEGIN:VEVENT', `UID:event-${input.id}@eventmap.pro`, `DTSTAMP:${stamp}`];
   const tz = input.timezone && isValidTimeZone(input.timezone) ? input.timezone : null;
   if (tz) {
     lines.push(
@@ -191,6 +185,29 @@ export function buildEventIcs(input: IcsEventInput): string {
   if (input.recurrence) lines.push(input.recurrence);
   if (input.description) lines.push(`DESCRIPTION:${escapeIcsText(input.description)}`);
   if (input.address) lines.push(`LOCATION:${escapeIcsText(input.address)}`);
-  lines.push(`URL:${getEventWebUrl(input.id)}`, 'END:VEVENT', 'END:VCALENDAR');
+  lines.push(`URL:${getEventWebUrl(input.id)}`, 'END:VEVENT');
+  return lines;
+}
+
+/**
+ * Minimal valid single-event ICS. With a zone, dates are local + TZID (Apple,
+ * Google and Outlook resolve IANA TZIDs without a VTIMEZONE block); otherwise
+ * UTC basic format (YYYYMMDDTHHMMSSZ). An invalid/missing end falls back to
+ * start + 1 hour.
+ */
+export function buildEventIcs(input: IcsEventInput): string {
+  return buildCalendarIcs([input]);
+}
+
+/**
+ * One VCALENDAR holding several VEVENTs (the personal calendar export). Each
+ * event follows the same rules as `buildEventIcs`; an empty list still yields
+ * a valid, empty calendar.
+ */
+export function buildCalendarIcs(inputs: readonly IcsEventInput[]): string {
+  const stamp = padUtcGcal(new Date().toISOString());
+  const lines = [...ICS_HEADER];
+  for (const input of inputs) lines.push(...buildVEventLines(input, stamp));
+  lines.push('END:VCALENDAR');
   return lines.map(foldIcsLine).join('\r\n') + '\r\n';
 }

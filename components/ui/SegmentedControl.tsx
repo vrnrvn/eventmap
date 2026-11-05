@@ -38,6 +38,8 @@ export function SegmentedControl<T extends string>({ options, value, onChange, s
             activeOpacity={0.8}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
+            // react-native-web drops accessibilityState; the aria prop reaches the DOM.
+            aria-selected={active}
             accessibilityLabel={option.accessibilityLabel ?? option.label}
           >
             <Text style={[styles.text, active && styles.textActive]} numberOfLines={1}>

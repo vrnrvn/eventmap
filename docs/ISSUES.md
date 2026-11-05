@@ -910,3 +910,16 @@ Client:
 `event_sections`, recurrence weekdays/count + per-occurrence overrides, real insights
 with server-side tier gating. **Cross-cutting**: co-hosts need `business_members` and
 touch every `user_is_event_host` check.
+
+# Calendar Phase B foundation and a shared-cluster safety note (2026-11-04)
+
+- [x] Shared DB state observed (read-only) on 2026-11-04: `supabase_migrations.schema_migrations` lists every `20261103*` file, so the "prepared, not applied" labels above for that set are stale.
+- [ ] **[DB]** `20261104110000_user_calendar_rpc.sql` (`get_user_calendar`): prepared, validated on a scratch copy with `scripts/test-calendar.sql`, NOT applied. The calendar screen falls back to the existing list RPCs until it is. Details: `docs/ANALYTICS_AND_CALENDAR_PLAN.md` §2.7.
+- **Safety:** on this Postgres 17 build, running `SET LOCAL role anon` and then calling a `pg_temp` function in a psql suite segfaulted the backend. Postgres then crash-restarted every connection in the cluster, shared DB included (16:41:06 UTC, about 0.4 s, no data loss). Check grants with `has_function_privilege('anon', …)` instead of switching to `anon` in SQL suites.
+- [ ] **[DB]** `20261104120000_going_events_requested_scope.sql` (requested scope + `timezone` in going rows, `requested_count`): prepared, validated on scratch, NOT applied.
+- [ ] `scripts/test-attendance-rpcs.sql` no longer runs: its fixture inserts RSVPs that the `guard_rsvp_approval` trigger (20261103170000) rejects with `event_closed`. This predates the calendar work; the suite needs its fixtures updated.
+- **Shared ports:** another session runs an isolated stack on 3997 / 54397 (scratch `eventmap_scratch_elm_calb2`). Check `lsof` before starting a private PostgREST or proxy; a proxy started on a taken REST port routes to someone else's scratch DB.
+- [ ] **[DB]** `20261104100000_event_insights.sql` (event insights, tiered business analytics) and `20261104130000_saved_events_timezone.sql`: prepared, validated on scratch, NOT applied. Until then the insights screen falls back to host-overview counts and the business analytics screen keeps its client-side lock.
+- Seed note: the demo host (`host@example.test`) is also an admin, and admins get premium analytics payloads. Clear `is_admin` inside a test transaction to check the free tier.
+- [ ] **[DB]** `20261104090000_event_interactions_and_rsvp_history.sql` (tap tracking, RSVP history trigger): prepared, validated on scratch, NOT applied. Apply it before `20261104100000`. Taps from Event Detail are silently dropped until then.
+- **Ports again:** another session's stack (`eventmap_scratch_elm_analyticsb_1104`) took 3981 / 54381 between passes. Always re-check with `lsof` right before `docker run`; the scripts accept `STATIC_PORT` / `CDP_PORT` / `PROXY`.

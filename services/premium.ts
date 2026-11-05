@@ -71,6 +71,7 @@ const PLANS: PremiumPlan[] = [
     features: [
       'Up to 2 events per month',
       'Up to 5 photos per event',
+      'Event insights: views, saves and RSVPs',
       'Basic map marker',
       'Standard placement',
     ],
@@ -93,7 +94,7 @@ const PLANS: PremiumPlan[] = [
       'Up to 30 events per month',
       'Up to 15 photos per event',
       'Recurring events',
-      'Analytics dashboard',
+      'Advanced analytics: trends, RSVP timing, audience',
       'Highlighted map markers',
       'Boosted placement',
       'Priority support',
@@ -239,39 +240,4 @@ export const premiumService = {
     return { success: true };
   },
 
-  /**
-   * SAMPLE DATA ONLY — view/share tracking does not exist in the schema yet.
-   * TODO(schema): add an event_views/event_analytics table, then replace this
-   * with real queries. Callers must label this output as sample data.
-   */
-  async getSampleEventAnalytics(eventId: string, days = 30) {
-    const dailyData = Array.from({ length: days }, (_, i) => {
-      const date = new Date();
-      date.setDate(date.getDate() - (days - 1 - i));
-      const baseViews = Math.floor(Math.random() * 50) + 10;
-      return {
-        date: date.toISOString().split('T')[0],
-        views: baseViews,
-        saves: Math.floor(baseViews * Math.random() * 0.2),
-        rsvps: Math.floor(baseViews * Math.random() * 0.1),
-      };
-    });
-    const totals = dailyData.reduce(
-      (acc, d) => ({
-        views: acc.views + d.views,
-        saves: acc.saves + d.saves,
-        rsvps: acc.rsvps + d.rsvps,
-      }),
-      { views: 0, saves: 0, rsvps: 0 }
-    );
-    return {
-      totalViews: totals.views,
-      uniqueViews: Math.floor(totals.views * 0.7),
-      totalSaves: totals.saves,
-      totalRsvps: totals.rsvps,
-      mapClicks: Math.floor(totals.views * 0.3),
-      shareClicks: Math.floor(totals.views * 0.05),
-      dailyData,
-    };
-  },
 };

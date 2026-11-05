@@ -32,6 +32,8 @@ export function extrasToUpdates(extras: EventExtras): Partial<Event> {
   return u;
 }
 
+export type EventInteractionKind = 'share' | 'ticket' | 'calendar' | 'directions';
+
 export const eventsService = {
   /**
    * One page of ranked events around a point. `hasMore` is inferred from a
@@ -66,6 +68,20 @@ export const eventsService = {
 
     if (error) throw error;
     return data as EventDetails | null;
+  },
+
+  /**
+   * Records a share / ticket / calendar / directions tap for host insights
+   * (track_event_interaction, 20261104090000). Fire-and-forget: never throws,
+   * and is a no-op while that migration isn't applied. The server dedupes to
+   * one tap per person, kind and day and ignores the host's own taps.
+   */
+  trackEventInteraction(eventId: string, kind: EventInteractionKind): void {
+    const rpc = supabase.rpc as unknown as (
+      fn: string,
+      args: Record<string, unknown>
+    ) => PromiseLike<{ error: unknown }>;
+    void Promise.resolve(rpc('track_event_interaction', { p_event_id: eventId, p_kind: kind })).catch(() => {});
   },
 
   async trackEventView(eventId: string): Promise<void> {

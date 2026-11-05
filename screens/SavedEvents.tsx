@@ -17,7 +17,8 @@ import { notify } from '@/utils/notify';
 import { Button } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { EventListItem } from '@/components/EventListItem';
-import { formatDistance, formatEventDate } from '@/utils/formatEventWhen';
+import { formatDistance } from '@/utils/formatEventWhen';
+import { describeEventDateTime } from '@/utils/timezone';
 import { RankedEvent } from '@/types/database';
 import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
 import {
@@ -116,7 +117,11 @@ export default function SavedEvents() {
     const cancelled = event.status === 'cancelled';
     const ended = !!event.has_ended;
     const when = ended ? event.start_datetime : event.next_start_datetime || event.start_datetime;
+    // Event-zone time with a "your time" line when the viewer's clock differs
+    // (rows carry `timezone` from 20261104130000; legacy rows render as before).
+    const display = describeEventDateTime(when, event.timezone);
     const metaLines: string[] = [];
+    if (display.secondary && !ended) metaLines.push(display.secondary);
     if (event.distance_km > 0) {
       metaLines.push(`${formatDistance(event.distance_km)} away`);
     }
@@ -130,7 +135,7 @@ export default function SavedEvents() {
         <EventListItem
           title={event.title}
           subtitle={event.business_name}
-          dateLine={`${formatEventDate(when)}${event.is_recurring && !ended ? ' · repeats' : ''}`}
+          dateLine={`${display.primary}${event.is_recurring && !ended ? ' · repeats' : ''}`}
           thumbnailUrl={event.cover_image_url}
           dimmed={ended || cancelled}
           badge={
@@ -157,7 +162,7 @@ export default function SavedEvents() {
             </TouchableOpacity>
           }
           onPress={() => router.push(`/event/${event.id}` as never)}
-          accessibilityLabel={`${event.title}, ${formatEventDate(when)}${ended ? ', ended' : ''}`}
+          accessibilityLabel={`${event.title}, ${display.primary}${display.secondary ? `, ${display.secondary}` : ''}${ended ? ', ended' : ''}`}
         />
       </View>
     );

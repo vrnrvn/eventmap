@@ -308,3 +308,41 @@ export function describeEventTime(
     : ` (${formatInZone(date, viewerTz, { month: 'short', day: 'numeric' }, locale)})`;
   return { primary, secondary: `${viewerTime} your time${dayNote}`, differs: true };
 }
+
+export type EventDateTimeDisplay = {
+  /** "Fri, Nov 6, 7:00 PM" in the event zone, with the zone abbreviation when the viewer's clock differs. */
+  primary: string;
+  /** "2:00 PM your time (Nov 6)" when the viewer's clock differs; otherwise null. */
+  secondary: string | null;
+};
+
+/**
+ * Date + time line for list rows (Saved, Joined): same rule as
+ * `describeEventTime`, with the date included. Legacy events (no zone)
+ * render in the viewer's zone with no second line.
+ */
+export function describeEventDateTime(
+  value: string | Date,
+  eventTz: string | null | undefined,
+  viewerTz: string = getDeviceTimeZone(),
+  locale?: string,
+  now: Date = new Date()
+): EventDateTimeDisplay {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return { primary: '', secondary: null };
+  const zone = eventTz && isValidTimeZone(eventTz) ? eventTz : viewerTz;
+  const sameYear = dateKeyInZone(date, zone).slice(0, 4) === dateKeyInZone(now, zone).slice(0, 4);
+  const opts: Intl.DateTimeFormatOptions = {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: sameYear ? undefined : 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  };
+  const when = describeEventTime(date, eventTz, viewerTz, locale);
+  const base = formatInZone(date, zone, opts, locale);
+  return when.differs
+    ? { primary: `${base} ${zoneAbbreviation(zone, date, locale)}`, secondary: when.secondary }
+    : { primary: base, secondary: null };
+}

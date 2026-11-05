@@ -379,12 +379,27 @@ export default function ProfileScreen() {
             )}
           </View>
 
+          {!isBizMode ? (
+            <View style={styles.quickLinks}>
+              <QuickLink
+                icon={<CalendarDays size={15} color={Palette.primary} />}
+                label="Calendar"
+                onPress={() => router.push('/calendar' as never)}
+              />
+            </View>
+          ) : null}
+
           {isBizMode && userBusiness ? (
             <View style={styles.quickLinks}>
               <QuickLink
                 icon={<Eye size={15} color={Palette.primary} />}
-                label="View public profile"
+                label="Public profile"
                 onPress={() => router.push(`/business/${userBusiness.id}` as never)}
+              />
+              <QuickLink
+                icon={<CalendarDays size={15} color={Palette.primary} />}
+                label="Calendar"
+                onPress={() => router.push('/calendar' as never)}
               />
             </View>
           ) : null}
@@ -613,7 +628,7 @@ export default function ProfileScreen() {
             <View style={styles.upgradeCopy}>
               <Text style={styles.upgradeTitle}>Upgrade to Premium</Text>
               <Text style={styles.upgradeSub}>
-                Boosted placement, analytics, recurring events, and more
+                Boosted placement, advanced analytics, recurring events, and more
               </Text>
             </View>
             <ChevronRight size={18} color={Colors.premium} />

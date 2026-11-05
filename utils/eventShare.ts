@@ -1,6 +1,6 @@
 import { Linking, Platform, Share } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
-import { buildEventIcs, getEventWebUrl, type IcsEventInput } from '@/utils/eventIcs';
+import { buildCalendarIcs, buildEventIcs, getEventWebUrl, type IcsEventInput } from '@/utils/eventIcs';
 
 // Re-exported so existing callers keep importing from one place.
 export {
@@ -59,9 +59,18 @@ export async function shareEventLink(opts: {
  * Throws on failure (callers surface a toast); a dismissed share sheet resolves.
  */
 export async function shareEventIcs(input: IcsEventInput): Promise<void> {
-  const ics = buildEventIcs(input);
-  const fileName = `event-${input.id}.ics`;
+  await shareIcsFile(buildEventIcs(input), `event-${input.id}.ics`, input.title);
+}
 
+/**
+ * Shares a multi-event .ics (the personal calendar export) through the same
+ * platform paths as `shareEventIcs`.
+ */
+export async function shareCalendarIcs(inputs: readonly IcsEventInput[], title = 'My EventMap calendar'): Promise<void> {
+  await shareIcsFile(buildCalendarIcs(inputs), 'eventmap-calendar.ics', title);
+}
+
+async function shareIcsFile(ics: string, fileName: string, title: string): Promise<void> {
   if (Platform.OS === 'web') {
     const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -85,7 +94,7 @@ export async function shareEventIcs(input: IcsEventInput): Promise<void> {
   });
 
   if (Platform.OS === 'ios') {
-    await Share.share({ title: input.title, url: fileUri });
+    await Share.share({ title, url: fileUri });
     return;
   }
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { queryKeys } from '@/hooks/queryKeys';
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
 import {
@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { EventListItem } from '@/components/EventListItem';
 import { formatEventDate, formatEventWhen } from '@/utils/formatEventWhen';
+import { describeEventDateTime } from '@/utils/timezone';
 import {
   ArrowLeft,
   CalendarDays,
@@ -44,10 +45,25 @@ export default function JoinedEvents() {
   const { user } = useAuth();
   const params = useLocalSearchParams<{ tab?: string }>();
   const initialScope: GoingEventsScope =
-    params.tab === 'past' || params.tab === 'interested' ? params.tab : 'upcoming';
+    params.tab === 'past' || params.tab === 'interested' || params.tab === 'requested' ? params.tab : 'upcoming';
   const [scope, setScope] = useState<GoingEventsScope>(initialScope);
   const [chatUnread, setChatUnread] = useState<Record<string, number>>({});
   const userId = user?.id;
+
+  // The Requests tab only appears when the backend supports the scope
+  // (requested_count present, 20261104120000) and there is something in it,
+  // or when deep-linked straight to it.
+  const countsQuery = useQuery({
+    queryKey: queryKeys.attendanceCounts(userId),
+    enabled: !!userId,
+    queryFn: () => socialService.getUserAttendanceCounts(userId!),
+    staleTime: 30_000,
+  });
+  const requestedCount = countsQuery.data?.requested ?? null;
+  const showRequests = (requestedCount !== null && requestedCount > 0) || scope === 'requested';
+  const tabs: GoingEventsScope[] = showRequests
+    ? ['upcoming', 'requested', 'interested', 'past']
+    : ['upcoming', 'interested', 'past'];
 
   // One cached, paged query per tab. React Query gives us request de-duping,
   // stale-while-revalidate on focus and tab switches, and page merging — the
@@ -107,6 +123,7 @@ export default function JoinedEvents() {
     const noun = items.length === 1 ? 'event' : 'events';
     if (scope === 'upcoming') return `${n} upcoming ${noun}`;
     if (scope === 'interested') return `${n} ${noun} you're interested in`;
+    if (scope === 'requested') return `${n} ${items.length === 1 ? 'request' : 'requests'} waiting for approval`;
     return `${n} attended ${noun}`;
   }, [loaded, items.length, query.hasNextPage, scope]);
 
@@ -115,16 +132,28 @@ export default function JoinedEvents() {
       const when = scope === 'past' ? item.start_datetime : item.next_start_datetime || item.start_datetime;
       const live = scope !== 'past' && isEventInProgress(item);
       const unread = chatUnread[item.id] ?? 0;
+      // Upcoming rows: event-zone time plus "your time" when the viewer's
+      // clock differs (rows carry `timezone` from 20261104120000).
+      const zoned = item.timezone ? describeEventDateTime(when, item.timezone) : null;
       const dateLine =
-        (scope === 'past' ? formatEventDate(when) : formatEventWhen(when)) +
-        (item.is_recurring && scope !== 'past' ? ' · repeats' : '');
+        (scope === 'past' ? formatEventDate(when) : zoned && zoned.secondary ? zoned.primary : formatEventWhen(when)) +
+        // The repeat icon already marks series; skip the suffix on the longer zoned line.
+        (item.is_recurring && scope !== 'past' && !zoned?.secondary ? ' · repeats' : '');
+      const zoneLine = scope !== 'past' && zoned?.secondary ? [zoned.secondary] : undefined;
       return (
         <EventListItem
           title={item.title}
           subtitle={item.business_name}
           dateLine={dateLine}
+          metaLines={zoneLine}
           thumbnailUrl={item.cover_image_url}
-          badge={live ? { label: 'LIVE', tone: 'success' } : null}
+          badge={
+            scope === 'requested'
+              ? { label: 'Pending', tone: 'primary' }
+              : live
+                ? { label: 'LIVE', tone: 'success' }
+                : null
+          }
           dateIcon={
             item.is_recurring ? (
               <Repeat size={12} color={Colors.text.tertiary} />
@@ -192,6 +221,8 @@ export default function JoinedEvents() {
             ? 'Nothing coming up'
             : scope === 'interested'
               ? 'No interested events'
+              : scope === 'requested'
+                ? 'No pending requests'
               : 'No past events yet'}
         </Text>
         <Text style={styles.emptyText}>
@@ -199,6 +230,8 @@ export default function JoinedEvents() {
             ? 'Events you RSVP to as going will show up here.'
             : scope === 'interested'
               ? 'Mark events as interested to keep an eye on them here.'
+              : scope === 'requested'
+                ? 'When a host approves or declines your request, it leaves this list.'
               : 'Once an event you joined is over, it moves here.'}
         </Text>
         {scope !== 'past' ? (
@@ -229,11 +262,20 @@ export default function JoinedEvents() {
           <Text style={styles.headerTitle}>Events Joined</Text>
           <Text style={styles.headerSubtitle}>{subtitle}</Text>
         </View>
-        <View style={styles.headerSpacer} />
+        <TouchableOpacity
+          style={styles.headerSpacer}
+          onPress={() => router.push('/calendar' as never)}
+          activeOpacity={0.7}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel="Open calendar"
+        >
+          <CalendarDays size={22} color={Colors.text.primary} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.segment} accessibilityRole="tablist">
-        {(['upcoming', 'interested', 'past'] as GoingEventsScope[]).map((key) => {
+        {tabs.map((key) => {
           const active = key === scope;
           return (
             <TouchableOpacity
@@ -246,7 +288,13 @@ export default function JoinedEvents() {
               hitSlop={{ top: 6, bottom: 6 }}
             >
               <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                {key === 'upcoming' ? 'Going' : key === 'interested' ? 'Interested' : 'Attended'}
+                {key === 'upcoming'
+                  ? 'Going'
+                  : key === 'interested'
+                    ? 'Interested'
+                    : key === 'requested'
+                      ? `Requests${requestedCount ? ` ${requestedCount}` : ''}`
+                      : 'Attended'}
               </Text>
             </TouchableOpacity>
           );
@@ -315,6 +363,9 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   segment: {
     flexDirection: 'row',
