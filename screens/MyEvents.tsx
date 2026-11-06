@@ -1,4 +1,9 @@
 import { useState, useCallback, useRef } from 'react';
+import { useIsRestoring, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/hooks/queryKeys';
+import { useConnectivity } from '@/services/connectivity';
+import { freshnessNote } from '@/utils/screenState';
+import { FreshnessNote, OfflineState } from '@/components/ui/QueryStates';
 import {
   View,
   Text,
@@ -61,6 +66,9 @@ const partitionUpcoming = (rows: Event[]) => {
   return { live, endedSeries };
 };
 
+/** One tab's first page as kept on the device. */
+type CachedPage = { rows: Event[]; fetched: number };
+
 export default function MyEvents() {
   const insets = useSafeAreaInsets();
   const { hasBusiness, userBusiness } = useApp();
@@ -73,6 +81,10 @@ export default function MyEvents() {
   const [hasMore, setHasMore] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [counts, setCounts] = useState<Map<string, HostEventCounts>>(new Map());
+  const [updatedAt, setUpdatedAt] = useState(0);
+  const [lastLoadFailed, setLastLoadFailed] = useState(false);
+  const queryClient = useQueryClient();
+  const connectivity = useConnectivity();
   const hasLoadedRef = useRef(false);
   // Ignore responses from a superseded load (tab switched mid-flight).
   const requestSeq = useRef(0);
@@ -125,6 +137,22 @@ export default function MyEvents() {
         setLoading(false);
         return;
       }
+      const key = queryKeys.myEvents(userBusiness.id, scope);
+      // First visit to this tab: show the page kept on the device (offline
+      // included), then refresh quietly (docs/OFFLINE_PLAN.md §3.5).
+      if (!hasLoadedRef.current) {
+        const cached = queryClient.getQueryData<CachedPage>(key);
+        if (cached && Array.isArray(cached.rows)) {
+          setEvents(cached.rows);
+          setOffset(cached.fetched);
+          setHasMore(cached.fetched >= PAGE_SIZE);
+          setUpdatedAt(queryClient.getQueryState(key)?.dataUpdatedAt ?? 0);
+          setLoadError(false);
+          setLoading(false);
+          hasLoadedRef.current = true;
+          silent = true;
+        }
+      }
       const seq = ++requestSeq.current;
       if (!silent) setLoading(true);
       try {
@@ -134,9 +162,18 @@ export default function MyEvents() {
         setOffset(fetched);
         setHasMore(fetched >= PAGE_SIZE);
         setLoadError(false);
+        setLastLoadFailed(false);
+        setUpdatedAt(Date.now());
         hasLoadedRef.current = true;
+        queryClient.setQueryData<CachedPage>(key, { rows, fetched });
       } catch {
         if (seq !== requestSeq.current) return;
+        setLastLoadFailed(true);
+        if (silent && hasLoadedRef.current) {
+          // Quiet refresh: keep the list that is already on screen (the
+          // freshness note says it may be out of date).
+          return;
+        }
         setEvents([]);
         setLoadError(true);
       } finally {
@@ -146,7 +183,7 @@ export default function MyEvents() {
         }
       }
     },
-    [userBusiness?.id, scope, fetchPage]
+    [userBusiness?.id, scope, fetchPage, queryClient]
   );
 
   const loadMore = useCallback(async () => {
@@ -163,7 +200,8 @@ export default function MyEvents() {
       setOffset((o) => o + fetched);
       setHasMore(fetched >= PAGE_SIZE);
     } catch {
-      setHasMore(false);
+      // Leave hasMore set so scrolling again retries the page.
+      notify.error("Couldn't load more events.");
     } finally {
       setLoadingMore(false);
     }
@@ -177,15 +215,19 @@ export default function MyEvents() {
 
   // Coming back from Edit / Insights / the event page refreshes quietly;
   // only the very first visit (and a tab switch) shows the skeleton.
+  // Also re-runs once the device cache finishes restoring, so a cold start
+  // straight into this screen picks up the cached page.
+  const isRestoring = useIsRestoring();
   useFocusEffect(
     useCallback(() => {
+      if (isRestoring) return;
       if (hasBusiness && userBusiness) {
         void loadInitial(hasLoadedRef.current);
       } else {
         setEvents([]);
         setLoading(false);
       }
-    }, [hasBusiness, userBusiness?.id, loadInitial])
+    }, [hasBusiness, userBusiness?.id, loadInitial, isRestoring])
   );
 
   const switchScope = (next: Scope) => {
@@ -349,9 +391,18 @@ export default function MyEvents() {
 
   const keyExtractor = useCallback((item: Event) => item.id, []);
 
+  const freshness = freshnessNote({
+    hasData: events.length > 0,
+    dataUpdatedAt: updatedAt,
+    isError: lastLoadFailed,
+    connectivity,
+  });
+
   const ListHeader = useCallback(
     () =>
       hasBusiness ? (
+        <>
+        <FreshnessNote text={freshness} />
         <TouchableOpacity
           style={styles.createCardWrap}
           onPress={() => router.push('/(tabs)/create' as never)}
@@ -375,13 +426,17 @@ export default function MyEvents() {
             <ChevronRight size={18} color="rgba(255,255,255,0.6)" />
           </LinearGradient>
         </TouchableOpacity>
+        </>
       ) : null,
-    [hasBusiness]
+    [hasBusiness, freshness]
   );
 
   const ListEmpty = useCallback(
     () => {
       if (loading || refreshing) return null;
+      if (loadError && connectivity === 'offline') {
+        return <OfflineState onRetry={loadInitial} style={styles.errorState} />;
+      }
       if (loadError) {
         return (
           <ErrorState
@@ -420,7 +475,7 @@ export default function MyEvents() {
         </View>
       );
     },
-    [loading, refreshing, hasBusiness, loadError, loadInitial, scope]
+    [loading, refreshing, hasBusiness, loadError, loadInitial, scope, connectivity]
   );
 
   const ListFooter = useCallback(

@@ -57,7 +57,10 @@ export function buildOpenMapHtml(center: { lat: number; lng: number }, zoom: num
   function emit(data){var message=JSON.stringify(data);if(window.ReactNativeWebView){window.ReactNativeWebView.postMessage(message)}else{window.parent.postMessage(message,'*')}}
   ${MARKER_SCRIPT}
   var map=L.map('map',{zoomControl:false,dragging:${gesturesOn},scrollWheelZoom:${gesturesOn},doubleClickZoom:${gesturesOn},touchZoom:${gesturesOn},boxZoom:${gesturesOn},keyboard:${gesturesOn}}).setView([${lat},${lng}],${safeZoom});
-  L.tileLayer(${JSON.stringify(mapTileUrl)},{maxZoom:${JSON.stringify(mapTileMaxZoom)},attribution:${JSON.stringify(mapTileAttribution)},crossOrigin:true}).addTo(map);
+  var tiles=L.tileLayer(${JSON.stringify(mapTileUrl)},{maxZoom:${JSON.stringify(mapTileMaxZoom)},attribution:${JSON.stringify(mapTileAttribution)},crossOrigin:true}).addTo(map);
+  var tileErrors=0,tilesDown=false;
+  tiles.on('tileerror',function(){tileErrors++;if(!tilesDown&&tileErrors>=3){tilesDown=true;emit({type:'mapUnavailable',reason:'tiles'})}});
+  tiles.on('tileload',function(){tileErrors=0;if(tilesDown){tilesDown=false;emit({type:'mapAvailable'})}});
   window.__map={panTo:function(c){map.panTo([c.lat,c.lng])},setZoom:function(z){map.setZoom(z)}};
   var markers=[];
   // 44x44 hit area with the visible disc centred inside it (see MARKER_SIZE).

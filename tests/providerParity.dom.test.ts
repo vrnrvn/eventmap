@@ -107,6 +107,20 @@ describe('both pages emit the same message types', () => {
   });
 });
 
+describe('both pages report when map imagery is unavailable', () => {
+  it("Leaflet reports failing tiles and recovery", () => {
+    expect(leafletHtml).toContain("'mapUnavailable'");
+    expect(leafletHtml).toContain("'mapAvailable'");
+    expect(leafletHtml).toContain("'tileerror'");
+  });
+
+  it('Google reports an SDK that fails to load or is refused', () => {
+    expect(googleHtml).toContain("'mapUnavailable'");
+    expect(googleHtml).toContain('gm_authFailure');
+    expect(googleHtml).toContain("onerror=\"window.__mapUnavailable('script')\"");
+  });
+});
+
 describe('marker artwork is identical across providers', () => {
   /** Pull the in-page builder out of a generated document. */
   function markerSvgFrom(html: string): (slug: string, active: boolean) => string {

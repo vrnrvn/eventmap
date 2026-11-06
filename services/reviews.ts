@@ -3,7 +3,7 @@
  * Handles business reviews (1-5 stars, text, business responses).
  */
 
-import { supabase } from './supabase';
+import { supabase, getSessionUser } from './supabase';
 
 export type Review = {
   id: string;
@@ -31,9 +31,7 @@ export const reviewsService = {
     rating: number,
     text?: string | null
   ): Promise<void> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { error } = await supabase.from('reviews').upsert(
@@ -127,9 +125,7 @@ export const reviewsService = {
   },
 
   async getUserReview(businessId: string): Promise<Review | null> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) return null;
 
     const { data, error } = await supabase
@@ -144,9 +140,7 @@ export const reviewsService = {
   },
 
   async updateBusinessResponse(reviewId: string, response: string): Promise<void> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { error } = await supabase
@@ -158,9 +152,7 @@ export const reviewsService = {
   },
 
   async deleteReview(businessId: string): Promise<void> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { error } = await supabase

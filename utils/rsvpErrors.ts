@@ -6,6 +6,8 @@
  * by message. RLS rejections on the direct rsvps path arrive as 42501.
  */
 
+import { OFFLINE_MESSAGE, TIMEOUT_MESSAGE, classifyError } from './networkErrors';
+
 export type RsvpErrorCode =
   | 'EVENT_FULL'
   | 'EVENT_CLOSED'
@@ -26,6 +28,10 @@ export type RsvpErrorCode =
   | 'ALREADY_GOING'
   /** Waitlist RPC: the event has no capacity limit. */
   | 'WAITLIST_NOT_NEEDED'
+  /** The request never reached the server (no connection). */
+  | 'OFFLINE'
+  /** No answer within the request timeout. The RSVP may or may not have landed. */
+  | 'TIMEOUT'
   | 'UNKNOWN';
 
 export class RsvpError extends Error {
@@ -68,6 +74,9 @@ export function classifyRsvpError(err: unknown): RsvpErrorCode {
   // ban or an event that is cancelled/ended. Either way the event can't be
   // joined right now, so treat the generic permission error as "closed".
   if (code === '42501') return 'EVENT_CLOSED';
+  const connection = classifyError(err);
+  if (connection === 'network') return 'OFFLINE';
+  if (connection === 'timeout') return 'TIMEOUT';
   return 'UNKNOWN';
 }
 
@@ -97,6 +106,10 @@ export function rsvpErrorMessage(code: RsvpErrorCode): string {
       return "You're already going to this event.";
     case 'WAITLIST_NOT_NEEDED':
       return 'This event has no attendee limit — just join.';
+    case 'OFFLINE':
+      return OFFLINE_MESSAGE;
+    case 'TIMEOUT':
+      return TIMEOUT_MESSAGE;
     default:
       return 'Failed to update RSVP. Please try again.';
   }
@@ -114,6 +127,8 @@ export function rsvpErrorNeedsRefresh(code: RsvpErrorCode): boolean {
     code === 'NOT_FOUND' ||
     code === 'SPOT_AVAILABLE' ||
     code === 'ALREADY_GOING' ||
-    code === 'WAITLIST_NOT_NEEDED'
+    code === 'WAITLIST_NOT_NEEDED' ||
+    // A timed-out write may have landed; re-read the event's real state.
+    code === 'TIMEOUT'
   );
 }

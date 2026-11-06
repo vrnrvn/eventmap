@@ -49,6 +49,12 @@ export function buildMapHtml(
     if (!window.ReactNativeWebView) {
       window.ReactNativeWebView = { postMessage: function(message) { window.parent.postMessage(message, '*'); } };
     }
+    // The SDK couldn't load (offline) or the key was refused: tell the app,
+    // which shows an overlay instead of a silent blank box.
+    window.__mapUnavailable = function(reason) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mapUnavailable', reason: reason }));
+    };
+    window.gm_authFailure = function() { window.__mapUnavailable('auth'); };
     ${markerSvgScript()}
     function getPinpointIcon(categorySlug, isActive) {
       var svg = __markerSvg(categorySlug, isActive);
@@ -150,7 +156,7 @@ export function buildMapHtml(
     }
   </script>
   <script async src="https://unpkg.com/@googlemaps/markerclusterer@2.5.3/dist/index.min.js" onload="if (window.__lastMarkersArgs && typeof window.__updateMarkers === 'function') { window.__updateMarkers(window.__lastMarkersArgs[0], window.__lastMarkersArgs[1]); }"></script>
-  <script async defer src="https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap"></script>
+  <script async defer src="https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap" onerror="window.__mapUnavailable('script')"></script>
 </body>
 </html>`;
 }

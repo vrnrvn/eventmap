@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, getSessionUser } from './supabase';
 import { RsvpError, classifyRsvpError } from '@/utils/rsvpErrors';
 import {
   RsvpStatus,
@@ -66,9 +66,7 @@ export const socialService = {
     eventId: string,
     status: RsvpStatus
   ): Promise<RsvpStatus | 'requested'> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new RsvpError('NOT_AUTHENTICATED');
 
     // Capacity-aware join (20261030108000): the RPC locks the event row and
@@ -101,9 +99,7 @@ export const socialService = {
   },
 
   async deleteRsvp(eventId: string): Promise<void> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { error } = await supabase
@@ -116,9 +112,7 @@ export const socialService = {
   },
 
   async getUserRsvp(eventId: string): Promise<RsvpStatus | null> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) return null;
 
     const { data, error } = await supabase
@@ -227,9 +221,7 @@ export const socialService = {
   },
 
   async getUserRsvps(): Promise<Rsvp[]> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { data, error } = await supabase
@@ -244,9 +236,7 @@ export const socialService = {
   },
 
   async saveEvent(eventId: string): Promise<void> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { error } = await supabase.from('saves').insert({
@@ -254,13 +244,13 @@ export const socialService = {
       event_id: eventId,
     });
 
-    if (error) throw error;
+    // Unique violation: a retry after an earlier insert landed but its
+    // response was lost. The row exists, which is what the caller wanted.
+    if (error && error.code !== '23505') throw error;
   },
 
   async unsaveEvent(eventId: string): Promise<void> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { error } = await supabase
@@ -273,9 +263,7 @@ export const socialService = {
   },
 
   async isEventSaved(eventId: string): Promise<boolean> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) return false;
 
     const { data, error } = await supabase
@@ -290,9 +278,7 @@ export const socialService = {
   },
 
   async getUserSavedEvents(): Promise<Save[]> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { data, error } = await supabase
@@ -325,9 +311,7 @@ export const socialService = {
   },
 
   async followBusiness(businessId: string): Promise<void> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { error } = await supabase.from('follows').insert({
@@ -335,13 +319,13 @@ export const socialService = {
       business_id: businessId,
     });
 
-    if (error) throw error;
+    // Unique violation: a retry after an earlier insert landed but its
+    // response was lost. The row exists, which is what the caller wanted.
+    if (error && error.code !== '23505') throw error;
   },
 
   async unfollowBusiness(businessId: string): Promise<void> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { error } = await supabase
@@ -354,9 +338,7 @@ export const socialService = {
   },
 
   async isFollowingBusiness(businessId: string): Promise<boolean> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) return false;
 
     const { data, error } = await supabase
@@ -371,9 +353,7 @@ export const socialService = {
   },
 
   async getUserFollows(): Promise<Follow[]> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { data, error } = await supabase
@@ -431,9 +411,7 @@ export const socialService = {
    * Throws BlockingUnavailableError until migration 20261030111000 is applied.
    */
   async blockUser(blockedUserId: string): Promise<void> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     // Not in the generated types until migration 20261030111000 is applied.
@@ -451,9 +429,7 @@ export const socialService = {
 
   /** Remove a global block. Throws BlockingUnavailableError pre-apply. */
   async unblockUser(blockedUserId: string): Promise<void> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { error } = await (supabase as any)
@@ -470,9 +446,7 @@ export const socialService = {
    * Throws BlockingUnavailableError pre-apply.
    */
   async getBlockedUsers(): Promise<{ id: string; name: string; avatar_url: string | null }[]> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) return [];
 
     const { data, error } = await supabase
@@ -511,9 +485,7 @@ export const socialService = {
    * Throws BlockingUnavailableError pre-apply (callers may treat as false).
    */
   async isBlocked(blockedUserId: string): Promise<boolean> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) return false;
 
     const { data, error } = await (supabase as any)

@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, getSessionUser } from './supabase';
 
 export type ComplaintTargetType = 'event' | 'business' | 'user' | 'review' | 'chat_message';
 
@@ -8,9 +8,7 @@ export const complaintsService = {
     targetId: string,
     reason?: string
   ): Promise<void> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { error } = await supabase.from('complaints').insert({

@@ -34,12 +34,18 @@ import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/th
 import {
   getNotificationsPage,
   getUnreadNotificationCount,
-  markNotificationAsRead,
-  markAllNotificationsAsRead,
-  deleteNotification,
   subscribeToNotifications,
+  NOTIFICATIONS_PAGE_SIZE,
   type Notification as ApiNotification,
 } from '@/services/notifications';
+import { useIsRestoring, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { getPendingWrites, runOrQueue } from '@/services/pendingWrites';
+import { overlayNotificationWrites } from '@/utils/pendingWrites';
+import { queryKeys } from '@/hooks/queryKeys';
+import { useConnectivity } from '@/services/connectivity';
+import { getConnectivity, subscribeConnectivity } from '@/utils/connectivity';
+import { freshnessNote } from '@/utils/screenState';
+import { FreshnessNote, OfflineState } from '@/components/ui/QueryStates';
 import { useAuth } from '@/contexts/AuthContext';
 import { notify } from '@/utils/notify';
 import { formatRelativeLabel } from '@/utils/relativeTime';
@@ -97,32 +103,77 @@ const getIconMeta = (type: NotificationType) => {
   }
 };
 
+type CachedNotifications = { items: Notification[]; hasMore: boolean; unreadCount: number };
+
+/** The cached first page, with timestamps revived (they are stored as strings). */
+function cachedNotifications(
+  queryClient: QueryClient,
+  userId: string | undefined
+): (CachedNotifications & { updatedAt: number }) | null {
+  if (!userId) return null;
+  const key = queryKeys.notifications(userId);
+  const cached = queryClient.getQueryData<CachedNotifications>(key);
+  if (!cached || !Array.isArray(cached.items)) return null;
+  return {
+    items: cached.items.map((n) => ({ ...n, timestamp: new Date(n.timestamp) })),
+    hasMore: !!cached.hasMore,
+    unreadCount: typeof cached.unreadCount === 'number' ? cached.unreadCount : 0,
+    updatedAt: queryClient.getQueryState(key)?.dataUpdatedAt ?? 0,
+  };
+}
+
 export default function NotificationsScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const queryClient = useQueryClient();
+  const connectivity = useConnectivity();
+  // The first page last shown, kept on the device so the tab opens with it
+  // offline (docs/OFFLINE_PLAN.md §3.5). The network load replaces it.
+  const [initial] = useState(() => cachedNotifications(queryClient, user?.id));
+  const [notifications, setNotifications] = useState<Notification[]>(initial?.items ?? []);
   const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initial);
   const [error, setError] = useState(false);
+  const [lastLoadFailed, setLastLoadFailed] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState(initial?.updatedAt ?? 0);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
+  const [hasMore, setHasMore] = useState(initial?.hasMore ?? false);
   // Server-side count: the list is paged, so counting loaded rows would
   // under-report (and disagree with the tab badge).
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(initial?.unreadCount ?? 0);
+  // Whether rows are on screen: a failed refresh then keeps them (with the
+  // freshness note) instead of swapping the list for the error state.
+  const hasLoadedRef = useRef(!!initial);
+  // A network load has succeeded this visit; until then the cached copy is
+  // shown and not written back (that would stamp it as fresh).
+  const fetchedRef = useRef(false);
 
   const loadNotifications = useCallback(async () => {
     try {
       const [{ items, hasMore: more }, unread] = await Promise.all([
         getNotificationsPage({ offset: 0 }),
-        getUnreadNotificationCount().catch(() => 0),
+        getUnreadNotificationCount().catch(() => null),
       ]);
-      setNotifications(items);
+      // Queued read / dismiss intents (made offline) win over the server
+      // copy until they replay.
+      const pending = getPendingWrites();
+      const visible = overlayNotificationWrites(items, pending);
+      setNotifications(visible);
       setHasMore(more);
-      setUnreadCount(unread);
+      if (unread !== null) {
+        const adjust = items.filter((n) => !n.read).length - visible.filter((n) => !n.read).length;
+        setUnreadCount(Math.max(0, unread - adjust));
+      }
+      // A failed count keeps the last known value rather than reading 0.
       setError(false);
+      setLastLoadFailed(false);
+      setUpdatedAt(Date.now());
+      hasLoadedRef.current = true;
+      fetchedRef.current = true;
     } catch (err) {
       console.error('Failed to load notifications:', err);
-      setError(true);
+      setLastLoadFailed(true);
+      if (!hasLoadedRef.current) setError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -132,6 +183,36 @@ export default function NotificationsScreen() {
   useEffect(() => {
     loadNotifications();
   }, [loadNotifications]);
+
+  // Mounted before the device cache finished restoring: adopt the restored
+  // first page if nothing has loaded yet.
+  const isRestoring = useIsRestoring();
+  useEffect(() => {
+    if (isRestoring || hasLoadedRef.current) return;
+    const restored = cachedNotifications(queryClient, user?.id);
+    if (!restored) return;
+    hasLoadedRef.current = true;
+    setNotifications(restored.items);
+    setHasMore(restored.hasMore);
+    setUnreadCount(restored.unreadCount);
+    setUpdatedAt(restored.updatedAt);
+    setError(false);
+    setLoading(false);
+    // Only the restore finishing should trigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRestoring]);
+
+  // Mirror the first page (with realtime and read / dismiss changes) into the
+  // device cache once it has been fetched this visit.
+  useEffect(() => {
+    if (!user?.id || !fetchedRef.current) return;
+    const snapshot: CachedNotifications = {
+      items: notifications.slice(0, NOTIFICATIONS_PAGE_SIZE),
+      hasMore: hasMore || notifications.length > NOTIFICATIONS_PAGE_SIZE,
+      unreadCount,
+    };
+    queryClient.setQueryData(queryKeys.notifications(user.id), snapshot);
+  }, [notifications, hasMore, unreadCount, user?.id, queryClient]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -156,9 +237,21 @@ export default function NotificationsScreen() {
       onDelete: (id) => {
         setNotifications((prev) => prev.filter((n) => n.id !== id));
       },
+      // Rejoined after a drop: changes in between were never delivered.
+      onResubscribed: () => void loadNotifications(),
     });
-    return unsubscribe;
-  }, [user?.id]);
+    // Back from offline: the realtime socket may not have noticed yet.
+    let previous = getConnectivity();
+    const unsubscribeConnectivity = subscribeConnectivity((status) => {
+      const wasOffline = previous === 'offline';
+      previous = status;
+      if (wasOffline && status !== 'offline') void loadNotifications();
+    });
+    return () => {
+      unsubscribe();
+      unsubscribeConnectivity();
+    };
+  }, [user?.id, loadNotifications]);
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore) return;
@@ -199,7 +292,7 @@ export default function NotificationsScreen() {
       prev.map((n) => (n.id === id ? { ...n, read: true } : n))
     );
     setUnreadCount((c) => Math.max(0, c - 1));
-    markNotificationAsRead(id).catch(() => {
+    runOrQueue({ kind: 'notificationRead', targetId: id }).catch(() => {
       // Revert the optimistic change so the UI and badge stay in sync.
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, read: false } : n))
@@ -217,7 +310,7 @@ export default function NotificationsScreen() {
     });
     const previousCount = unreadCount;
     setUnreadCount(0);
-    markAllNotificationsAsRead().catch(() => {
+    runOrQueue({ kind: 'notificationRead', targetId: '*' }).catch(() => {
       setNotifications(previous);
       setUnreadCount(previousCount);
       notify.error('Could not mark all notifications as read.');
@@ -232,7 +325,7 @@ export default function NotificationsScreen() {
     });
     const wasUnread = previous.find((n) => n.id === id)?.read === false;
     if (wasUnread) setUnreadCount((c) => Math.max(0, c - 1));
-    deleteNotification(id).catch(() => {
+    runOrQueue({ kind: 'notificationDelete', targetId: id }).catch(() => {
       setNotifications(previous);
       if (wasUnread) setUnreadCount((c) => c + 1);
       notify.error('Could not dismiss notification.');
@@ -301,8 +394,25 @@ export default function NotificationsScreen() {
         </View>
 
         <View style={styles.listWrap}>
+          {!loading && !error ? (
+            <FreshnessNote
+              text={freshnessNote({
+                hasData: notifications.length > 0,
+                dataUpdatedAt: updatedAt,
+                isError: lastLoadFailed,
+                connectivity,
+              })}
+            />
+          ) : null}
           {loading ? (
             <NotificationSkeleton />
+          ) : error && connectivity === 'offline' ? (
+            <OfflineState
+              onRetry={() => {
+                setLoading(true);
+                loadNotifications();
+              }}
+            />
           ) : error ? (
             <ErrorState
               title="Couldn't load notifications"

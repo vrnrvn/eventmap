@@ -1,4 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { blockedOffline } from '@/utils/requireOnline';
+import { useQuery } from '@tanstack/react-query';
+import { queryKeys } from '@/hooks/queryKeys';
+import { useScreenState } from '@/hooks/useScreenState';
+import { PERSISTED_QUERY } from '@/utils/queryPersistence';
+import { hasEventEnded } from '@/utils/eventStatus';
+import { FreshnessNote } from '@/components/ui/QueryStates';
 import {
   View,
   Text,
@@ -48,92 +55,79 @@ function buildFacebookUrl(handle: string): string {
   return `https://facebook.com/${clean}`;
 }
 
+type UserProfilePage = {
+  profile: Profile | null;
+  isPrivate: boolean;
+  events: RankedEvent[];
+  /** Whether the viewer blocked this user; null when unknown. */
+  blocked: boolean | null;
+};
+
 export default function UserProfile() {
   const { width: windowWidth } = useWindowDimensions();
   const EVENT_CARD_WIDTH = windowWidth * EVENT_CARD_WIDTH_RATIO;
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const { user, profile: currentUserProfile } = useAuth();
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [isPrivate, setIsPrivate] = useState(false);
-  const [upcomingEvents, setUpcomingEvents] = useState<RankedEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [blockBusy, setBlockBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const isOwnProfile = user?.id === id;
 
-  const load = useCallback(async () => {
-    if (!id) return;
-    try {
-      setLoadError(false);
+  // One cached query per profile, kept on the device so profiles you've
+  // visited open offline (docs/OFFLINE_PLAN.md §3.5). A failed refetch keeps
+  // what's shown; only a first load with nothing cached shows an error.
+  const query = useQuery({
+    queryKey: queryKeys.userProfile(id ?? '', isOwnProfile),
+    ...PERSISTED_QUERY,
+    enabled: !!id,
+    queryFn: async (): Promise<UserProfilePage> => {
       if (isOwnProfile) {
         const [p, events] = await Promise.all([
-          profilesService.getProfile(id),
-          socialService.getUserUpcomingEvents(id),
+          profilesService.getProfile(id!),
+          socialService.getUserUpcomingEvents(id!),
         ]);
-        setProfile(p);
-        setIsPrivate(false);
-        setUpcomingEvents(events);
-      } else {
-        const [result, isBlockedResult] = await Promise.all([
-          profilesService.getPublicProfile(id),
-          // Best-effort: blocking is NOT_AVAILABLE until migration
-          // 20261030111000 is applied — treat any failure as "not blocked".
-          socialService.isBlocked(id).catch(() => false),
-        ]);
-        setBlocked(isBlockedResult);
-        if (!result) {
-          setProfile(null);
-          setIsPrivate(false);
-          setUpcomingEvents([]);
-          return;
-        }
-        if (result.isPrivate) {
-          setProfile(null);
-          setIsPrivate(true);
-          setUpcomingEvents([]);
-          return;
-        }
-        setProfile(result.profile);
-        setIsPrivate(false);
-        if (result.profile.show_future_events !== false) {
-          const events = await socialService.getUserUpcomingEvents(id);
-          setUpcomingEvents(events);
-        } else {
-          setUpcomingEvents([]);
-        }
+        return { profile: p, isPrivate: false, events, blocked: null };
       }
-    } catch {
-      // Fetch failure (network/server) — not a missing profile. Surface an
-      // error state with Retry instead of a misleading "Profile not found".
-      setProfile(null);
-      setIsPrivate(false);
-      setUpcomingEvents([]);
-      setLoadError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, [id, isOwnProfile]);
+      const [result, isBlockedResult] = await Promise.all([
+        profilesService.getPublicProfile(id!),
+        // Best-effort: blocking is NOT_AVAILABLE until migration
+        // 20261030111000 is applied. A failure keeps the last known value.
+        socialService.isBlocked(id!).catch(() => null),
+      ]);
+      if (!result) return { profile: null, isPrivate: false, events: [], blocked: isBlockedResult };
+      if (result.isPrivate) return { profile: null, isPrivate: true, events: [], blocked: isBlockedResult };
+      const events =
+        result.profile.show_future_events !== false ? await socialService.getUserUpcomingEvents(id!) : [];
+      return { profile: result.profile, isPrivate: false, events, blocked: isBlockedResult };
+    },
+  });
+  const page = query.data;
+  const profile = page?.profile ?? null;
+  const isPrivate = page?.isPrivate ?? false;
+  // Cached rows can be days old: drop events that have ended since.
+  const upcomingEvents = useMemo(() => (page?.events ?? []).filter((e) => !hasEventEnded(e)), [page]);
+  const { state: screenState, freshness } = useScreenState(query, { hasData: page !== undefined, isEmpty: false });
+  const loading = screenState === 'loading';
+  const loadError = screenState === 'error' || screenState === 'offline';
 
-  // Reset to the loading state whenever the route id changes so a previous
-  // user's profile is not shown while the next one loads.
+  // Block / unblock update `blocked` locally; a fresh server value wins.
   useEffect(() => {
-    setLoading(true);
-    load();
-  }, [load]);
+    if (typeof page?.blocked === 'boolean') setBlocked(page.blocked);
+  }, [page?.blocked]);
 
+  const retry = useCallback(() => void query.refetch(), [query]);
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    load().finally(() => setRefreshing(false));
-  }, [load]);
+    query.refetch().finally(() => setRefreshing(false));
+  }, [query]);
 
   const socialHandles = (profile?.social_handles as { instagram?: string; facebook?: string } | null) ?? {};
 
   const handleReportUser = useCallback(() => {
+    if (blockedOffline('report this profile')) return;
     if (!id || reportSubmitting) return;
     notifyConfirm({
       title: 'Report user',
@@ -162,6 +156,7 @@ export default function UserProfile() {
   }, [id, reportSubmitting]);
 
   const handleToggleBlock = useCallback(() => {
+    if (blockedOffline('block or unblock someone')) return;
     if (!id || blockBusy) return;
     const blocking = !blocked;
     notifyConfirm({
@@ -269,14 +264,13 @@ export default function UserProfile() {
         <ScreenHeader title="Profile" safeArea={false} />
         <View style={styles.center}>
           <Text style={styles.errorText}>
-            Couldn&apos;t load this profile. Check your connection and try again.
+            {screenState === 'offline'
+              ? "You're offline. This profile will load when you reconnect."
+              : "Couldn't load this profile. Check your connection and try again."}
           </Text>
           <TouchableOpacity
             style={styles.retryBtn}
-            onPress={() => {
-              setLoading(true);
-              load();
-            }}
+            onPress={retry}
             accessibilityRole="button"
             accessibilityLabel="Retry loading profile"
             activeOpacity={0.8}
@@ -311,6 +305,7 @@ export default function UserProfile() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
         }
       >
+        <FreshnessNote text={freshness} />
         {blocked ? (
           <View style={styles.blockedBanner}>
             <Ban size={16} color={Colors.error} />

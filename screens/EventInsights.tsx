@@ -17,6 +17,7 @@ import {
   Users,
 } from 'lucide-react-native';
 import { queryKeys } from '@/hooks/queryKeys';
+import { shouldRetryQuery } from '@/utils/queryRetry';
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
 import { analyticsService, InsightsForbiddenError, InsightsNotFoundError } from '@/services/analytics';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
@@ -80,7 +81,8 @@ export default function EventInsightsScreen() {
     queryFn: () => analyticsService.getEventInsights(id!, days),
     staleTime: 60_000,
     retry: (count, error) =>
-      !(error instanceof InsightsForbiddenError || error instanceof InsightsNotFoundError) && count < 2,
+      !(error instanceof InsightsForbiddenError || error instanceof InsightsNotFoundError) &&
+      shouldRetryQuery(count, error),
   });
   useRefetchOnFocus(query.refetch, !!id);
   const [pulling, setPulling] = useState(false);
@@ -114,7 +116,8 @@ export default function EventInsightsScreen() {
         style={styles.center}
       />
     );
-  } else if (query.error || !data) {
+  } else if (!data) {
+    // A failed refetch keeps the last insights on screen.
     body = (
       <ErrorState
         title="Couldn't load insights"

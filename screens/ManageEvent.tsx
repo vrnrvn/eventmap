@@ -1418,11 +1418,21 @@ export default function ManageEvent() {
     );
   }
 
-  if (detailsQuery.isError || !event) {
+  // A failed refetch keeps the cached event on screen; only a missing event
+  // replaces the screen.
+  if (!event) {
     return (
       <View style={styles.screen}>
         <ScreenHeader title="Manage event" />
-        <ErrorState title="Couldn't load this event" onRetry={() => void detailsQuery.refetch()} />
+        {detailsQuery.isError ? (
+          <ErrorState title="Couldn't load this event" onRetry={() => void detailsQuery.refetch()} />
+        ) : (
+          <ErrorState
+            title="Event not found"
+            message="It may have been deleted."
+            onRetry={() => void detailsQuery.refetch()}
+          />
+        )}
       </View>
     );
   }

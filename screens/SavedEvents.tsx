@@ -2,6 +2,8 @@ import { useCallback, useMemo, useState } from 'react';
 import { useInfiniteQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { queryKeys } from '@/hooks/queryKeys';
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
+import { useScreenState } from '@/hooks/useScreenState';
+import { PERSISTED_QUERY } from '@/utils/queryPersistence';
 import {
   View,
   Text,
@@ -13,9 +15,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { socialService } from '@/services/social';
+import { runOrQueue } from '@/services/pendingWrites';
 import { notify } from '@/utils/notify';
 import { Button } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { FreshnessNote, OfflineState } from '@/components/ui/QueryStates';
 import { EventListItem } from '@/components/EventListItem';
 import { formatDistance } from '@/utils/formatEventWhen';
 import { describeEventDateTime } from '@/utils/timezone';
@@ -39,6 +43,8 @@ export default function SavedEvents() {
   // to reach older saves; this pages through all of them.
   const query = useInfiniteQuery({
     queryKey: queryKeys.savedEvents(),
+    // Kept on the device so saved events open offline after a restart.
+    ...PERSISTED_QUERY,
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
       socialService.getUserSavedEventsWithDetails({ limit: PAGE_SIZE, offset: pageParam }),
@@ -54,11 +60,14 @@ export default function SavedEvents() {
       seen.has(e.id) ? false : (seen.add(e.id), true)
     );
   }, [query.data]);
-  const loading = query.isPending;
+  const { state: screenState, freshness } = useScreenState(query, {
+    hasData: query.data !== undefined,
+    isEmpty: events.length === 0,
+  });
+  const loading = screenState === 'loading';
   // Only the pull gesture drives the RefreshControl; background refetches
   // (focus, invalidation, foreground) must not animate the list.
   const [pulling, setPulling] = useState(false);
-  const error = query.isError ? 'Could not load your saved events.' : null;
 
   const retryLoad = useCallback(() => {
     void query.refetch();
@@ -66,7 +75,12 @@ export default function SavedEvents() {
 
   const onRefresh = useCallback(() => {
     setPulling(true);
-    void query.refetch().finally(() => setPulling(false));
+    void query
+      .refetch()
+      .then((result) => {
+        if (result.isError && result.data) notify.backgroundError("Couldn't refresh saved events.");
+      })
+      .finally(() => setPulling(false));
   }, [query]);
 
   /**
@@ -87,17 +101,21 @@ export default function SavedEvents() {
           : old
       );
       try {
-        await socialService.unsaveEvent(event.id);
-        void queryClient.invalidateQueries({ queryKey: key });
-        notify.undo(`Removed "${event.title}" from saved`, () => {
+        // Offline the removal is queued and replayed on reconnect; a refetch
+        // before then would bring the row back, so only re-read when sent.
+        const result = await runOrQueue({ kind: 'save', targetId: event.id, on: false, label: event.title });
+        if (result === 'done') void queryClient.invalidateQueries({ queryKey: key });
+        const tail = result === 'queued' ? " It will sync when you're back online." : '';
+        notify.undo(`Removed "${event.title}" from saved.${tail}`, () => {
           void (async () => {
             try {
-              await socialService.saveEvent(event.id);
+              const undo = await runOrQueue({ kind: 'save', targetId: event.id, on: true, label: event.title });
+              // Queued: put the row back as it was; sent: re-read rather than
+              // splice it in, since position depends on the server's ordering.
+              if (undo === 'queued') queryClient.setQueryData(key, previous);
+              else void queryClient.invalidateQueries({ queryKey: key });
             } catch {
               notify.error('Could not restore the saved event.');
-            } finally {
-              // Re-read rather than splice the row back in: position depends
-              // on the server's upcoming/past ordering.
               void queryClient.invalidateQueries({ queryKey: key });
             }
           })();
@@ -191,7 +209,9 @@ export default function SavedEvents() {
             <Text style={styles.headerSubtitle}>
               {loading
                 ? 'Loading…'
-                : `${events.length} saved event${events.length !== 1 ? 's' : ''}`}
+                : query.data === undefined
+                  ? 'Not loaded yet'
+                  : `${events.length} saved event${events.length !== 1 ? 's' : ''}`}
             </Text>
           </View>
         </View>
@@ -232,10 +252,12 @@ export default function SavedEvents() {
             />
           }
         >
-          {error ? (
+          {screenState === 'offline' ? (
+            <OfflineState onRetry={retryLoad} />
+          ) : screenState === 'error' ? (
             <ErrorState
               title="Couldn't load saved events"
-              message={error}
+              message="Could not load your saved events."
               onRetry={retryLoad}
             />
           ) : events.length === 0 ? (
@@ -257,6 +279,7 @@ export default function SavedEvents() {
             </View>
           ) : (
             <>
+              <FreshnessNote text={freshness} />
               {upcoming.map(renderCard)}
               {past.length > 0 ? (
                 <>

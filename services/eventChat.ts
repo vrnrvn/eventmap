@@ -1,5 +1,6 @@
 import { RealtimeChannel } from '@supabase/supabase-js';
-import { supabase } from './supabase';
+import { supabase, getSessionUser } from './supabase';
+import { isConnectionError } from '@/utils/networkErrors';
 import { EventChatMessage, EventChatMessageWithSender, Profile } from '@/types/database';
 
 export const CHAT_MESSAGE_PAGE_SIZE = 100;
@@ -183,9 +184,7 @@ export function isChatAccessError(error: unknown): boolean {
 }
 
 async function getCurrentUserId(): Promise<string> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) throw new Error('Not authenticated');
   return user.id;
 }
@@ -368,8 +367,13 @@ export const eventChatService = {
       .single();
 
     if (error) {
-      if (error.code === UNIQUE_VIOLATION) {
-        const existing = await eventChatService.getMessage(messageId);
+      // A retry of a message that already landed: normally a unique
+      // violation, but the slow-mode / rate-limit triggers run before the
+      // primary-key check and refuse it first (the stored copy counts as the
+      // last post). Either way the message exists, which is success.
+      // Connection failures can't tell us anything, so they're rethrown.
+      if (error.code === UNIQUE_VIOLATION || !isConnectionError(error)) {
+        const existing = await eventChatService.getMessage(messageId).catch(() => null);
         if (existing) return existing;
       }
       throw error;

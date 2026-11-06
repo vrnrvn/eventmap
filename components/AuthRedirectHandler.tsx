@@ -6,6 +6,7 @@ import * as QueryParams from 'expo-auth-session/build/QueryParams';
 import { router } from 'expo-router';
 import { supabase } from '@/services/supabase';
 import { notify } from '@/utils/notify';
+import { isConnectionError } from '@/utils/networkErrors';
 import { isAuthCallbackUrl, isMissingVerifierError } from '@/utils/authCallback';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -46,7 +47,7 @@ async function createSessionFromUrl(url: string) {
           'This link must be opened on the device where you requested it. Request a new link to use this device.'
         );
       } else {
-        notify.error('That link could not be verified. It may have expired — request a new one.');
+        notify.error(linkErrorMessage(error));
       }
       router.replace('/(auth)/login');
       return;
@@ -72,6 +73,13 @@ async function createSessionFromUrl(url: string) {
   }
 }
 
+/** A failed link check: blame the connection when it was the connection, not the link. */
+function linkErrorMessage(err: unknown): string {
+  return isConnectionError(err)
+    ? "Couldn't verify this link because the connection failed. Connect and open the link again."
+    : 'That link could not be verified. It may have expired — request a new one.';
+}
+
 export function AuthRedirectHandler() {
   useEffect(() => {
     const handleUrl = async (url: string | null) => {
@@ -87,7 +95,7 @@ export function AuthRedirectHandler() {
         // Anything thrown here came from an allow-listed auth-callback URL
         // (non-auth URLs return early without throwing), so land the user
         // somewhere sane instead of leaving a silent dead end.
-        notify.error('That link could not be verified. It may have expired — request a new one.');
+        notify.error(linkErrorMessage(err));
         router.replace('/(auth)/login');
       }
     };

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Linking } from 'react-native';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import type { AppBanner } from '@/services/banners';
@@ -7,6 +8,8 @@ type AppBannerCarouselProps = {
 };
 
 export function AppBannerCarousel({ banners }: AppBannerCarouselProps) {
+  // Image URLs that failed to load (offline); those banners show text only.
+  const [failed, setFailed] = useState<Set<string>>(() => new Set());
   if (banners.length === 0) return null;
 
   const handlePress = (banner: AppBanner) => {
@@ -25,10 +28,25 @@ export function AppBannerCarousel({ banners }: AppBannerCarouselProps) {
           activeOpacity={banner.link_url ? 0.8 : 1}
           disabled={!banner.link_url}
         >
-          {banner.image_url ? (
-            <Image source={{ uri: banner.image_url }} style={styles.bannerImage} resizeMode="cover" />
+          {banner.image_url && !failed.has(banner.image_url) ? (
+            <Image
+              source={{ uri: banner.image_url }}
+              style={styles.bannerImage}
+              resizeMode="cover"
+              onError={() => {
+                const url = banner.image_url!;
+                setFailed((prev) => new Set(prev).add(url));
+              }}
+            />
           ) : null}
-          <View style={[styles.bannerContent, banner.image_url && styles.bannerContentOverlay]}>
+          {/* Without its image (none, or it failed offline) the text sits on
+              the plain card instead of over a blank area. */}
+          <View
+            style={[
+              styles.bannerContent,
+              banner.image_url && !failed.has(banner.image_url) && styles.bannerContentOverlay,
+            ]}
+          >
             <Text style={styles.bannerTitle} numberOfLines={1}>
               {banner.title}
             </Text>

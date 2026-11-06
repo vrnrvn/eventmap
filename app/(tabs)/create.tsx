@@ -1,4 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { blockedOffline } from '@/utils/requireOnline';
+import { useFormDraft } from '@/hooks/useFormDraft';
+import { draftKeys } from '@/utils/formDraft';
 import { useFocusEffect, router } from 'expo-router';
 import {
   View,
@@ -41,9 +44,8 @@ import {
   type RecurrencePickerHandle,
 } from '@/components/RecurrencePicker';
 import { eventsService } from '@/services/events';
-import { categoriesService } from '@/services/categories';
+import { useCategories } from '@/hooks/useCategories';
 import { businessesService } from '@/services/businesses';
-import { Category } from '@/types/database';
 import { alpha, Colors, Shadows, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { eventLocationStore } from '@/stores/eventLocationStore';
 import { parseRecurrenceEndDate, type RecurrenceOption } from '@/utils/recurrence';
@@ -98,8 +100,7 @@ export default function CreateScreen() {
     loading: premiumLoading,
     refreshSubscription,
   } = usePremium();
-  const { isBanned } = useAuth();
-  const [categories, setCategories] = useState<Category[]>([]);
+  const { isBanned, user } = useAuth();
   const [loading, setLoading] = useState(false);
   /** "Uploading photo 2 of 5…" while photos go up; null otherwise. */
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
@@ -134,6 +135,62 @@ export default function CreateScreen() {
     timezone: getDeviceTimeZone(),
     extras: EMPTY_EXTRAS as EventExtrasDraft,
   });
+  // Local draft (docs/OFFLINE_PLAN.md §3.7): what the host types is kept on
+  // the device until it's published or saved as a draft, so a dropped
+  // connection, a failed save or a killed app doesn't lose it.
+  const draftKey = user ? draftKeys.createEvent(user.id) : null;
+  const [draftReady, setDraftReady] = useState(false);
+  const hasContent = !!(
+    formData.title.trim() ||
+    formData.description.trim() ||
+    formData.categoryId ||
+    formData.images.length ||
+    formData.links.length ||
+    formData.maxAttendees.trim()
+  );
+  const { readDraft, clearDraft } = useFormDraft(draftKey, formData, { shouldSave: hasContent, ready: draftReady });
+
+  const resetForm = () => {
+    clearDraft();
+    venueChosenRef.current = false;
+    setFormData({
+      title: '',
+      description: '',
+      categoryId: '',
+      startDatetime: new Date(Date.now() + 60 * 60 * 1000),
+      endDatetime: new Date(Date.now() + 3 * 60 * 60 * 1000),
+      recurrence: null,
+      address: businessLocation?.address ?? '',
+      lat: businessLocation?.lat ?? DEFAULT_LOCATION.lat,
+      lng: businessLocation?.lng ?? DEFAULT_LOCATION.lng,
+      images: [],
+      maxAttendees: '',
+      links: [],
+      timezone: getDeviceTimeZone(),
+      extras: EMPTY_EXTRAS,
+    });
+  };
+
+  useEffect(() => {
+    if (!draftKey) return;
+    let cancelled = false;
+    void readDraft().then((draft) => {
+      if (cancelled) return;
+      if (draft && typeof draft.title === 'string' && draft.startDatetime instanceof Date && draft.endDatetime instanceof Date) {
+        setFormData((f) => ({ ...f, ...draft, extras: { ...f.extras, ...draft.extras } }));
+        // A restored venue must not be overwritten by the business address.
+        if (draft.address) venueChosenRef.current = true;
+        notify.withAction('Restored the event you were writing.', { label: 'Start over', onPress: resetForm });
+      }
+      setDraftReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Read once per signed-in user.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+
   const [linkErrors, setLinkErrors] = useState<Record<number, string>>({});
   const [extrasErrors, setExtrasErrors] = useState<Partial<Record<keyof EventExtrasDraft, string>>>({});
   const [showExtras, setShowExtras] = useState(false);
@@ -170,9 +227,14 @@ export default function CreateScreen() {
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
 
+  // Categories are required to publish. They come from the shared cached
+  // query (available offline once loaded); with nothing loaded, a failed
+  // load offers a retry instead of leaving an empty picker.
+  const { categories, isError: categoriesFailed, refetch: refetchCategories } = useCategories();
   useEffect(() => {
-    categoriesService.getAllCategories().then(setCategories);
-  }, []);
+    if (!categoriesFailed || categories.length > 0) return;
+    notify.error("Couldn't load categories.", { label: 'Retry', onPress: () => void refetchCategories() });
+  }, [categoriesFailed, categories.length, refetchCategories]);
 
   const openAndroidPicker = useCallback(
     (currentDate: Date, field: 'start' | 'end') => {
@@ -292,6 +354,7 @@ export default function CreateScreen() {
   };
 
   const handleSubmit = async (mode: 'publish' | 'draft' = 'publish') => {
+    if (blockedOffline('save or publish events. Your form is kept on this device')) return;
     const problems = validate();
     if (problems.length > 0) {
       // Scroll to the first failing section rather than the top, so the
@@ -423,23 +486,7 @@ export default function CreateScreen() {
       }
 
       // Reset the form so re-tapping Publish can't create a duplicate event.
-      venueChosenRef.current = false;
-      setFormData({
-        title: '',
-        description: '',
-        categoryId: '',
-        startDatetime: new Date(Date.now() + 60 * 60 * 1000),
-        endDatetime: new Date(Date.now() + 3 * 60 * 60 * 1000),
-        recurrence: null,
-        address: businessLocation?.address ?? '',
-        lat: businessLocation?.lat ?? DEFAULT_LOCATION.lat,
-        lng: businessLocation?.lng ?? DEFAULT_LOCATION.lng,
-        images: [],
-        maxAttendees: '',
-        links: [],
-        timezone: getDeviceTimeZone(),
-        extras: EMPTY_EXTRAS,
-      });
+      resetForm();
       setErrors({});
       setLinkErrors({});
 

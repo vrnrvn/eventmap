@@ -21,8 +21,16 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import { useSearch, type SearchDateRange } from '@/contexts/SearchContext';
 import { eventsService } from '@/services/events';
-import { categoriesService } from '@/services/categories';
-import { RankedEvent, Category } from '@/types/database';
+import { useIsRestoring, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { PERSISTED_QUERY } from '@/utils/queryPersistence';
+import { queryKeys } from '@/hooks/queryKeys';
+import { useCategories } from '@/hooks/useCategories';
+import { useConnectivity } from '@/services/connectivity';
+import { freshnessNote } from '@/utils/screenState';
+import { FreshnessNote } from '@/components/ui/QueryStates';
+import { isUnfiltered, makeDiscoverSnapshot, parseDiscoverSnapshot } from '@/utils/discoverSnapshot';
+import { getConnectivity, subscribeConnectivity } from '@/utils/connectivity';
+import { RankedEvent } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { getCategoryIconColor } from '@/constants/categoryIcons';
 import { CategoryIcon } from '@/components/CategoryIcon';
@@ -59,6 +67,41 @@ const EVENTS_PAGE_SIZE = 50;
 /** Chips sit ~30pt tall over the map; this lifts the tap target past 44pt. */
 const CHIP_HIT_SLOP = { top: 8, bottom: 8, left: 4, right: 4 };
 
+const GPS_TIMEOUT_MS = 8000;
+
+/**
+ * Current position, or the last known one if a fresh fix fails or takes
+ * longer than GPS_TIMEOUT_MS (a cold fix with no data connection can take
+ * much longer). Null when neither is available; never throws.
+ */
+async function getPositionWithTimeout(): Promise<Location.LocationObject | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const fresh = await Promise.race([
+      Location.getCurrentPositionAsync({}),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), GPS_TIMEOUT_MS);
+      }),
+    ]);
+    if (fresh) return fresh;
+  } catch {
+    // Fall through to the last known position.
+  } finally {
+    clearTimeout(timer);
+  }
+  return Location.getLastKnownPositionAsync().catch(() => null);
+}
+
+const NO_BANNERS: AppBanner[] = [];
+
+/** Discover's saved last area, if any (see the screen's `lastArea`). */
+function readLastArea(queryClient: QueryClient) {
+  const key = queryKeys.discoverLastArea();
+  const snapshot = parseDiscoverSnapshot<RankedEvent>(queryClient.getQueryData(key));
+  if (!snapshot || snapshot.items.length === 0) return null;
+  return { ...snapshot, updatedAt: queryClient.getQueryState(key)?.dataUpdatedAt ?? 0 };
+}
+
 function truncateText(text: string, limit = 50): string {
   if (!text || text.length <= limit) return text;
   return text.slice(0, limit).trim() + '...';
@@ -73,15 +116,25 @@ export default function DiscoverScreen() {
   const { profile } = useAuth();
   const { hasBusiness, loading: appLoading } = useApp();
   const { location: searchLocation, dateRange, setDateRange } = useSearch();
-  const [events, setEvents] = useState<RankedEvent[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const connectivity = useConnectivity();
+  // The last unfiltered area this device loaded (utils/discoverSnapshot):
+  // Discover opens on it with its pins and list, offline included, while the
+  // real location loads (docs/OFFLINE_PLAN.md §3.5).
+  const [lastArea] = useState(() => readLastArea(queryClient));
+  const [events, setEvents] = useState<RankedEvent[]>(lastArea?.items ?? []);
+  // When the events on screen were fetched; drives the freshness note.
+  const [eventsUpdatedAt, setEventsUpdatedAt] = useState(lastArea?.updatedAt ?? 0);
+  // Category chips load on their own (shared, cached query): a failure keeps
+  // the chips already shown and never stops the events request.
+  const { categories, refetch: refetchCategories } = useCategories();
+  const [loading, setLoading] = useState(!lastArea);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [showSearchOverlay, setShowSearchOverlay] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
-  const [center, setCenter] = useState(DEFAULT_CENTER);
-  const [mapCenter, setMapCenter] = useState(DEFAULT_CENTER);
+  const [center, setCenter] = useState(lastArea?.center ?? DEFAULT_CENTER);
+  const [mapCenter, setMapCenter] = useState(lastArea?.center ?? DEFAULT_CENTER);
   const [mapBounds, setMapBounds] = useState<{
     ne: { lat: number; lng: number };
     sw: { lat: number; lng: number };
@@ -91,11 +144,17 @@ export default function DiscoverScreen() {
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
   const [showFloatingCard, setShowFloatingCard] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [banners, setBanners] = useState<AppBanner[]>([]);
+  // Kept on the device like the rest of Discover; hidden if none ever loaded.
+  const { data: banners = NO_BANNERS } = useQuery({
+    queryKey: queryKeys.banners('discover'),
+    ...PERSISTED_QUERY,
+    queryFn: () => bannersService.getActiveBanners('discover'),
+    staleTime: 10 * 60 * 1000,
+  });
   const [locationDenied, setLocationDenied] = useState(false);
   const [locationBannerDismissed, setLocationBannerDismissed] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMoreEvents, setHasMoreEvents] = useState(false);
+  const [hasMoreEvents, setHasMoreEvents] = useState(lastArea?.hasMore ?? false);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(false);
 
@@ -124,9 +183,6 @@ export default function DiscoverScreen() {
     loadInitialData();
   }, [profile]);
 
-  useEffect(() => {
-    bannersService.getActiveBanners('discover').then(setBanners).catch(() => setBanners([]));
-  }, []);
 
   useEffect(() => {
     return () => {
@@ -169,14 +225,18 @@ export default function DiscoverScreen() {
   const mapBoundsRef = useRef(mapBounds);
   mapBoundsRef.current = mapBounds;
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A map pan skipped its reload while offline.
+  const missedReloadRef = useRef(false);
+  // Opened on the saved area and the real location hasn't loaded yet.
+  const pendingInitialRef = useRef<{ lat: number; lng: number } | null>(null);
+  const loadErrorRef = useRef(false);
+  loadErrorRef.current = loadError;
   const loadEventsWithCenterRef = useRef<
-    (lat: number, lng: number) => Promise<void>
-  >(() => Promise.resolve());
+    (lat: number, lng: number) => Promise<boolean>
+  >(() => Promise.resolve(false));
 
   const loadInitialData = async () => {
     try {
-      const categoriesData = await categoriesService.getAllCategories();
-      setCategories(categoriesData);
       let fetchLat = center.lat;
       let fetchLng = center.lng;
       const profileLocation =
@@ -191,10 +251,14 @@ export default function DiscoverScreen() {
       } else {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
-          const loc = await Location.getCurrentPositionAsync({});
-          fetchLat = loc.coords.latitude;
-          fetchLng = loc.coords.longitude;
-          hasRealLocation = true;
+          // A failed or slow fix (services off, no signal) falls back to the
+          // default center rather than skipping the events load.
+          const loc = await getPositionWithTimeout();
+          if (loc) {
+            fetchLat = loc.coords.latitude;
+            fetchLng = loc.coords.longitude;
+            hasRealLocation = true;
+          }
         } else {
           // Keep userLocation null (the SF fallback is a map center, not the
           // user's location) and surface the banner instead.
@@ -206,7 +270,23 @@ export default function DiscoverScreen() {
       if (hasRealLocation) {
         setUserLocation({ lat: fetchLat, lng: fetchLng });
       }
-      if (!hasInitializedMapRef.current) {
+      if (!hasInitializedMapRef.current && lastArea) {
+        // Opened on the saved area: load the real location first and only
+        // move there if that worked. Otherwise the map stays on the saved
+        // area, so its pins and list keep matching what's shown.
+        hasInitializedMapRef.current = true;
+        const loaded = await loadEventsWithCenter(fetchLat, fetchLng);
+        // Retried on reconnect (effect below).
+        pendingInitialRef.current = loaded ? null : { lat: fetchLat, lng: fetchLng };
+        if (loaded) {
+          const loc = { lat: fetchLat, lng: fetchLng };
+          setCenter(loc);
+          setMapCenter(loc);
+          beginProgrammaticMove(1200);
+          setExplicitMoveTrigger((t) => t + 1);
+          mapRef.current?.animateTo(loc.lat, loc.lng);
+        }
+      } else if (!hasInitializedMapRef.current) {
         const loc = { lat: fetchLat, lng: fetchLng };
         setCenter(loc);
         setMapCenter(loc);
@@ -271,32 +351,40 @@ export default function DiscoverScreen() {
 
   // First page: resets paging. Any filter or region change routes through
   // here, so paging always restarts from offset 0 for the new query.
-  const loadEventsWithCenter = async (lat: number, lng: number, override?: FilterOverride) => {
+  /** First page for a centre; resolves true when it loaded (and is current). */
+  const loadEventsWithCenter = async (lat: number, lng: number, override?: FilterOverride): Promise<boolean> => {
     const requestId = ++loadRequestIdRef.current;
     try {
       setLoading(true);
+      const filters = currentFilters(override);
       const { items, hasMore } = await eventsService.getRankedEventsPage(
         lat,
         lng,
-        currentFilters(override),
+        filters,
         { limit: EVENTS_PAGE_SIZE, offset: 0 }
       );
-      if (requestId !== loadRequestIdRef.current) return;
+      if (requestId !== loadRequestIdRef.current) return false;
       fetchOffsetRef.current = items.length;
       setHasMoreEvents(hasMore);
       setEvents(applyDateFilter(items, rangeFor(override)));
+      setEventsUpdatedAt(Date.now());
       setLoadError(false);
+      if (isUnfiltered(filters)) {
+        queryClient.setQueryData(queryKeys.discoverLastArea(), makeDiscoverSnapshot(lat, lng, items, hasMore));
+      }
+      return true;
     } catch (err) {
       console.error('Failed to load events:', err);
       if (requestId === loadRequestIdRef.current) {
         setLoadError(true);
         // With stale events still on screen the ErrorState (empty-list only)
         // never shows, so surface the failure explicitly.
-        if (eventsRef.current.length > 0) notify.error("Couldn't refresh events");
+        if (eventsRef.current.length > 0) notify.backgroundError("Couldn't refresh events.");
       }
     } finally {
       if (requestId === loadRequestIdRef.current) setLoading(false);
     }
+    return false;
   };
   loadEventsWithCenterRef.current = loadEventsWithCenter;
 
@@ -353,13 +441,14 @@ export default function DiscoverScreen() {
   // refreshing/onRefresh pair natively).
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
+    void refetchCategories();
     try {
       const target = mapCenterRef.current;
       await loadEventsWithCenterRef.current(target.lat, target.lng);
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [refetchCategories]);
 
   // Clear the location banner once the user grants permission in Settings:
   // re-check on every focus, and recenter on their real position when granted.
@@ -463,12 +552,71 @@ export default function DiscoverScreen() {
       debounceTimerRef.current = setTimeout(() => {
         debounceTimerRef.current = null;
         if (isProgrammaticMoveRef.current) return;
+        // The user picked an area; don't jump to their location on reconnect.
+        pendingInitialRef.current = null;
         setCenter({ lat: region.lat, lng: region.lng });
+        // Offline, a pan can't load anything: keep the current list and pins
+        // and catch up once the connection returns (effect below).
+        if (getConnectivity() === 'offline') {
+          missedReloadRef.current = true;
+          return;
+        }
         loadEventsWithCenterRef.current(region.lat, region.lng);
       }, REGION_DEBOUNCE_MS);
     },
     []
   );
+
+  // Back from offline (or out of a weak connection): if Discover opened on the
+  // saved area and couldn't load the real location, try that again and move
+  // there; otherwise reload the area the map shows now if a pan was skipped,
+  // the last load failed, or nothing is listed.
+  useEffect(() => {
+    let previous = getConnectivity();
+    return subscribeConnectivity((status) => {
+      const wasImpaired = previous !== 'online';
+      previous = status;
+      if (!wasImpaired || status !== 'online' || !hasInitializedMapRef.current) return;
+      const pending = pendingInitialRef.current;
+      if (pending) {
+        void loadEventsWithCenterRef.current(pending.lat, pending.lng).then((loaded) => {
+          if (!loaded || pendingInitialRef.current !== pending) return;
+          pendingInitialRef.current = null;
+          setCenter(pending);
+          setMapCenter(pending);
+          beginProgrammaticMove(1200);
+          setExplicitMoveTrigger((t) => t + 1);
+          mapRef.current?.animateTo(pending.lat, pending.lng);
+        });
+        return;
+      }
+      if (!missedReloadRef.current && !loadErrorRef.current && eventsRef.current.length > 0) return;
+      missedReloadRef.current = false;
+      const target = mapCenterRef.current;
+      void loadEventsWithCenterRef.current(target.lat, target.lng);
+    });
+  }, [beginProgrammaticMove]);
+
+  // Mounted before the device cache finished restoring, and the first load
+  // then failed with nothing listed: fall back to the saved area (moving the
+  // map there so pins and list match) and retry the real location on
+  // reconnect.
+  const isRestoring = useIsRestoring();
+  useEffect(() => {
+    if (isRestoring || !loadError || eventsRef.current.length > 0) return;
+    const area = readLastArea(queryClient);
+    if (!area) return;
+    pendingInitialRef.current = mapCenterRef.current;
+    fetchOffsetRef.current = area.items.length;
+    setEvents(area.items);
+    setHasMoreEvents(area.hasMore);
+    setEventsUpdatedAt(area.updatedAt);
+    setCenter(area.center);
+    setMapCenter(area.center);
+    beginProgrammaticMove(1200);
+    setExplicitMoveTrigger((t) => t + 1);
+    mapRef.current?.animateTo(area.center.lat, area.center.lng);
+  }, [isRestoring, loadError, queryClient, beginProgrammaticMove]);
 
   const visibleEvents = useMemo(() => {
     if (!mapBounds) return events;
@@ -681,6 +829,14 @@ export default function DiscoverScreen() {
       </View>
       {banners.length > 0 ? <AppBannerCarousel banners={banners} /> : null}
       <Text style={styles.sheetSummary}>{eventCountLabel}</Text>
+      <FreshnessNote
+        text={freshnessNote({
+          hasData: events.length > 0,
+          dataUpdatedAt: eventsUpdatedAt,
+          isError: loadError,
+          connectivity,
+        })}
+      />
     </View>
   );
 

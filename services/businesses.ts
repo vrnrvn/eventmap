@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, getSessionUser } from './supabase';
 import { profilesService } from './profiles';
 import { eventsService } from './events';
 import { Business, BusinessLink, BusinessPhoto } from '@/types/database';
@@ -31,9 +31,7 @@ export const businessesService = {
     lng: number;
     logoUrl?: string | null;
   }): Promise<Business> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     await profilesService.ensureProfileExists(user.id, user.user_metadata?.name ?? user.email ?? '');

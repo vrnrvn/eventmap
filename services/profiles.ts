@@ -1,4 +1,4 @@
-import { supabase } from './supabase';
+import { supabase, getSessionUser } from './supabase';
 import { Profile } from '@/types/database';
 
 export type PublicProfileResult =
@@ -26,9 +26,7 @@ export const profilesService = {
   },
 
   async getCurrentUserProfile(): Promise<Profile | null> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) return null;
 
     return this.getProfile(user.id);
@@ -71,9 +69,7 @@ export const profilesService = {
     name: string;
     type: string;
   }): Promise<string> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const fileExt = file.name.split('.').pop();

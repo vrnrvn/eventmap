@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   View,
+  Text,
   Image,
   Modal,
   FlatList,
@@ -10,6 +11,7 @@ import {
   StatusBar,
 } from 'react-native';
 import { X } from 'lucide-react-native';
+import { Colors, Typography } from '@/constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -28,6 +30,8 @@ export function ImageViewer({ visible, images, initialIndex = 0, onClose }: Imag
   const safeInitialIndex =
     images.length > 0 ? Math.min(Math.max(0, initialIndex), images.length - 1) : 0;
   const [activeIndex, setActiveIndex] = useState(safeInitialIndex);
+  // Photos that failed to load (offline): a message instead of a black page.
+  const [failed, setFailed] = useState<Set<string>>(() => new Set());
   const listRef = useRef<FlatList<string>>(null);
 
   // The viewer stays mounted between opens, so re-sync the active image
@@ -87,11 +91,16 @@ export function ImageViewer({ visible, images, initialIndex = 0, onClose }: Imag
           keyExtractor={(_, i) => `viewer-${i}`}
           renderItem={({ item }) => (
             <View style={styles.page}>
-              <Image
-                source={{ uri: item }}
-                style={styles.image}
-                resizeMode="contain"
-              />
+              {failed.has(item) ? (
+                <Text style={styles.unavailable}>This photo can&apos;t load right now.</Text>
+              ) : (
+                <Image
+                  source={{ uri: item }}
+                  style={styles.image}
+                  resizeMode="contain"
+                  onError={() => setFailed((prev) => new Set(prev).add(item))}
+                />
+              )}
             </View>
           )}
         />
@@ -138,6 +147,12 @@ const styles = StyleSheet.create({
   image: {
     width: SCREEN_WIDTH,
     height: SCREEN_HEIGHT * 0.7,
+  },
+  unavailable: {
+    color: Colors.white,
+    fontSize: Typography.sizes.sm,
+    textAlign: 'center',
+    paddingHorizontal: 24,
   },
   dotsRow: {
     position: 'absolute',

@@ -6,14 +6,32 @@ import {
     useState,
     useEffect,
     useCallback,
+    useRef,
     ReactNode,
   } from 'react';
+  import { AppState } from 'react-native';
   import {
     premiumService,
     PremiumPlan,
     BusinessSubscription,
   } from '@/services/premium';
   import { useApp } from './AppContext';
+  import { useAuth } from './AuthContext';
+  import { readPremiumSnapshot, writePremiumSnapshot } from '@/services/offlineSnapshots';
+  import { getConnectivity, subscribeConnectivity } from '@/utils/connectivity';
+
+  type PremiumSnapshot = {
+    subscription: BusinessSubscription | null;
+    currentPlan: PremiumPlan | null;
+    eventCount: number;
+  };
+
+  const isPremiumSnapshot = (data: unknown): data is PremiumSnapshot =>
+    typeof data === 'object' &&
+    data !== null &&
+    'subscription' in data &&
+    'currentPlan' in data &&
+    typeof (data as { eventCount?: unknown }).eventCount === 'number';
   
   type FeatureKey =
     | 'analytics'
@@ -58,35 +76,106 @@ import {
     const [loading, setLoading] = useState(true);
     const [eventCount, setEventCount] = useState(0);
   
-    const loadData = useCallback(async () => {
-      try {
-        setLoading(true);
-        const plans = await premiumService.getPlans();
-        setAllPlans(plans);
-  
-        if (userBusiness) {
-          const sub = await premiumService.getSubscription(userBusiness.id);
-          setSubscription(sub);
-          const limits = await premiumService.getFeatureLimits(userBusiness.id);
-          setCurrentPlan(limits);
-          const count = await premiumService.getEventCount(userBusiness.id);
-          setEventCount(count);
-        } else {
-          setSubscription(null);
-          setCurrentPlan(plans.find((p) => p.slug === 'free') ?? null);
-          setEventCount(0);
-        }
-      } catch (err) {
-        console.error('Failed to load premium data:', err);
-      } finally {
+    const { sessionStale } = useAuth();
+    // Guards against a slow load for a previous business applying late.
+    const loadSeqRef = useRef(0);
+    // The last network load failed or was skipped; retried on reconnect.
+    const [premiumStale, setPremiumStale] = useState(false);
+    const skippedForStaleRef = useRef(false);
+
+    /**
+     * A business's last known plan shows at once from the device snapshot,
+     * so an offline start doesn't silently drop a premium host to free-tier
+     * limits; the network result replaces it. Skipped while the session is
+     * unverified, since an anonymous read finds no subscription
+     * (docs/OFFLINE_PLAN.md §3.6).
+     */
+    const loadData = useCallback(async ({ useSnapshot = false } = {}) => {
+      const seq = ++loadSeqRef.current;
+      const businessId = userBusiness?.id;
+      const plans = await premiumService.getPlans();
+      if (seq !== loadSeqRef.current) return;
+      setAllPlans(plans);
+
+      if (!businessId) {
+        setSubscription(null);
+        setCurrentPlan(plans.find((p) => p.slug === 'free') ?? null);
+        setEventCount(0);
+        setPremiumStale(false);
         setLoading(false);
+        return;
       }
-    }, [userBusiness?.id]);
-  
+
+      let haveSnapshot = false;
+      if (useSnapshot) {
+        const snapshot = await readPremiumSnapshot(businessId, isPremiumSnapshot);
+        if (seq !== loadSeqRef.current) return;
+        if (snapshot) {
+          haveSnapshot = true;
+          setSubscription(snapshot.data.subscription);
+          setCurrentPlan(snapshot.data.currentPlan);
+          setEventCount(snapshot.data.eventCount);
+          setLoading(false);
+        }
+      }
+      if (sessionStale) {
+        skippedForStaleRef.current = true;
+        setPremiumStale(true);
+        setLoading(false);
+        return;
+      }
+
+      try {
+        if (!haveSnapshot) setLoading(true);
+        const [sub, limits, count] = await Promise.all([
+          premiumService.getSubscription(businessId),
+          premiumService.getFeatureLimits(businessId),
+          premiumService.getEventCount(businessId),
+        ]);
+        if (seq !== loadSeqRef.current) return;
+        setSubscription(sub);
+        setCurrentPlan(limits);
+        setEventCount(count);
+        setPremiumStale(false);
+        writePremiumSnapshot(businessId, { subscription: sub, currentPlan: limits, eventCount: count });
+      } catch (err) {
+        if (seq !== loadSeqRef.current) return;
+        // Keep what is shown (snapshot or an earlier load).
+        console.error('Failed to load premium data:', err);
+        setPremiumStale(true);
+      } finally {
+        if (seq === loadSeqRef.current) setLoading(false);
+      }
+    }, [userBusiness?.id, sessionStale]);
+
     useEffect(() => {
-      loadData();
-    }, [loadData]);
-  
+      loadData({ useSnapshot: true });
+      // Reload only when the business changes; the effect below handles a
+      // session that becomes verified.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [userBusiness?.id]);
+
+    useEffect(() => {
+      if (!premiumStale || sessionStale || !userBusiness) return;
+      if (skippedForStaleRef.current) {
+        skippedForStaleRef.current = false;
+        loadData();
+      }
+      let previous = getConnectivity();
+      const unsubscribe = subscribeConnectivity((status) => {
+        const wasOnline = previous === 'online';
+        previous = status;
+        if (status === 'online' && !wasOnline) loadData();
+      });
+      const appState = AppState.addEventListener('change', (state) => {
+        if (state === 'active' && getConnectivity() !== 'offline') loadData();
+      });
+      return () => {
+        unsubscribe();
+        appState.remove();
+      };
+    }, [premiumStale, sessionStale, userBusiness, loadData]);
+
     const isPremium =
       subscription?.status === 'active' &&
       currentPlan != null &&
@@ -124,7 +213,7 @@ import {
           eventLimit,
           canUse,
           canCreateEvent,
-          refreshSubscription: loadData,
+          refreshSubscription: () => loadData(),
         }}
       >
         {children}

@@ -1,6 +1,8 @@
 import { useCallback, useMemo } from 'react';
 import { keepPreviousData, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/hooks/queryKeys';
+import { shouldRetryQuery } from '@/utils/queryRetry';
+import { PERSISTED_QUERY } from '@/utils/queryPersistence';
 import { socialService } from '@/services/social';
 import { eventsService } from '@/services/events';
 import {
@@ -58,12 +60,22 @@ export type CalendarEventsResult = {
   truncated: boolean;
   /** No data yet for the current request. */
   isPending: boolean;
+  /** Some data has loaded (fresh, cached or carried over from the previous range). */
+  hasData: boolean;
+  /** When the shown data was fetched (oldest source in list mode); 0 if none. */
+  dataUpdatedAt: number;
   isFetching: boolean;
   error: unknown;
   /** Which backend path served the data (for tests and diagnostics). */
   mode: 'range' | 'lists';
   refetch: (opts?: { cancelRefetch?: boolean }) => Promise<unknown>;
 };
+
+/** Fetch time of the oldest source that has data; 0 when none has. */
+function oldestUpdate(queries: { data?: unknown; dataUpdatedAt: number }[]): number {
+  const times = queries.filter((q) => q.data !== undefined).map((q) => q.dataUpdatedAt);
+  return times.length > 0 ? Math.min(...times) : 0;
+}
 
 export function useCalendarEvents(
   userId: string | undefined,
@@ -82,12 +94,14 @@ export function useCalendarEvents(
   const knownMissing = isCalendarRpcKnownUnavailable();
   const rangeQuery = useQuery({
     queryKey: queryKeys.calendarRange(userId, fromIso, toIso, sourcesKey),
+    // Kept on the device so the calendar opens offline after a restart.
+    ...PERSISTED_QUERY,
     enabled: !!userId && !knownMissing && enabledSources.length > 0,
     queryFn: () => calendarService.getUserCalendar(new Date(fromIso), new Date(toIso), enabledSources),
     // Month / agenda changes keep the previous rows visible while loading.
     placeholderData: keepPreviousData,
     staleTime: 30_000,
-    retry: (count, error) => !(error instanceof CalendarRpcUnavailableError) && count < 2,
+    retry: (count, error) => !(error instanceof CalendarRpcUnavailableError) && shouldRetryQuery(count, error),
   });
   const useLists = knownMissing || rangeQuery.error instanceof CalendarRpcUnavailableError;
 
@@ -105,6 +119,7 @@ export function useCalendarEvents(
   const lists = useQueries({
     queries: listSources.map((source) => ({
       queryKey: queryKeys.calendarSource(userId, source),
+      ...PERSISTED_QUERY,
       enabled: !!userId && (source !== 'hosting' || !!businessId),
       queryFn: () => fetchList(source, userId!, businessId),
       staleTime: 30_000,
@@ -122,6 +137,8 @@ export function useCalendarEvents(
         rows,
         truncated: queries.some((q) => (q.data?.length ?? 0) >= CALENDAR_PAGE_CAP),
         isPending: queries.some((q) => q.isPending && q.fetchStatus !== 'idle'),
+        hasData: queries.some((q) => q.data !== undefined),
+        dataUpdatedAt: oldestUpdate(queries),
         isFetching: queries.some((q) => q.isFetching),
         error: queries.find((q) => q.isError)?.error ?? null,
       };
@@ -142,6 +159,8 @@ export function useCalendarEvents(
     rows: rangeQuery.data?.rows ?? [],
     truncated: rangeQuery.data?.truncated ?? false,
     isPending: rangeQuery.isPending && rangeQuery.fetchStatus !== 'idle',
+    hasData: rangeQuery.data !== undefined,
+    dataUpdatedAt: rangeQuery.dataUpdatedAt,
     isFetching: rangeQuery.isFetching,
     error: rangeQuery.error,
     mode: 'range',

@@ -2,7 +2,10 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import * as WebBrowser from 'expo-web-browser';
 import * as QueryParams from 'expo-auth-session/build/QueryParams';
-import { supabase } from './supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
+import { supabase, supabaseStorageKey, storedSessionAtLaunch } from './supabase';
+import { parseStoredSession } from '@/utils/offlineSnapshot';
 import { getAuthRedirectUrl, getAuthEmailRedirectUrl } from './authRedirect';
 import { oauthEnabled } from './runtime';
 
@@ -250,9 +253,29 @@ export const authService = {
     return data.user;
   },
 
-  onAuthStateChange(callback: (session: any) => void) {
-    return supabase.auth.onAuthStateChange((_event, session) => {
-      callback(session);
+  /**
+   * The session supabase-js last persisted, read straight from storage with
+   * no refresh and no network. Used to keep a signed-in user signed in when
+   * the startup refresh can't reach the server (docs/OFFLINE_PLAN.md §3.6).
+   * The access token may be expired: callers treat it as "unverified".
+   */
+  async readStoredSession(): Promise<Session | null> {
+    try {
+      const stored = parseStoredSession(await AsyncStorage.getItem(supabaseStorageKey));
+      return stored as unknown as Session | null;
+    } catch {
+      return null;
+    }
+  },
+
+  /** The user id of the session stored when the app launched, if any. */
+  async storedUserIdAtLaunch(): Promise<string | null> {
+    return parseStoredSession(await storedSessionAtLaunch)?.user.id ?? null;
+  },
+
+  onAuthStateChange(callback: (session: Session | null, event: AuthChangeEvent) => void) {
+    return supabase.auth.onAuthStateChange((event, session) => {
+      callback(session, event);
     });
   },
 };

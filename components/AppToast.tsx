@@ -13,6 +13,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CheckCircle, AlertCircle } from 'lucide-react-native';
 import { alpha, Colors, Typography, Spacing, BorderRadius, Shadows } from '@/constants/theme';
+import { OFFLINE_BANNER_OFFSET, useBannerKind } from '@/components/OfflineBanner';
+import { useConnectivity } from '@/services/connectivity';
 import {
   registerNotifyHost,
   type ToastPayload,
@@ -91,6 +93,8 @@ function ToastItem({ toast, onDone }: { toast: ToastPayload; onDone: (id: number
  */
 export function AppToast() {
   const insets = useSafeAreaInsets();
+  // Stack toasts below the connection banner rather than on top of it.
+  const bannerUp = useBannerKind(useConnectivity()) !== null;
   const [toasts, setToasts] = useState<ToastPayload[]>([]);
   // FIFO queue: a confirm requested while another is open must not clobber
   // it (the replaced dialog's onConfirm/onCancel would never fire, hanging
@@ -124,7 +128,15 @@ export function AppToast() {
     <>
       <View
         pointerEvents="box-none"
-        style={[styles.toastWrap, { top: insets.top + (Platform.OS === 'web' ? 16 : 8) }]}
+        style={[
+          styles.toastWrap,
+          {
+            top:
+              insets.top +
+              (Platform.OS === 'web' ? 16 : 8) +
+              (bannerUp ? OFFLINE_BANNER_OFFSET : 0),
+          },
+        ]}
       >
         {toasts.map((toast) => (
           <ToastItem key={toast.id} toast={toast} onDone={removeToast} />

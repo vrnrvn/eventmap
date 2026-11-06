@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { supabase } from './supabase';
+import { supabase, getSessionUser } from './supabase';
 import type { RankedEvent, EventDetails, Event, EventLink, EventVisibility, AgeRestriction } from '@/types/database';
 
 import { FilterOptions } from '@/types/app';
@@ -473,9 +473,7 @@ export const eventsService = {
     file: { uri: string; name: string; type: string },
     folder: 'events' | 'logos' | 'venues' = 'events'
   ): Promise<string> {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const fileExt = file.name.split('.').pop() || 'jpg';

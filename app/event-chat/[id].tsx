@@ -24,6 +24,7 @@ import {
   Bell,
   BellOff,
   ChevronDown,
+  CloudOff,
   Info,
   Lock,
   MessageCircle,
@@ -35,6 +36,19 @@ import {
   X,
 } from 'lucide-react-native';
 import { socialService, BlockingUnavailableError } from '@/services/social';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useIsRestoring, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/hooks/queryKeys';
+import { getConnectivity, subscribeConnectivity } from '@/utils/connectivity';
+import { isConnectionError } from '@/utils/networkErrors';
+import {
+  CACHED_ROOM_MESSAGES,
+  buildOutbox,
+  mergePending,
+  messagesToAutoRetry,
+  outboxKey,
+  parseOutbox,
+} from '@/utils/chatOutbox';
 import { complaintsService } from '@/services/complaints';
 import { ReportReasonSheet } from '@/components/ReportReasonSheet';
 import { ChatModerationSheet } from '@/components/ChatModerationSheet';
@@ -77,6 +91,13 @@ import {
   type ChatMessage,
 } from '@/components/chat/ChatMessageRow';
 
+/** A room as kept on the device for offline reading (queryKeys.chatRoom). */
+type CachedChatRoom = {
+  details: EventDetails;
+  postStatus: ChatPostStatus | null;
+  messages: ChatMessage[];
+};
+
 const NEAR_BOTTOM_THRESHOLD = 80;
 const MAX_MESSAGE_LENGTH = 1000;
 const COUNTER_VISIBLE_FROM = MAX_MESSAGE_LENGTH - 100;
@@ -105,7 +126,9 @@ function haptic(kind: 'send' | 'press' | 'error') {
 export default function EventChatScreen() {
   const { id, messageId: targetMessageId } = useLocalSearchParams<{ id: string; messageId?: string }>();
   const insets = useSafeAreaInsets();
-  const { user, profile } = useAuth();
+  const { user, profile, sessionStale } = useAuth();
+  const sessionStaleRef = useRef(sessionStale);
+  sessionStaleRef.current = sessionStale;
   const listRef = useRef<FlatList<ListRow>>(null);
   const [details, setDetails] = useState<EventDetails | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -133,6 +156,16 @@ export default function EventChatScreen() {
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [slowRemaining, setSlowRemaining] = useState(0);
   const [unreadJump, setUnreadJump] = useState<{ count: number; dividerId: string } | null>(null);
+  // Opened from the device cache because the room couldn't load (offline):
+  // reloaded for real once the connection is back.
+  const [offlineRoom, setOfflineRoom] = useState(false);
+  // What's on screen came from the device cache (provisionally or offline):
+  // not mirrored back, which would stamp it as fresh.
+  const roomFromCacheRef = useRef(false);
+  const queryClient = useQueryClient();
+  // The room's outbox (unsent messages + composer draft) has been read and
+  // merged in; only then is it written back (utils/chatOutbox).
+  const [outboxRestored, setOutboxRestored] = useState(false);
   const openedLastReadRef = useRef<string | null | undefined>(undefined);
   const lastSentAtRef = useRef<number>(0);
   const deepLinkHandledRef = useRef<string | null>(null);
@@ -538,6 +571,34 @@ export default function EventChatScreen() {
     return () => clearTimeout(timer);
   }, [typingUsers]);
 
+  // The transcript and access state last mirrored for this room, with any
+  // unsent messages, shown when the room can't load. Messages written
+  // offline are queued and sent once the connection is back.
+  // `provisional`: shown while the live load runs (it can take a while on
+  // a bad connection), replaced when it succeeds; no offline banner yet.
+  const openCachedRoom = useCallback(({ provisional = false } = {}) => {
+    if (!id) return false;
+    const cached = queryClient.getQueryData<CachedChatRoom>(queryKeys.chatRoom(id));
+    if (!cached?.details || !Array.isArray(cached.messages)) return false;
+    roomFromCacheRef.current = true;
+    setDetails(cached.details);
+    if (cached.postStatus) setPostStatus(cached.postStatus);
+    // Keep unsent messages already on screen (restored or just written).
+    setMessages((current) => sortMessages(mergePending(cached.messages, current.filter((m) => m.localStatus))));
+    if (!provisional) setOfflineRoom(true);
+    setLoadError(false);
+    canChatRef.current = true;
+    return true;
+  }, [id, queryClient]);
+
+  // Opened before the device cache finished restoring (offline start): show
+  // the saved room as soon as it's available if nothing has loaded yet.
+  const isRestoring = useIsRestoring();
+  useEffect(() => {
+    if (isRestoring || !loading || messagesRef.current.some((m) => !m.localStatus)) return;
+    if (openCachedRoom({ provisional: true })) setLoading(false);
+  }, [isRestoring, loading, openCachedRoom]);
+
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
@@ -545,6 +606,13 @@ export default function EventChatScreen() {
     const load = async () => {
       setLoading(true);
       setLoadError(false);
+      if (getConnectivity() === 'offline' && openCachedRoom()) {
+        setLoading(false);
+        hasLoadedRef.current = true;
+        return;
+      }
+      // Show the saved copy right away; the live load below replaces it.
+      if (!hasLoadedRef.current && openCachedRoom({ provisional: true })) setLoading(false);
       try {
         const [nextDetails, status] = await Promise.all([
           eventsService.getEventDetails(id),
@@ -558,6 +626,7 @@ export default function EventChatScreen() {
           (nextDetails?.user_rsvp === 'going' && nextDetails.rsvp_count >= 2) ||
           Boolean(status?.can_read);
         if (!hasAccess) {
+          roomFromCacheRef.current = false;
           setMessages([]);
           return;
         }
@@ -593,7 +662,11 @@ export default function EventChatScreen() {
           }
         }
 
-        setMessages(initialMessages);
+        setMessages((current) =>
+          sortMessages(mergePending(initialMessages, current.filter((m) => m.localStatus)))
+        );
+        roomFromCacheRef.current = false;
+        setOfflineRoom(false);
         setHasMoreHistory(initialMessages.length >= CHAT_MESSAGE_PAGE_SIZE);
         nearBottomRef.current = true;
         setUnseenCount(0);
@@ -664,9 +737,10 @@ export default function EventChatScreen() {
         );
         supersededRef.current = false;
       } catch {
-        if (!cancelled) {
+        if (!cancelled && !openCachedRoom()) {
           setDetails(null);
-          setMessages([]);
+          // Unsent messages stay (and stay stored) for the next attempt.
+          setMessages((current) => current.filter((m) => m.localStatus));
           setLoadError(true);
         }
       } finally {
@@ -707,6 +781,7 @@ export default function EventChatScreen() {
   }, [
     id,
     reloadKey,
+    openCachedRoom,
     handleIncoming,
     markDeleted,
     mergeMessages,
@@ -721,6 +796,58 @@ export default function EventChatScreen() {
     flashMessage,
     showNotice,
   ]);
+
+  // Restore the room's outbox once the signed-in user is known (after an
+  // offline start that can be several seconds after the screen opened).
+  useEffect(() => {
+    const uid = user?.id;
+    if (!id || !uid || outboxRestored) return;
+    let cancelled = false;
+    void AsyncStorage.getItem(outboxKey(uid, id))
+      .then((raw) => parseOutbox<ChatMessage>(raw))
+      .catch(() => null)
+      .then((outbox) => {
+        if (cancelled) return;
+        if (outbox) {
+          if (outbox.pending.length) setMessages((current) => sortMessages(mergePending(current, outbox.pending)));
+          if (outbox.draft.trim()) {
+            setDraft((current) => (current.trim() ? current : outbox.draft));
+            draftMentionsRef.current = outbox.draftMentions;
+          }
+        }
+        setOutboxRestored(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, user?.id, outboxRestored]);
+
+  // Keep the room's unsent messages and composer draft on the device
+  // (debounced), so a dropped connection or a killed app loses neither.
+  // Not before the stored outbox was read: that would overwrite it.
+  useEffect(() => {
+    const uid = user?.id;
+    if (!id || !uid || !outboxRestored) return;
+    const timer = setTimeout(() => {
+      const outbox = buildOutbox(messages, draft, draftMentionsRef.current);
+      const key = outboxKey(uid, id);
+      (outbox ? AsyncStorage.setItem(key, JSON.stringify(outbox)) : AsyncStorage.removeItem(key)).catch(() => {});
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [id, user?.id, messages, draft, outboxRestored]);
+
+  // Mirror the newest server messages and access state into the device cache
+  // (5 most recent rooms), so the room opens offline. Not while showing that
+  // cached copy: it would be re-stamped as fresh.
+  useEffect(() => {
+    if (!id || !details || offlineRoom || roomFromCacheRef.current || loading || !canChat) return;
+    const room: CachedChatRoom = {
+      details,
+      postStatus,
+      messages: messages.filter((m) => !m.localStatus).slice(-CACHED_ROOM_MESSAGES),
+    };
+    queryClient.setQueryData(queryKeys.chatRoom(id), room);
+  }, [id, details, postStatus, messages, offlineRoom, loading, canChat, queryClient]);
 
   // Attendees for @mention autocomplete (public, non-anonymous, not self).
   useEffect(() => {
@@ -793,18 +920,38 @@ export default function EventChatScreen() {
         return next;
       });
       scrollToLatest(true);
+      const waitForConnection = () =>
+        setMessages((current) =>
+          current.map((item) =>
+            item.id === pending.id && item.localStatus === 'sending'
+              ? { ...item, localStatus: 'failed' as const, autoRetry: true }
+              : item
+          )
+        );
+      // No connection, or the session isn't verified yet (the request would
+      // wait on the token refresh, then be refused): keep it (on the device
+      // too) and send once that changes.
+      if (getConnectivity() === 'offline' || sessionStaleRef.current) {
+        waitForConnection();
+        return;
+      }
       try {
         const sent = await eventChatService.sendMessage(id, pending.body, pending.id, pending.mentions);
         lastSentAtRef.current = Math.max(lastSentAtRef.current, new Date(sent.created_at).getTime());
         mergeMessages([sent]);
         scheduleMarkRead();
       } catch (err) {
+        if (isConnectionError(err)) {
+          waitForConnection();
+          showNotice("No connection — it will send when you're back online.");
+          return;
+        }
         // If the insert committed and the realtime echo already replaced the
         // optimistic row, the server copy must not be stamped as failed.
         setMessages((current) =>
           current.map((item) =>
             item.id === pending.id && item.localStatus === 'sending'
-              ? { ...item, localStatus: 'failed' as const }
+              ? { ...item, localStatus: 'failed' as const, autoRetry: false }
               : item
           )
         );
@@ -849,6 +996,28 @@ export default function EventChatScreen() {
     },
     [id, scrollToLatest, mergeMessages, scheduleMarkRead, refreshDetails, showNotice]
   );
+
+  // Messages waiting for a connection are re-sent once it's back (and right
+  // after the room loads online). Their ids make a repeat harmless.
+  const retryWaiting = useCallback(() => {
+    if (getConnectivity() === 'offline' || offlineRoom || sessionStaleRef.current) return;
+    for (const message of messagesToAutoRetry(messagesRef.current)) void sendNow(message);
+  }, [offlineRoom, sendNow]);
+  useEffect(() => {
+    if (!loading && !offlineRoom && outboxRestored && !sessionStale) retryWaiting();
+  }, [loading, offlineRoom, outboxRestored, sessionStale, retryWaiting]);
+  useEffect(() => {
+    let previous = getConnectivity();
+    return subscribeConnectivity((status) => {
+      const wasImpaired = previous !== 'online';
+      previous = status;
+      if (!wasImpaired || status !== 'online') return;
+      // A cached room reloads for real (which then re-sends); a live room
+      // just re-sends.
+      if (offlineRoom) setReloadKey((key) => key + 1);
+      else retryWaiting();
+    });
+  }, [offlineRoom, retryWaiting]);
 
   const stopTyping = useCallback(() => {
     if (typingIdleTimer.current) {
@@ -1395,7 +1564,14 @@ export default function EventChatScreen() {
         </TouchableOpacity>
       </View>
 
-      {canChat && !loading && connectionStatus !== 'connected' ? (
+      {canChat && !loading && offlineRoom ? (
+        <View style={styles.connectionBanner}>
+          <CloudOff size={16} color={Colors.text.secondary} />
+          <Text style={styles.connectionBannerText}>
+            Offline · Showing saved messages. New ones send when you reconnect.
+          </Text>
+        </View>
+      ) : canChat && !loading && connectionStatus !== 'connected' ? (
         <View style={styles.connectionBanner}>
           <ActivityIndicator size="small" color={Colors.text.secondary} />
           <Text style={styles.connectionBannerText}>

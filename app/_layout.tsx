@@ -33,11 +33,18 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { Typography } from '@/constants/theme';
 import { setupNotificationResponseHandlers } from '@/services/pushNotifications';
-import { markNotificationAsRead } from '@/services/notifications';
+import { runOrQueue } from '@/services/pendingWrites';
 import { router } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { BrandedSplashScreen } from '@/components/BrandedSplashScreen';
 import { AppToast } from '@/components/AppToast';
+import { OfflineBanner } from '@/components/OfflineBanner';
+import { QueryCachePersistence } from '@/components/QueryCachePersistence';
+import { PendingWritesSync } from '@/components/PendingWritesSync';
+import { startConnectivityMonitoring } from '@/services/connectivity';
+import { shouldRetryQuery } from '@/utils/queryRetry';
+import { PERSISTED_QUERY } from '@/utils/queryPersistence';
+import { queryKeys } from '@/hooks/queryKeys';
 
 function resolveNotificationPath(data: Record<string, unknown> | null | undefined): string {
   if (!data || typeof data !== 'object') {
@@ -65,9 +72,10 @@ function resolveNotificationPath(data: Record<string, unknown> | null | undefine
 
 /**
  * Push-notification navigation, gated on auth. Taps that arrive before the
- * session is known are queued; once auth resolves they're flushed if the user
- * is signed in and onboarded, and dropped otherwise (the tabs guard would
- * bounce them anyway — dropping avoids a redirect flash).
+ * session is known, or while the profile can't load (e.g. opened offline),
+ * are queued and flushed once the user can navigate. Taps for a known
+ * signed-out / un-onboarded user are dropped (the tabs guard would bounce
+ * them anyway — dropping avoids a redirect flash).
  */
 function PushNavigationGate() {
   const { session, loading, profileError, hasCompletedOnboarding } = useAuth();
@@ -76,8 +84,11 @@ function PushNavigationGate() {
   const canNavigateRef = useRef(canNavigate);
   canNavigateRef.current = canNavigate;
   const authKnown = !loading;
-  const authKnownRef = useRef(authKnown);
-  authKnownRef.current = authKnown;
+  // Still worth holding a tap for: auth resolving, or a signed-in user whose
+  // profile failed to load and is being retried.
+  const mayNavigateSoon = !authKnown || (!!session && profileError);
+  const mayNavigateSoonRef = useRef(mayNavigateSoon);
+  mayNavigateSoonRef.current = mayNavigateSoon;
 
   useEffect(() => {
     const cleanup = setupNotificationResponseHandlers((data) => {
@@ -87,12 +98,12 @@ function PushNavigationGate() {
       // badge stale until the user opens the notification centre.
       const notificationId = data && typeof data.notificationId === 'string' ? data.notificationId : null;
       if (notificationId) {
-        void markNotificationAsRead(notificationId).catch(() => {});
+        void runOrQueue({ kind: 'notificationRead', targetId: notificationId }).catch(() => {});
       }
       if (canNavigateRef.current) {
         router.push(path as never);
-      } else if (!authKnownRef.current) {
-        pendingRef.current = path; // auth still resolving: queue the latest tap
+      } else if (mayNavigateSoonRef.current) {
+        pendingRef.current = path; // can't navigate yet: queue the latest tap
       }
       // Known signed-out / un-onboarded: drop the navigation.
     });
@@ -100,18 +111,20 @@ function PushNavigationGate() {
   }, []);
 
   useEffect(() => {
-    if (!authKnown || !pendingRef.current) return;
+    if (mayNavigateSoon || !pendingRef.current) return;
     const path = pendingRef.current;
     pendingRef.current = null;
     if (canNavigate) {
       router.push(path as never);
     }
-  }, [authKnown, canNavigate]);
+  }, [mayNavigateSoon, canNavigate]);
 
   return null;
 }
 
 SplashScreen.preventAutoHideAsync();
+
+startConnectivityMonitoring();
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -119,11 +132,29 @@ const queryClient = new QueryClient({
       // Lists stay fresh via focus refetch; a short staleTime avoids a
       // duplicate request when two screens mount the same query back to back.
       staleTime: 30_000,
-      retry: 1,
+      // Connection failures and 5xx only, never while offline (see
+      // utils/queryRetry for why).
+      retry: shouldRetryQuery,
+      // Always try the request (offline detection can lag, and a failed
+      // attempt keeps cached data on screen) instead of parking queries as
+      // "paused", which would leave a first load on a spinner indefinitely.
+      networkMode: 'offlineFirst',
       refetchOnWindowFocus: true,
     },
   },
 });
+
+// Event pages mirror what they show into these entries (EventDetail), so
+// recently opened events are kept on the device and open offline.
+queryClient.setQueryDefaults(queryKeys.eventDetailsPrefix(), PERSISTED_QUERY);
+// Same for the notifications tab's first page (notifications.tsx).
+queryClient.setQueryDefaults(queryKeys.notificationsPrefix(), PERSISTED_QUERY);
+// And My Events' first page per tab (MyEvents.tsx).
+queryClient.setQueryDefaults(['events', 'mine'], PERSISTED_QUERY);
+// And the most recent chat rooms (event-chat/[id].tsx).
+queryClient.setQueryDefaults(queryKeys.chatRoomPrefix(), PERSISTED_QUERY);
+// And Discover's last area (discover.tsx).
+queryClient.setQueryDefaults(queryKeys.discoverLastArea(), PERSISTED_QUERY);
 
 /**
  * React Query's "window focus" has no meaning in React Native; feed it the
@@ -193,6 +224,8 @@ export default function RootLayout() {
         <AuthProvider>
           <AuthRedirectHandler />
           <PushNavigationGate />
+          <QueryCachePersistence>
+          <PendingWritesSync />
           <AppProvider>
             <PremiumProvider>
               <SearchProvider>
@@ -205,12 +238,14 @@ export default function RootLayout() {
                 <Stack.Screen name="+not-found" />
               </Stack>
               <BrandedSplashScreen visible={showBrandedSplash} />
+              <OfflineBanner />
               <AppToast />
               </BottomSheetModalProvider>
               </SearchProvider>
               <StatusBar style="auto" />
             </PremiumProvider>
           </AppProvider>
+          </QueryCachePersistence>
         </AuthProvider>
       </QueryClientProvider>
     </GestureHandlerRootView>

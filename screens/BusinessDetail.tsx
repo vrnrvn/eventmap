@@ -1,4 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/hooks/queryKeys';
+import { useScreenState } from '@/hooks/useScreenState';
+import { PERSISTED_QUERY } from '@/utils/queryPersistence';
+import { FreshnessNote, OfflineState } from '@/components/ui/QueryStates';
 import {
   View,
   Text,
@@ -46,6 +51,8 @@ import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { complaintsService } from '@/services/complaints';
 import { notify, notifyConfirm } from '@/utils/notify';
+import { connectionErrorMessage } from '@/utils/networkErrors';
+import { runOrQueueWithNotice } from '@/services/pendingWrites';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -68,6 +75,18 @@ function buildFacebookUrl(handle: string): string {
   return `https://facebook.com/${clean}`;
 }
 
+type BusinessPage = {
+  business: Business | null;
+  photos: string[];
+  links: { id: string; label: string | null; url: string }[];
+  events: Event[];
+  upcomingCount: number | null;
+  averageRating: { average: number; count: number };
+  followerCount: number;
+  following: boolean;
+  reviews: ReviewWithProfile[];
+};
+
 export default function BusinessDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
@@ -83,84 +102,102 @@ export default function BusinessDetail() {
   const [averageRating, setAverageRating] = useState({ average: 0, count: 0 });
   const [followerCount, setFollowerCount] = useState(0);
   const [following, setFollowing] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [loadError, setLoadError] = useState(false);
 
   const isOwner = userBusiness?.id === id;
+  const queryClient = useQueryClient();
 
-  const load = useCallback(async () => {
-    if (!id) return;
-    try {
-      const [biz, photosData, linksData, eventsData, upcomingCount, avg, count, isFollowingResult] =
+  // The whole page is one cached query, kept on the device so business pages
+  // you've visited open offline (docs/OFFLINE_PLAN.md §3.5). Optional
+  // sections that fail keep their last known value instead of blanking.
+  const query = useQuery({
+    queryKey: queryKeys.businessPage(id ?? ''),
+    ...PERSISTED_QUERY,
+    enabled: !!id,
+    queryFn: async (): Promise<BusinessPage> => {
+      const previous = queryClient.getQueryData<BusinessPage>(queryKeys.businessPage(id!));
+      const [biz, photosData, linksData, eventsData, upcoming, avg, count, isFollowingResult, reviewsList] =
         await Promise.all([
-        businessesService.getBusiness(id),
-        businessesService.getBusinessPhotos(id).catch(() => []),
-        businessesService.getBusinessLinks(id).catch(() => []),
-        eventsService.getBusinessEvents(id, { limit: 10, scope: 'upcoming' }),
-        eventsService.getBusinessEventsCount(id, { scope: 'upcoming' }).catch(() => null),
-        reviewsService.getAverageRatingAndCount(id),
-        businessesService.getFollowerCount(id),
-        user ? socialService.isFollowingBusiness(id) : Promise.resolve(false),
-      ]);
-      setBusiness(biz || null);
-      setPhotos(photosData.map((p) => p.image_url));
-      setLinks(linksData);
-      // Ended recurring series come back from the upcoming query; drop them.
-      setEvents(eventsData.filter((e) => !hasEventEnded(e)));
-      setUpcomingCount(upcomingCount);
-      setAverageRating(avg);
-      setFollowerCount(count);
-      setFollowing(isFollowingResult);
+          businessesService.getBusiness(id!),
+          businessesService.getBusinessPhotos(id!).catch(() => null),
+          businessesService.getBusinessLinks(id!).catch(() => null),
+          eventsService.getBusinessEvents(id!, { limit: 10, scope: 'upcoming' }),
+          eventsService.getBusinessEventsCount(id!, { scope: 'upcoming' }).catch(() => null),
+          reviewsService.getAverageRatingAndCount(id!),
+          businessesService.getFollowerCount(id!),
+          user ? socialService.isFollowingBusiness(id!) : Promise.resolve(false),
+          reviewsService.getReviewsForBusiness(id!),
+        ]);
+      return {
+        business: biz || null,
+        photos: photosData ? photosData.map((p) => p.image_url) : (previous?.photos ?? []),
+        links: linksData ?? previous?.links ?? [],
+        events: eventsData,
+        upcomingCount: upcoming ?? previous?.upcomingCount ?? null,
+        averageRating: avg,
+        followerCount: count,
+        following: isFollowingResult,
+        reviews: biz ? reviewsList : [],
+      };
+    },
+  });
+  const { state: screenState, freshness } = useScreenState(query, {
+    hasData: query.data !== undefined,
+    isEmpty: false,
+  });
+  const loading = screenState === 'loading';
+  const loadError = screenState === 'error' || screenState === 'offline';
 
-      if (biz) {
-        const reviewsList = await reviewsService.getReviewsForBusiness(id);
-        setReviews(reviewsList);
-      }
-      setLoadError(false);
-    } catch (error) {
-      console.error('Failed to load business:', error);
-      setBusiness(null);
-      setLoadError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, [id, user]);
-
+  // Follow / review actions update these locally; each fetched page resets
+  // them to the server's values.
   useEffect(() => {
-    load();
-  }, [load]);
+    const page = query.data;
+    if (!page) return;
+    setBusiness(page.business);
+    setPhotos(page.photos);
+    setLinks(page.links);
+    // Ended recurring series come back from the upcoming query, and cached
+    // rows can be days old: drop ended events.
+    setEvents(page.events.filter((e) => !hasEventEnded(e)));
+    setUpcomingCount(page.upcomingCount);
+    setAverageRating(page.averageRating);
+    setFollowerCount(page.followerCount);
+    setFollowing(page.following);
+    setReviews(page.reviews);
+  }, [query.data]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    load().finally(() => setRefreshing(false));
-  }, [load]);
+    query.refetch().finally(() => setRefreshing(false));
+  }, [query]);
 
   const handleFollow = async () => {
     if (!user || !id) return;
     setSaving(true);
     try {
-      if (following) {
-        await socialService.unfollowBusiness(id);
-        setFollowing(false);
-        setFollowerCount((c) => Math.max(0, c - 1));
-      } else {
-        await socialService.followBusiness(id);
-        setFollowing(true);
-        setFollowerCount((c) => c + 1);
-      }
-    } catch {
-      notify.error(following ? 'Failed to unfollow' : 'Failed to follow');
+      // Queued when offline and replayed on reconnect; shown as done either way.
+      await runOrQueueWithNotice({ kind: 'follow', targetId: id, on: !following, label: business?.name });
+      setFollowing(!following);
+      setFollowerCount((c) => Math.max(0, c + (following ? -1 : 1)));
+      // Keep the cached page in step, so an offline reopen shows the change.
+      queryClient.setQueryData<BusinessPage>(queryKeys.businessPage(id), (page) =>
+        page
+          ? {
+              ...page,
+              following: !following,
+              followerCount: Math.max(0, page.followerCount + (following ? -1 : 1)),
+            }
+          : page
+      );
+    } catch (err) {
+      notify.error(connectionErrorMessage(err) ?? (following ? 'Failed to unfollow' : 'Failed to follow'));
     } finally {
       setSaving(false);
     }
   };
 
-  const retryLoad = () => {
-    setLoading(true);
-    load();
-  };
+  const retryLoad = () => void query.refetch();
 
   /** Recurring series display their next occurrence, not the first one. */
   const nextStartOf = (event: Event) =>
@@ -170,7 +207,8 @@ export default function BusinessDetail() {
 
   const formatDate = (dateString: string) => formatEventDate(dateString);
 
-  if (loading && !business) {
+  // Also while fetched data is being copied into state (one render).
+  if ((loading && !business) || (!business && query.data?.business)) {
     return (
       <View style={[styles.root, { paddingTop: insets.top }]}>
         <ScreenHeader title="Business" safeArea={false} />
@@ -186,7 +224,9 @@ export default function BusinessDetail() {
       <View style={[styles.root, { paddingTop: insets.top }]}>
         <ScreenHeader title="Business" safeArea={false} />
         <View style={styles.centerContainer}>
-          {loadError ? (
+          {screenState === 'offline' ? (
+            <OfflineState onRetry={retryLoad} />
+          ) : loadError ? (
             <ErrorState
               title="Couldn't load this business"
               onRetry={retryLoad}
@@ -256,6 +296,7 @@ export default function BusinessDetail() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />
         }
       >
+        <FreshnessNote text={freshness} style={styles.freshness} />
         {/* Hero: logo + name + category */}
         <View style={styles.hero}>
           <Avatar imageUrl={business.logo_url} name={business.name} size={100} />
@@ -487,8 +528,15 @@ export default function BusinessDetail() {
                 isOwner
                   ? async (reviewId, response) => {
                       await reviewsService.updateBusinessResponse(reviewId, response);
-                      const list = await reviewsService.getReviewsForBusiness(id!);
-                      setReviews(list);
+                      // Show the saved response now; the reload is best-effort
+                      // so a failure can't report the saved response as failed.
+                      setReviews((prev) =>
+                        prev.map((r) => (r.id === reviewId ? { ...r, business_response: response } : r))
+                      );
+                      reviewsService
+                        .getReviewsForBusiness(id!)
+                        .then(setReviews)
+                        .catch(() => {});
                     }
                   : undefined
               }
@@ -526,6 +574,10 @@ export default function BusinessDetail() {
 }
 
 const styles = StyleSheet.create({
+  freshness: {
+    marginHorizontal: Spacing.md,
+    marginTop: Spacing.sm,
+  },
   root: {
     flex: 1,
     backgroundColor: Colors.background.secondary,

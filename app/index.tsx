@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Redirect } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { useConnectivity } from '@/services/connectivity';
 import { View, Text, ActivityIndicator, StyleSheet, TouchableOpacity } from 'react-native';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 
@@ -8,6 +9,7 @@ export default function Index() {
   const { session, loading, profile, profileError, hasCompletedOnboarding, refreshProfile } =
     useAuth();
   const [retrying, setRetrying] = useState(false);
+  const offline = useConnectivity() === 'offline';
 
   if (loading) {
     return (
@@ -29,7 +31,9 @@ export default function Index() {
       <View style={styles.container}>
         <Text style={styles.errorTitle}>Couldn&apos;t load your profile</Text>
         <Text style={styles.errorBody}>
-          Check your connection and try again.
+          {offline
+            ? "You're offline. We'll try again as soon as you reconnect."
+            : 'Check your connection and try again.'}
         </Text>
         {retrying ? (
           <ActivityIndicator size="small" color={Colors.primary} style={styles.retrySpinner} />

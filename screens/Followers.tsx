@@ -16,6 +16,8 @@ import { ChevronRight, Users } from 'lucide-react-native';
 import { Avatar } from '@/components/Avatar';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { OfflineState } from '@/components/ui/QueryStates';
+import { useConnectivity } from '@/services/connectivity';
 
 type Follower = {
   id: string;
@@ -25,6 +27,7 @@ type Follower = {
 };
 
 export default function Followers() {
+  const connectivity = useConnectivity();
   const insets = useSafeAreaInsets();
   const { userBusiness } = useApp();
   const [followers, setFollowers] = useState<Follower[]>([]);
@@ -91,7 +94,9 @@ export default function Followers() {
       <Text style={styles.headerSubtitle}>
         {loading
           ? 'Loading…'
-          : `${followers.length} follower${followers.length !== 1 ? 's' : ''}`}
+          : loadError && followers.length === 0
+            ? 'Not loaded yet'
+            : `${followers.length} follower${followers.length !== 1 ? 's' : ''}`}
       </Text>
 
       {loading ? (
@@ -126,7 +131,9 @@ export default function Followers() {
             />
           }
           ListEmptyComponent={
-            loadError ? (
+            loadError && connectivity === 'offline' ? (
+              <OfflineState onRetry={retryLoad} />
+            ) : loadError ? (
               <ErrorState
                 title="Couldn't load followers"
                 onRetry={retryLoad}

@@ -18,6 +18,8 @@ import { useCalendarEvents, type CalendarRow } from '@/hooks/useCalendarEvents';
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { FreshnessNote, OfflineState } from '@/components/ui/QueryStates';
+import { useScreenState } from '@/hooks/useScreenState';
 import { Button } from '@/components/ui/Button';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { EventListItem, type EventListItemBadge } from '@/components/EventListItem';
@@ -197,6 +199,10 @@ export default function CalendarScreen() {
     todayStart
   );
   useRefetchOnFocus(data.refetch, !!userId);
+  const { state: screenState, freshness } = useScreenState(
+    { isError: !!data.error, dataUpdatedAt: data.dataUpdatedAt },
+    { hasData: data.hasData, isEmpty: data.rows.length === 0 }
+  );
 
   const occurrences = useMemo(() => expandOccurrences(data.rows, range, viewerTz), [data.rows, range, viewerTz]);
   const byDay = useMemo(() => groupByDay(occurrences), [occurrences]);
@@ -367,9 +373,14 @@ export default function CalendarScreen() {
     </View>
   );
 
-  const truncatedNote = data.truncated ? (
-    <Text style={styles.note}>Showing the first part of a long list. Some dates may be missing.</Text>
-  ) : null;
+  const truncatedNote = (
+    <>
+      <FreshnessNote text={freshness} style={styles.freshness} />
+      {data.truncated ? (
+        <Text style={styles.note}>Showing the first part of a long list. Some dates may be missing.</Text>
+      ) : null}
+    </>
+  );
 
   const monthHeader = (
     <View>
@@ -404,14 +415,26 @@ export default function CalendarScreen() {
 
   // Loading / error / nothing-selected states shared by both views; null when content can render.
   const blockingState = () => {
-    if (data.isPending && data.rows.length === 0) {
+    // Before the loading checks: with no list selected nothing is fetched.
+    if (activeSources.length === 0) {
+      return (
+        <View style={styles.center}>
+          <Text style={styles.emptyTitle}>Nothing selected</Text>
+          <Text style={styles.emptyText}>Turn on a list above to see those events here.</Text>
+        </View>
+      );
+    }
+    if (screenState === 'loading') {
       return (
         <View style={styles.center} accessibilityLabel="Loading events" accessibilityState={{ busy: true }}>
           <ActivityIndicator size="large" color={Colors.primary} />
         </View>
       );
     }
-    if (data.error && data.rows.length === 0) {
+    if (screenState === 'offline') {
+      return <OfflineState onRetry={() => void data.refetch()} style={styles.center} />;
+    }
+    if (screenState === 'error') {
       return (
         <ErrorState
           title="Couldn't load your calendar"
@@ -419,14 +442,6 @@ export default function CalendarScreen() {
           onRetry={() => void data.refetch()}
           style={styles.center}
         />
-      );
-    }
-    if (activeSources.length === 0) {
-      return (
-        <View style={styles.center}>
-          <Text style={styles.emptyTitle}>Nothing selected</Text>
-          <Text style={styles.emptyText}>Turn on a list above to see those events here.</Text>
-        </View>
       );
     }
     return null;
@@ -649,6 +664,9 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.md,
     fontFamily: Typography.displayFontFamilies.semibold,
     color: Colors.text.primary,
+  },
+  freshness: {
+    marginHorizontal: Spacing.md,
   },
   note: {
     paddingHorizontal: Spacing.md,

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { UserRoundX } from 'lucide-react-native';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { OfflineState } from '@/components/ui/QueryStates';
+import { useConnectivity } from '@/services/connectivity';
 import { Avatar } from '@/components/Avatar';
 import { socialService, BlockingUnavailableError } from '@/services/social';
 import { confirmAction } from '@/utils/confirm';
@@ -27,19 +29,27 @@ type BlockedUser = { id: string; name: string; avatar_url: string | null };
  * was private or you couldn't remember the name.
  */
 export default function BlockedUsers() {
+  const connectivity = useConnectivity();
   const insets = useSafeAreaInsets();
   const [users, setUsers] = useState<BlockedUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Set once the list has loaded; a failed quiet refresh then keeps it.
+  const hasLoadedRef = useRef(false);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
       setUsers(await socialService.getBlockedUsers());
       setError(null);
+      hasLoadedRef.current = true;
     } catch (err) {
+      if (silent && hasLoadedRef.current) {
+        notify.backgroundError("Couldn't refresh your blocked list.");
+        return;
+      }
       setError(
         err instanceof BlockingUnavailableError
           ? "Blocking isn't enabled on this server yet."
@@ -120,6 +130,8 @@ export default function BlockedUsers() {
         <View style={styles.center}>
           <ActivityIndicator color={Colors.primary} />
         </View>
+      ) : error && connectivity === 'offline' ? (
+        <OfflineState onRetry={() => void load()} style={styles.center} />
       ) : error ? (
         <ErrorState title={error} onRetry={() => void load()} style={styles.center} />
       ) : (

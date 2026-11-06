@@ -10,6 +10,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { socialService } from '@/services/social';
+import { runOrQueueWithNotice } from '@/services/pendingWrites';
+import { connectionErrorMessage } from '@/utils/networkErrors';
 import { notify, notifyConfirm } from '@/utils/notify';
 import { Business } from '@/types/database';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
@@ -18,10 +20,13 @@ import { Avatar } from '@/components/Avatar';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { OfflineState } from '@/components/ui/QueryStates';
+import { useConnectivity } from '@/services/connectivity';
 
 type FollowedBusiness = Business & { followId: string };
 
 export default function Following() {
+  const connectivity = useConnectivity();
   const insets = useSafeAreaInsets();
   const [businesses, setBusinesses] = useState<FollowedBusiness[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,10 +83,10 @@ export default function Following() {
       onConfirm: async () => {
         setUnfollowingId(business.id);
         try {
-          await socialService.unfollowBusiness(business.id);
+          await runOrQueueWithNotice({ kind: 'follow', targetId: business.id, on: false, label: business.name });
           setBusinesses((prev) => prev.filter((b) => b.id !== business.id));
-        } catch {
-          notify.error('Failed to unfollow');
+        } catch (err) {
+          notify.error(connectionErrorMessage(err) ?? 'Failed to unfollow');
         } finally {
           setUnfollowingId(null);
         }
@@ -111,7 +116,9 @@ export default function Following() {
       <Text style={styles.headerSubtitle}>
         {loading
           ? 'Loading…'
-          : `${businesses.length} business${businesses.length !== 1 ? 'es' : ''}`}
+          : loadError && businesses.length === 0
+            ? 'Not loaded yet'
+            : `${businesses.length} business${businesses.length !== 1 ? 'es' : ''}`}
       </Text>
 
       {loading ? (
@@ -148,7 +155,9 @@ export default function Following() {
             />
           }
           ListEmptyComponent={
-            loadError ? (
+            loadError && connectivity === 'offline' ? (
+              <OfflineState onRetry={retryLoad} />
+            ) : loadError ? (
               <ErrorState
                 title="Couldn't load who you follow"
                 onRetry={retryLoad}

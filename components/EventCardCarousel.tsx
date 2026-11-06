@@ -8,6 +8,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Colors } from '@/constants/theme';
 import { EventmapCalendar } from '@/components/icons/EventmapIcons';
+import { useImageFallback } from '@/hooks/useImageFallback';
 
 const DEFAULT_IMAGE_HEIGHT = 180;
 /** Fallback only; the real default comes from useWindowDimensions below. */
@@ -107,6 +108,7 @@ function StaticImage({
   cardWidth: number;
   applySkew: boolean;
 }) {
+  const image = useImageFallback(uri);
   return (
     <View
       style={[
@@ -115,8 +117,8 @@ function StaticImage({
         applySkew ? styles.skewed : null,
       ]}
     >
-      {uri && !isPlaceholder ? (
-        <Image source={{ uri }} style={styles.image} resizeMode="cover" />
+      {uri && !isPlaceholder && !image.failed ? (
+        <Image source={{ uri }} style={styles.image} resizeMode="cover" onError={image.onError} />
       ) : (
         <View style={[styles.image, styles.placeholder]}>
           <EventmapCalendar size={40} color={Colors.text.tertiary} />
@@ -143,6 +145,7 @@ function CarouselImage({
   cardWidth?: number;
   applySkew?: boolean;
 }) {
+  const image = useImageFallback(uri);
   const animatedStyle = useAnimatedStyle(() => {
     const inputRange = [
       (index - 1) * cardWidth,
@@ -161,8 +164,8 @@ function CarouselImage({
 
   return (
     <Animated.View style={[styles.imageWrapper, { width: cardWidth, height: imageHeight }, animatedStyle]}>
-      {uri && !isPlaceholder ? (
-        <Image source={{ uri }} style={styles.image} resizeMode="cover" />
+      {uri && !isPlaceholder && !image.failed ? (
+        <Image source={{ uri }} style={styles.image} resizeMode="cover" onError={image.onError} />
       ) : (
         <View style={[styles.image, styles.placeholder]}>
           <EventmapCalendar size={40} color={Colors.text.tertiary} />

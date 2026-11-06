@@ -923,3 +923,129 @@ touch every `user_is_event_host` check.
 - Seed note: the demo host (`host@example.test`) is also an admin, and admins get premium analytics payloads. Clear `is_admin` inside a test transaction to check the free tier.
 - [ ] **[DB]** `20261104090000_event_interactions_and_rsvp_history.sql` (tap tracking, RSVP history trigger): prepared, validated on scratch, NOT applied. Apply it before `20261104100000`. Taps from Event Detail are silently dropped until then.
 - **Ports again:** another session's stack (`eventmap_scratch_elm_analyticsb_1104`) took 3981 / 54381 between passes. Always re-check with `lsof` right before `docker run`; the scripts accept `STATIC_PORT` / `CDP_PORT` / `PROXY`.
+
+# Offline and poor-connection work (2026-11-05)
+
+Plan and implementation log: `docs/OFFLINE_PLAN.md` (steps 0-7 + step 8 no-dependency part done; final regression pass 145/145 web checks). Rule
+for this effort: **no database writes**. DB changes are prepared under
+`supabase/pending/` only (none written yet).
+
+## Pre-existing bugs fixed along the way
+- [x] Any failed refresh replaced data already on screen with an error state
+  (10 screens). Data now stays, with a freshness note.
+- [x] Discover: a failed categories request stopped events from loading
+  ("No events nearby"). A failed GPS fix did the same.
+- [x] Event page: a network error showed "Event not found".
+- [x] Save / follow: retrying after a lost response showed an error
+  (23505) while the server had the row.
+- [x] Review submit / host response reported failure when only the reload
+  after a successful write failed.
+- [x] Signed-in user opening the app offline with an expired token landed
+  on welcome, looking signed out. Restored from the stored session now.
+- [x] A failed profile refresh (Settings save) bounced the user out of the
+  tabs.
+- [x] The in-memory query cache survived sign-out. `['events','saved']` has
+  no user id, so the next account could briefly see the previous one's
+  saved list. Cleared on sign-out / switch now.
+- [x] 31 service calls made an extra auth-server round trip
+  (`auth.getUser()`).
+- [x] "Couldn't refresh" toasts fired on every tab switch / map pan
+  offline. They are quiet while the connection banner is up.
+
+## Open (offline-related)
+- [ ] The connection banner floats over screen headers (covers the title
+  while up) and over the branded splash screen.
+- [~] Images (event covers, banners, avatars) need the network. Failed
+  images now fall back to placeholders, and banners show text only
+  (step 8). Disk caching / prefetch still needs expo-image (install).
+- [ ] Google map provider: markerclusterer still loads from unpkg at
+  runtime (vendor via `scripts/vendor-map.mjs`, needs a download).
+- [x] Blank page on a fresh browser's first load: map marker injection
+  threw on an iframe without a body and unmounted the app (regression
+  exposed by step 4). Fixed in `GoogleMapView`.
+- [x] Offline cold start: taps on deep-linked screens did nothing for up to
+  6 s (no user yet). The stored session now applies at once when the
+  device is known offline.
+- [x] Saves / chat sends while the session was unverified waited ~25 s on
+  token-refresh retries (lost if the app closed). Queued / held at once
+  now; the chat shows its saved copy immediately.
+- [ ] **Larger:** with an expired token and a connected-but-failing network,
+  supabase-js retries the refresh with backoff for ~25 s, and *every*
+  request waits on it. Screens with cached data are unaffected, but
+  uncached screens spin that long before failing. Options: fail fast in
+  the custom fetch while degraded, or skip auth-js's refresh retries when
+  the connectivity store reports trouble. Needs care around token rotation.
+- [ ] In degraded (not offline) cold starts the stored session still
+  applies after up to 6 s; taps on deep-linked screens before that are
+  silently ignored (`if (!user) return`). A "still signing you in" message
+  would be clearer.
+- [ ] During a flaky moment (refresh failed, next request succeeds),
+  supabase-js sends requests with the anon key. Account reads are guarded
+  (step 2), but other screens' queries can return empty / error until the
+  next refresh. No wrong-account data.
+- [ ] Profile overview key includes the business id, so business users get
+  a second cached entry (`none`) while their business loads. Harmless,
+  wasteful.
+- [ ] BusinessDetail: review responses / own review edits update local
+  state only. The cached page catches up on the next refetch (follow is
+  synced).
+- [ ] **[DB]** Event create has no idempotency key; a lost response plus
+  a second Publish creates a duplicate and uses a monthly slot. → step 9,
+  prepare under `supabase/pending/`.
+- [ ] **[DB]** `event_photos` has no unique constraint; a retried upload
+  duplicates the row and orphans the storage object. → step 9.
+- [x] EditEvent: if reschedule succeeded and a later step failed, saving
+  again re-sent "rescheduled" notifications. Fixed in step 6 (applied steps
+  are folded into the saved row).
+- [x] Chat: retrying a message that already landed failed with slow-mode /
+  rate-limit; pending messages and drafts lived in memory only. Fixed in
+  step 7 (lookup by id after a failure; per-room outbox; auto re-send).
+- [x] Notifications realtime had no backfill after a drop. Fixed in step 7
+  (reload on rejoin and on reconnect).
+- [x] Event form drafts (step 6) survived sign-out. Cleared now, with chat
+  outboxes.
+- [ ] Chat realtime still uses the anon key while the session is stale
+  (same as other requests); the room catches up after the token refreshes.
+- [ ] A cached chat room can show a room the user has since lost access to
+  (offline only). Sending then fails on reconnect with the existing "can no
+  longer post" message.
+- [ ] Chat read markers (`markRead`) aren't queued offline; the server
+  marker catches up on the next online visit.
+- [ ] Discarding a "waiting" chat message after it actually reached the
+  server removes it locally only (server copy remains), as before.
+- [x] Offline writes: save / follow / notification read & dismiss are
+  queued and replayed; RSVP, review, report, block, publish / edit and
+  avatar are refused offline with clear copy (step 6).
+- [ ] Gate coverage is partial: ManageEvent host tools, Settings saves,
+  review responses and chat moderation still try the request offline. They
+  fail fast with connection copy (step 1), but aren't pre-checked.
+- [ ] Queued writes have no per-item "pending" marker (only the toast).
+  The Saved list doesn't show an event saved offline until it syncs.
+- [ ] Signing out while offline deletes queued writes that couldn't be
+  sent (a send is attempted first). Kept for privacy on shared devices;
+  could instead be kept per user and replayed at the next sign-in.
+- [ ] Edit drafts are tied to the event's `updated_at`. After a partial
+  save failure the server version changes, so the leftover unsaved edits
+  aren't restored on a later visit.
+- [ ] Native image-picker URIs live in the cache directory and can be
+  purged by the OS; a restored draft then fails on that photo's upload
+  (counted as a photo failure, not fatal). Web drafts drop picked photos.
+- [x] On reconnect, the notifications tab could briefly show a dismissed
+  notification before queued writes replayed. Fixed in step 7 (queued
+  intents are overlaid on fresh rows).
+- [ ] Not verified on a device: NetInfo needs a dev-client / EAS rebuild;
+  iOS / Android offline behaviour untested (web checks only).
+- **By design:** event previews have no links / photos / reviews /
+  waitlist. Followers / Following / Blocked aren't persisted. Discover
+  stores only its last *unfiltered* area.
+
+## Test-environment notes
+- Harness runs must start from a fresh Chrome profile
+  (`--user-data-dir`): reusing one carried localStorage across runs and
+  produced misleading results (fixed in the final pass).
+- Other local sessions reuse similar `/tmp` paths, ports (8095 / 9395,
+  later 8295 / 9595) and even another session's private harness directory.
+  Chrome hands a second launch on the same `--user-data-dir` to the running
+  instance, so two sessions' tests can silently share one browser. Use a
+  fresh `mktemp -d` directory and random free ports per run, and check
+  `lsof` first.

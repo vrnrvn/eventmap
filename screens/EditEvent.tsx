@@ -1,4 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { blockedOffline } from '@/utils/requireOnline';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from '@/contexts/AuthContext';
+import { useFormDraft } from '@/hooks/useFormDraft';
+import { draftKeys, parseDraft } from '@/utils/formDraft';
 import {
   View,
   Text,
@@ -46,9 +51,9 @@ import {
   type EventExtrasDraft,
 } from '@/components/EventExtrasFields';
 import { eventLocationStore } from '@/stores/eventLocationStore';
-import { categoriesService } from '@/services/categories';
+import { useCategories } from '@/hooks/useCategories';
 import { CategoryIcon } from '@/components/CategoryIcon';
-import { Category, Event, EventPhoto } from '@/types/database';
+import { Event, EventPhoto } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { withShiftedEnd } from '@/utils/eventDatetime';
 import {
@@ -115,11 +120,11 @@ export default function EditEvent() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const { userBusiness } = useApp();
+  const { user } = useAuth();
   const { currentPlan } = usePremium();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
-  const [categories, setCategories] = useState<Category[]>([]);
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
 
@@ -167,6 +172,16 @@ export default function EditEvent() {
   const isDirty =
     initialSnapshot.current != null && snapshotOf(formData) !== initialSnapshot.current;
 
+  // Local draft of unsaved edits (docs/OFFLINE_PLAN.md §3.7), tied to the
+  // event version it was made from so it's never restored over newer edits.
+  const [draftBase, setDraftBase] = useState<string | null>(null);
+  const [draftReady, setDraftReady] = useState(false);
+  const { clearDraft } = useFormDraft(user && id ? draftKeys.editEvent(user.id, id) : null, formData, {
+    shouldSave: isDirty,
+    ready: draftReady,
+    base: draftBase,
+  });
+
   // Unsaved-changes guard for every way off the screen: header back, the
   // Android hardware back and the iOS swipe gesture all dispatch a remove
   // action, which this intercepts while the form is dirty.
@@ -178,15 +193,23 @@ export default function EditEvent() {
       confirmLabel: 'Discard',
       cancelLabel: 'Keep editing',
       destructive: true,
-      onConfirm: () => navigation.dispatch(data.action),
+      onConfirm: () => {
+        clearDraft();
+        navigation.dispatch(data.action);
+      },
     });
   });
 
   const handleBack = () => router.back();
 
+  // Categories are required to publish. They come from the shared cached
+  // query (available offline once loaded); with nothing loaded, a failed
+  // load offers a retry instead of leaving an empty picker.
+  const { categories, isError: categoriesFailed, refetch: refetchCategories } = useCategories();
   useEffect(() => {
-    categoriesService.getAllCategories().then(setCategories);
-  }, []);
+    if (!categoriesFailed || categories.length > 0) return;
+    notify.error("Couldn't load categories.", { label: 'Retry', onPress: () => void refetchCategories() });
+  }, [categoriesFailed, categories.length, refetchCategories]);
 
   // Location is select-only: it can only change via the /business-location
   // picker (suggestion pick or map tap), which hands the committed result
@@ -280,6 +303,24 @@ export default function EditEvent() {
         );
         setFormData(loaded);
         initialSnapshot.current = snapshotOf(loaded);
+        // Unsaved edits from an earlier visit to this same version of the
+        // event (a failed save, a dropped connection, a killed app).
+        setDraftBase(e.updated_at ?? null);
+        const draft = parseDraft<EventFormData>(
+          user ? await AsyncStorage.getItem(draftKeys.editEvent(user.id, id)).catch(() => null) : null,
+          e.updated_at ?? null
+        );
+        if (draft && draft.startDatetime instanceof Date && draft.endDatetime instanceof Date) {
+          setFormData({ ...loaded, ...draft, extras: { ...loaded.extras, ...draft.extras } });
+          notify.withAction('Restored your unsaved changes.', {
+            label: 'Discard',
+            onPress: () => {
+              clearDraft();
+              setFormData(loaded);
+            },
+          });
+        }
+        setDraftReady(true);
       } catch {
         notify.error('Failed to load event');
         router.back();
@@ -288,6 +329,9 @@ export default function EditEvent() {
       }
     };
     load();
+    // Loads once per event; the signed-in user can't change on this screen
+    // and clearDraft is only called later, from the toast action.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const openAndroidPicker = useCallback(
@@ -465,6 +509,7 @@ export default function EditEvent() {
   };
 
   const handleSubmit = async () => {
+    if (blockedOffline("save your changes. They're kept on this device")) return;
     if (!validate() || !id) return;
 
     const updates = buildUpdates();
@@ -511,15 +556,32 @@ export default function EditEvent() {
       // Save the event fields FIRST: if this fails, nothing has been uploaded
       // or deleted, so there are no orphans. Photos are handled afterwards
       // and photo failures are non-fatal.
+      // Each step that succeeds is folded into originalEvent (the saved row
+      // every save diffs against), so if a later step fails, saving again
+      // only resends what's still missing: no second "rescheduled" notice.
       if (viaReschedule) {
         const zone = effectiveZone(formData);
-        await hostToolsService.rescheduleEvent(id, {
+        const reschedule = {
           startIso: pickerDateToInstant(formData.startDatetime, zone).toISOString(),
           endIso: pickerDateToInstant(formData.endDatetime, zone).toISOString(),
           address: placeChanged ? (updates.address ?? originalEvent.current?.address ?? null) : null,
           lat: placeChanged ? (updates.lat ?? originalEvent.current?.lat ?? null) : null,
           lng: placeChanged ? (updates.lng ?? originalEvent.current?.lng ?? null) : null,
-        });
+        };
+        await hostToolsService.rescheduleEvent(id, reschedule);
+        if (originalEvent.current) {
+          const orig = originalEvent.current;
+          originalEvent.current = {
+            ...orig,
+            start_datetime: reschedule.startIso,
+            end_datetime: reschedule.endIso,
+            ...(placeChanged
+              ? { address: reschedule.address ?? orig.address, lat: reschedule.lat ?? orig.lat, lng: reschedule.lng ?? orig.lng }
+              : null),
+            // reschedule_event resumes a postponed event.
+            status: orig.status === 'postponed' ? 'active' : orig.status,
+          };
+        }
         delete updates.start_datetime;
         delete updates.end_datetime;
         delete updates.address;
@@ -528,9 +590,11 @@ export default function EditEvent() {
       }
       if (Object.keys(updates).length > 0) {
         await eventsService.updateEvent(id, updates);
+        if (originalEvent.current) originalEvent.current = { ...originalEvent.current, ...updates };
       }
       if (confirmedLowerCap !== undefined) {
         await hostToolsService.setCapacity(id, confirmedLowerCap);
+        if (originalEvent.current) originalEvent.current = { ...originalEvent.current, max_attendees: confirmedLowerCap };
       }
 
       // Detect removed photos and delete them (non-fatal)
@@ -624,6 +688,7 @@ export default function EditEvent() {
       // Everything is persisted: mark the form clean so the remove guard
       // doesn't ask about "unsaved changes" on the way out.
       initialSnapshot.current = snapshotOf(formData);
+      clearDraft();
       router.back();
     } catch (err: unknown) {
       // The going count moved under us (someone joined since the screen

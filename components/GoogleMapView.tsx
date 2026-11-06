@@ -1,5 +1,6 @@
-import { useMemo, useRef, useImperativeHandle, forwardRef, useEffect, useCallback, memo } from 'react';
-import { StyleSheet, View, Platform } from 'react-native';
+import { useMemo, useRef, useImperativeHandle, forwardRef, useEffect, useCallback, memo, useState } from 'react';
+import { StyleSheet, Text, View, Platform } from 'react-native';
+import { Colors, Typography } from '@/constants/theme';
 import { WebView } from 'react-native-webview';
 import { buildMapHtml } from '@/utils/googleMapHtml';
 import { usesGoogleMaps } from '@/services/runtime';
@@ -12,7 +13,7 @@ import {
 } from '@/utils/webviewInject';
 
 /** Bump when changing map icon logic or HTML structure to force WebView reload */
-const MAP_HTML_VERSION = 8;
+const MAP_HTML_VERSION = 9;
 
 export type GoogleMapHandle = {
   animateTo: (lat: number, lng: number, zoom?: number) => void;
@@ -102,11 +103,17 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
 
   const webViewRef = useRef<WebView>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  // The page reported it can't show map imagery (tiles failing, or the
+  // Google SDK unreachable): show a small overlay instead of a silent blank.
+  const [unavailable, setUnavailable] = useState<'tiles' | 'map' | null>(null);
   const injectJavaScript = useCallback((script: string) => {
     if (Platform.OS === 'web') {
       const frame = iframeRef.current;
       const doc = frame?.contentDocument;
-      if (doc) {
+      // The frame can exist before its document has a body (first load on a
+      // fresh browser). Skip then: mapReady re-injects markers and centre.
+      // Throwing here unmounted the whole app (a blank page).
+      if (doc?.body) {
         const element = doc.createElement('script');
         element.textContent = script;
         doc.body.appendChild(element);
@@ -175,7 +182,9 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
   const handleMessage = useCallback((data: string) => {
     try {
       const payload = JSON.parse(data);
-      if (payload.type === 'mapReady') {
+      if (payload.type === 'mapUnavailable' || payload.type === 'mapAvailable') {
+        setUnavailable(payload.type === 'mapUnavailable' ? (payload.reason === 'tiles' ? 'tiles' : 'map') : null);
+      } else if (payload.type === 'mapReady') {
         lastInjectedMarkersRef.current = '';
         lastInjectedActiveRef.current = '__none__';
         injectMarkers();
@@ -224,6 +233,10 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
         onMessage={(event) => {
           try {
             const payload = JSON.parse(event.nativeEvent.data);
+            if (payload?.type === 'mapUnavailable' || payload?.type === 'mapAvailable') {
+              handleMessage(event.nativeEvent.data);
+              return;
+            }
             if (payload?.type === 'mapPress' && onMapPress && typeof payload.lat === 'number' && typeof payload.lng === 'number') {
               onMapPress(payload.lat, payload.lng);
             }
@@ -250,8 +263,19 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
             // ignore
           }
         }}
+        // The page itself failed (rare: it's inline HTML).
+        onError={() => setUnavailable('map')}
       />
       )}
+      {unavailable ? (
+        <View style={styles.unavailable} pointerEvents="none" accessibilityLiveRegion="polite">
+          <Text style={styles.unavailableText}>
+            {unavailable === 'tiles'
+              ? "Map images can't load right now. Pins still show."
+              : "The map can't load right now. Events are still listed."}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 });
@@ -262,6 +286,23 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     minHeight: 300,
+  },
+  unavailable: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 12,
+    alignItems: 'center',
+  },
+  unavailableText: {
+    backgroundColor: Colors.surface,
+    color: Colors.text.secondary,
+    fontSize: Typography.sizes.xs,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    overflow: 'hidden',
+    textAlign: 'center',
   },
   webview: {
     flex: 1,

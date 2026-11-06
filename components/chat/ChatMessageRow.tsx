@@ -9,6 +9,8 @@ export const CHAT_AVATAR_SIZE = 32;
 
 export type ChatMessage = EventChatMessageWithSender & {
   localStatus?: 'sending' | 'failed';
+  /** Failed for lack of a connection: re-sent automatically when it returns. */
+  autoRetry?: boolean;
 };
 
 export type ChatListRowData =
@@ -200,7 +202,13 @@ export const ChatListRow = memo(function ChatListRow({
               failed && styles.messageMetaFailed,
             ]}
           >
-            {failed ? 'Not sent · tap to retry' : sending ? 'Sending…' : timeLabel(message.created_at)}
+            {failed
+              ? message.autoRetry
+                ? 'Waiting for connection · tap for options'
+                : 'Not sent · tap to retry'
+              : sending
+                ? 'Sending…'
+                : timeLabel(message.created_at)}
           </Text>
         ) : null}
       </Pressable>

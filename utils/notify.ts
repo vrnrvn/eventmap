@@ -1,4 +1,5 @@
 import { Alert, Platform } from 'react-native';
+import { isConnectionImpaired } from './connectivity';
 
 export type ToastKind = 'success' | 'error';
 
@@ -58,7 +59,19 @@ export const notify = {
   success(message: string) {
     emitToast('success', message);
   },
-  error(message: string) {
+  /** Error toast, optionally with an inline action such as Retry. */
+  error(message: string, action?: ToastAction) {
+    emitToast('error', message, action);
+  },
+  /**
+   * A refresh the user didn't ask for failed (focus refetch, quiet reload,
+   * pull-to-refresh) and the screen kept its data. Skipped while the
+   * connection banner is up: it already explains why, and one toast per tab
+   * switch or map pan would just be noise. Use `error` for failures of
+   * something the user explicitly did.
+   */
+  backgroundError(message: string) {
+    if (isConnectionImpaired()) return;
     emitToast('error', message);
   },
   /**

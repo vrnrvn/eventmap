@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { getConnectivity, subscribeConnectivity } from '@/utils/connectivity';
 import { AppState } from 'react-native';
 import {
   getUnreadNotificationCount,
@@ -42,6 +43,8 @@ export function useUnreadNotificationCount(userId: string | undefined): number {
         onInsert: refetch,
         onUpdate: refetch,
         onDelete: refetch,
+        // Rejoined after a drop: changes in between were never delivered.
+        onResubscribed: refetch,
       },
       // Distinct channel topic so this badge subscription can coexist with
       // the notifications screen's subscription for the same user.
@@ -53,10 +56,19 @@ export function useUnreadNotificationCount(userId: string | undefined): number {
       if (state === 'active') refetch();
     });
 
+    // Back from offline: refresh without waiting for the socket to rejoin.
+    let previous = getConnectivity();
+    const unsubscribeConnectivity = subscribeConnectivity((status) => {
+      const wasOffline = previous === 'offline';
+      previous = status;
+      if (wasOffline && status !== 'offline') refetch();
+    });
+
     return () => {
       active = false;
       unsubscribe();
       appStateSub.remove();
+      unsubscribeConnectivity();
     };
   }, [userId]);
 

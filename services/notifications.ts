@@ -3,7 +3,7 @@
  * Fetches user notifications from Supabase.
  */
 
-import { supabase } from './supabase';
+import { supabase, getSessionUser } from './supabase';
 
 export type NotificationType =
   | 'event_reminder'
@@ -36,6 +36,11 @@ type RealtimeNotificationHandler = {
   onInsert?: (notification: Notification) => void;
   onUpdate?: (notification: Notification) => void;
   onDelete?: (id: string) => void;
+  /**
+   * The channel rejoined after a drop. Changes made in between were never
+   * delivered, so the subscriber should reload (backfill).
+   */
+  onResubscribed?: () => void;
 };
 
 function mapRowToNotification(row: any): Notification {
@@ -63,9 +68,7 @@ export async function getNotificationsPage(
 ): Promise<{ items: Notification[]; hasMore: boolean }> {
   const limit = page.limit ?? NOTIFICATIONS_PAGE_SIZE;
   const offset = page.offset ?? 0;
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) return { items: [], hasMore: false };
 
   const { data, error } = await supabase
@@ -95,9 +98,7 @@ export async function getNotifications(): Promise<Notification[]> {
  * bumps, app foreground).
  */
 export async function getUnreadNotificationCount(): Promise<number> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) return 0;
 
   const { count, error } = await supabase
@@ -114,9 +115,7 @@ export async function getUnreadNotificationCount(): Promise<number> {
  * Mark a notification as read.
  */
 export async function markNotificationAsRead(id: string): Promise<void> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) return;
 
   const { error } = await (supabase as any)
@@ -131,9 +130,7 @@ export async function markNotificationAsRead(id: string): Promise<void> {
  * Mark all notifications as read for the current user.
  */
 export async function markAllNotificationsAsRead(): Promise<void> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) return;
 
   const { error } = await (supabase as any)
@@ -147,9 +144,7 @@ export async function markAllNotificationsAsRead(): Promise<void> {
  * Delete a notification (dismiss).
  */
 export async function deleteNotification(id: string): Promise<void> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getSessionUser();
   if (!user) return;
 
   const { error } = await supabase
@@ -170,6 +165,7 @@ export function subscribeToNotifications(
    */
   channelSuffix = ''
 ): () => void {
+  let joinedOnce = false;
   const channel = supabase
     .channel(`notifications${channelSuffix}:${userId}`)
     .on(
@@ -208,7 +204,11 @@ export function subscribeToNotifications(
         handlers.onDelete?.(String((payload.old as any).id));
       }
     )
-    .subscribe();
+    .subscribe((status) => {
+      if (status !== 'SUBSCRIBED') return;
+      if (joinedOnce) handlers.onResubscribed?.();
+      joinedOnce = true;
+    });
 
   return () => {
     supabase.removeChannel(channel);

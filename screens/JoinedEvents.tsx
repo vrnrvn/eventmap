@@ -21,6 +21,9 @@ import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { isEventInProgress } from '@/utils/eventStatus';
 import { Button } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { FreshnessNote, OfflineState } from '@/components/ui/QueryStates';
+import { useScreenState } from '@/hooks/useScreenState';
+import { PERSISTED_QUERY } from '@/utils/queryPersistence';
 import { EventListItem } from '@/components/EventListItem';
 import { formatEventDate, formatEventWhen } from '@/utils/formatEventWhen';
 import { describeEventDateTime } from '@/utils/timezone';
@@ -55,6 +58,7 @@ export default function JoinedEvents() {
   // or when deep-linked straight to it.
   const countsQuery = useQuery({
     queryKey: queryKeys.attendanceCounts(userId),
+    ...PERSISTED_QUERY,
     enabled: !!userId,
     queryFn: () => socialService.getUserAttendanceCounts(userId!),
     staleTime: 30_000,
@@ -70,6 +74,8 @@ export default function JoinedEvents() {
   // hand-rolled per-tab state with request sequencing is gone.
   const query = useInfiniteQuery({
     queryKey: queryKeys.joinedEvents(userId, scope),
+    // Kept on the device so your plans open offline after a restart.
+    ...PERSISTED_QUERY,
     enabled: !!userId,
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
@@ -80,8 +86,9 @@ export default function JoinedEvents() {
   useRefetchOnFocus(query.refetch, !!userId);
 
   const items = useMemo(() => dedupeById(query.data?.pages.flat() ?? []), [query.data]);
-  const loaded = !query.isPending;
-  const error = query.isError ? 'Could not load your events.' : null;
+  const hasData = query.data !== undefined;
+  const { state: screenState, freshness } = useScreenState(query, { hasData, isEmpty: items.length === 0 });
+  const loaded = hasData;
   // Only the pull gesture drives the RefreshControl; background refetches
   // (focus, invalidation, foreground) must not animate the list.
   const [pulling, setPulling] = useState(false);
@@ -118,14 +125,14 @@ export default function JoinedEvents() {
   }, [loaded, query]);
 
   const subtitle = useMemo(() => {
-    if (!loaded) return 'Loading…';
+    if (!loaded) return screenState === 'loading' ? 'Loading…' : 'Not loaded yet';
     const n = `${items.length}${query.hasNextPage ? '+' : ''}`;
     const noun = items.length === 1 ? 'event' : 'events';
     if (scope === 'upcoming') return `${n} upcoming ${noun}`;
     if (scope === 'interested') return `${n} ${noun} you're interested in`;
     if (scope === 'requested') return `${n} ${items.length === 1 ? 'request' : 'requests'} waiting for approval`;
     return `${n} attended ${noun}`;
-  }, [loaded, items.length, query.hasNextPage, scope]);
+  }, [loaded, screenState, items.length, query.hasNextPage, scope]);
 
   const renderItem = useCallback(
     ({ item }: { item: RankedEvent }) => {
@@ -177,7 +184,7 @@ export default function JoinedEvents() {
   );
 
   const renderEmpty = () => {
-    if (!loaded) {
+    if (screenState === 'loading') {
       // Static skeleton rows mirroring EventListItem's shape.
       return (
         <View
@@ -197,11 +204,14 @@ export default function JoinedEvents() {
         </View>
       );
     }
-    if (error) {
+    if (screenState === 'offline') {
+      return <OfflineState onRetry={() => void query.refetch()} style={styles.center} />;
+    }
+    if (screenState === 'error') {
       return (
         <ErrorState
           title="Couldn't load your events"
-          message={error}
+          message="Could not load your events."
           onRetry={() => void query.refetch()}
           style={styles.center}
         />
@@ -305,6 +315,7 @@ export default function JoinedEvents() {
         data={items}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
+        ListHeaderComponent={items.length > 0 ? <FreshnessNote text={freshness} /> : null}
         ListEmptyComponent={renderEmpty}
         contentContainerStyle={[
           styles.listContent,

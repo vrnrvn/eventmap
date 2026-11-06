@@ -23,4 +23,34 @@ export const queryKeys = {
     ['events', 'calendar', userId ?? 'anon', 'range', fromIso, toIso, sources] as const,
   /** Prefix for every attendance-derived list (joined tabs + saved + calendar). */
   attendanceLists: () => ['events'] as const,
+  /**
+   * Full details of one event, as last shown on its page. Kept on the device
+   * (most recent PERSIST_LIMITS.eventDetails) so events open offline.
+   */
+  eventDetails: (eventId: string) => ['event', 'details', eventId] as const,
+  eventDetailsPrefix: () => ['event', 'details'] as const,
+  /**
+   * Profile tab: created + upcoming previews and the stat counts. Under the
+   * 'events' prefix so RSVP / save changes (attendanceLists) refresh it.
+   */
+  /** Notifications tab: first page + unread count, kept on the device. */
+  notifications: (userId: string) => ['notifications', userId] as const,
+  notificationsPrefix: () => ['notifications'] as const,
+  /** Another user's profile page (own = the viewer's own, full profile). */
+  userProfile: (userId: string, own: boolean) => ['user-profile', userId, own ? 'own' : 'public'] as const,
+  /** A business page: business, photos, links, upcoming events, reviews. */
+  businessPage: (businessId: string) => ['business-page', businessId] as const,
+  /** Host's own events for one My Events tab (paged). */
+  myEvents: (businessId: string, scope: string) => ['events', 'mine', businessId, scope] as const,
+  /** A chat room's newest messages + access state, kept for offline reading. */
+  chatRoom: (eventId: string) => ['chat', 'room', eventId] as const,
+  chatRoomPrefix: () => ['chat', 'room'] as const,
+  /** Active promo banners for one placement. */
+  banners: (placement: string) => ['banners', placement] as const,
+  /** All event categories (hooks/useCategories). */
+  categories: () => ['categories'] as const,
+  /** Discover's last unfiltered area (utils/discoverSnapshot), kept on the device. */
+  discoverLastArea: () => ['discover', 'last-area'] as const,
+  profileOverview: (userId: string | undefined, businessId: string | undefined) =>
+    ['events', 'profile', userId ?? 'anon', businessId ?? 'none'] as const,
 };

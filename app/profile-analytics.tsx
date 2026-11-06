@@ -125,7 +125,9 @@ export default function ProfileAnalyticsScreen() {
 
   const loading = query.isPending && query.fetchStatus !== 'idle';
   const fetching = query.isFetching && !loading;
-  const errorMessage = query.isError
+  // A failed refetch keeps the last loaded numbers; the error card is only
+  // for "nothing loaded for this period".
+  const errorMessage = query.isError && !query.data
     ? query.error instanceof Error
       ? query.error.message
       : 'Failed to load analytics data.'

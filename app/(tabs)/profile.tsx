@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
+import { blockedOffline } from '@/utils/requireOnline';
 import {
   View,
   Text,
@@ -32,6 +33,12 @@ import {
 import { AvatarRing } from '@/components/AvatarRing';
 import { Button } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { FreshnessNote, OfflineState } from '@/components/ui/QueryStates';
+import { useQuery } from '@tanstack/react-query';
+import { queryKeys } from '@/hooks/queryKeys';
+import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
+import { useScreenState } from '@/hooks/useScreenState';
+import { PERSISTED_QUERY } from '@/utils/queryPersistence';
 import { confirmAction } from '@/utils/confirm';
 import {
   MapPin,
@@ -61,6 +68,10 @@ type ProfileStats = {
   created: number;
 };
 
+const EMPTY_STATS: ProfileStats = { upcoming: 0, attended: 0, saved: 0, created: 0 };
+
+type ProfileOverview = { created: Event[]; upcoming: RankedEvent[]; stats: ProfileStats };
+
 const Palette = {
   surface: Colors.background.primary,
   card: Colors.surface,
@@ -81,12 +92,7 @@ export default function ProfileScreen() {
     useApp();
   const { isPremium, currentPlan } = usePremium();
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const [createdEvents, setCreatedEvents] = useState<Event[]>([]);
-  const [joinedEvents, setJoinedEvents] = useState<RankedEvent[]>([]);
   const [chatUnread, setChatUnread] = useState<Record<string, number>>({});
-  const [stats, setStats] = useState<ProfileStats>({ upcoming: 0, attended: 0, saved: 0, created: 0 });
-  const [loaded, setLoaded] = useState(false);
-  const [loadError, setLoadError] = useState(false);
 
   const isBizMode = hasBusiness && userMode === 'business';
   const businessId = hasBusiness ? userBusiness?.id : undefined;
@@ -106,74 +112,64 @@ export default function ProfileScreen() {
   const showVerifiedBadge = isBizMode && !!userBusiness?.verified;
 
   // Everything on this tab that can change while it stays mounted (RSVPs made
-  // elsewhere, new events, chat activity) is reloaded on focus in one pass.
-  const loadProfileData = useCallback(
-    async (isCancelled: () => boolean) => {
-      try {
-        const [created, createdCount, upcoming, counts] = await Promise.all([
-          businessId
-            ? eventsService.getBusinessEvents(businessId, {
-                limit: CREATED_PREVIEW_LIMIT,
-                scope: 'upcoming',
-              })
-            : Promise.resolve([] as Event[]),
-          businessId ? eventsService.getBusinessEventsCount(businessId) : Promise.resolve(0),
-          userId
-            ? socialService.getUserUpcomingEvents(userId, { limit: JOINED_PREVIEW_LIMIT })
-            : Promise.resolve([] as RankedEvent[]),
-          userId
-            ? socialService.getUserAttendanceCounts(userId)
-            : Promise.resolve({ upcoming: 0, attended: 0, saved: 0, interested: 0 }),
-        ]);
-        if (isCancelled()) return;
-
-        // The upcoming query can't evaluate a recurring series' own end
-        // date server-side; drop ended series here.
-        setCreatedEvents(created.filter((e) => !hasEventEnded(e)));
-        setJoinedEvents(upcoming);
-        setStats({
-          upcoming: counts.upcoming,
-          attended: counts.attended,
-          saved: counts.saved,
-          created: createdCount,
-        });
-        setLoadError(false);
-        setLoaded(true);
-
-        const joinedIds = upcoming.map((event) => event.id);
-        if (joinedIds.length === 0) {
-          setChatUnread({});
-          return;
-        }
-        // Badges are a nice-to-have: a failure here must not blank the lists.
-        const unread = await eventChatService.getUnreadCounts(joinedIds).catch(() => []);
-        if (isCancelled()) return;
-        setChatUnread(Object.fromEntries(unread.map((row) => [row.event_id, row.unread_count])));
-      } catch {
-        if (isCancelled()) return;
-        // Don't zero everything out: surface the failure instead of
-        // rendering it as "no events / 0 stats".
-        setLoadError(true);
-        setLoaded(true);
-      }
+  // elsewhere, new events) is one query, refetched on focus and kept on the
+  // device so the tab opens with its last data offline (docs/OFFLINE_PLAN.md
+  // §3.5). A failed refetch keeps the data and shows the freshness note.
+  const overviewQuery = useQuery({
+    queryKey: queryKeys.profileOverview(userId, businessId),
+    ...PERSISTED_QUERY,
+    enabled: !!userId,
+    queryFn: async (): Promise<ProfileOverview> => {
+      const [created, createdCount, upcoming, counts] = await Promise.all([
+        businessId
+          ? eventsService.getBusinessEvents(businessId, { limit: CREATED_PREVIEW_LIMIT, scope: 'upcoming' })
+          : Promise.resolve([] as Event[]),
+        businessId ? eventsService.getBusinessEventsCount(businessId) : Promise.resolve(0),
+        socialService.getUserUpcomingEvents(userId!, { limit: JOINED_PREVIEW_LIMIT }),
+        socialService.getUserAttendanceCounts(userId!),
+      ]);
+      return {
+        created,
+        upcoming,
+        stats: { upcoming: counts.upcoming, attended: counts.attended, saved: counts.saved, created: createdCount },
+      };
     },
-    [businessId, userId]
-  );
+  });
+  useRefetchOnFocus(overviewQuery.refetch, !!userId);
+  const overview = overviewQuery.data;
+  const { state: overviewState, freshness } = useScreenState(overviewQuery, {
+    hasData: overview !== undefined,
+    isEmpty: false,
+  });
+  const loaded = overview !== undefined;
+  const loadError = overviewState === 'error' || overviewState === 'offline';
+  const stats = overview?.stats ?? EMPTY_STATS;
+  // The upcoming queries can't evaluate a recurring series' own end date
+  // server-side, and cached rows can be days old: drop ended events here.
+  const createdEvents = useMemo(() => (overview?.created ?? []).filter((e) => !hasEventEnded(e)), [overview]);
+  const joinedEvents = useMemo(() => (overview?.upcoming ?? []).filter((e) => !hasEventEnded(e)), [overview]);
 
   const retryLoad = useCallback(() => {
-    setLoadError(false);
-    setLoaded(false);
-    loadProfileData(() => false);
-  }, [loadProfileData]);
+    void overviewQuery.refetch();
+  }, [overviewQuery]);
 
+  // Chat badges are a nice-to-have, refreshed on focus; a failure keeps the
+  // last known badges.
+  const joinedIdsKey = joinedEvents.map((e) => e.id).join(',');
   useFocusEffect(
     useCallback(() => {
+      if (!joinedIdsKey) return;
       let cancelled = false;
-      loadProfileData(() => cancelled);
+      eventChatService
+        .getUnreadCounts(joinedIdsKey.split(','))
+        .then((unread) => {
+          if (!cancelled) setChatUnread(Object.fromEntries(unread.map((row) => [row.event_id, row.unread_count])));
+        })
+        .catch(() => {});
       return () => {
         cancelled = true;
       };
-    }, [loadProfileData])
+    }, [joinedIdsKey])
   );
 
   const handleSignOut = async () => {
@@ -189,6 +185,7 @@ export default function ProfileScreen() {
   };
 
   const handleAvatarPick = async () => {
+    if (blockedOffline('change your photo')) return;
     if (!user) return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
@@ -427,7 +424,9 @@ export default function ProfileScreen() {
           )}
         </View>
 
-        {loadError ? (
+        {overviewState === 'offline' ? (
+          <OfflineState onRetry={retryLoad} style={styles.errorState} />
+        ) : loadError ? (
           <ErrorState
             title="Couldn't load your profile"
             onRetry={retryLoad}
@@ -435,6 +434,7 @@ export default function ProfileScreen() {
           />
         ) : (
         <>
+        <FreshnessNote text={freshness} style={styles.freshness} />
         {!appLoading && hasBusiness && (
           <TouchableOpacity
             style={styles.createEventWrap}
@@ -1222,6 +1222,10 @@ const styles = StyleSheet.create({
   },
   errorState: {
     marginTop: 28,
+  },
+  freshness: {
+    marginTop: 20,
+    marginHorizontal: 16,
   },
   signOutButton: {
     marginTop: 20,

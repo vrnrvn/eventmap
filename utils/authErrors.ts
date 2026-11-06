@@ -9,6 +9,10 @@
  * cost of being vaguer, which is the right trade for an auth screen.
  */
 
+import { TIMEOUT_MESSAGE, classifyError } from './networkErrors';
+
+const NETWORK_MESSAGE = "Can't reach the server. Check your connection and try again.";
+
 type MaybeAuthError = {
   code?: string;
   status?: number;
@@ -67,7 +71,7 @@ const PATTERNS: { match: RegExp; message: string }[] = [
   },
   {
     match: /network request failed|failed to fetch|network error/,
-    message: "Can't reach the server. Check your connection and try again.",
+    message: NETWORK_MESSAGE,
   },
   {
     match: /cancel/,
@@ -78,6 +82,12 @@ const PATTERNS: { match: RegExp; message: string }[] = [
 export function authErrorMessage(error: unknown, fallback: string): string {
   const err = error as MaybeAuthError | null;
   if (!err) return fallback;
+
+  // Connection failures first: AuthRetryableFetchError and timeouts don't
+  // always carry "network" wording for the patterns below to catch.
+  const connection = classifyError(err);
+  if (connection === 'network') return NETWORK_MESSAGE;
+  if (connection === 'timeout') return TIMEOUT_MESSAGE;
 
   const haystack = [err.code, err.message, err.name]
     .filter((v): v is string => typeof v === 'string')

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { blockedOffline } from '@/utils/requireOnline';
 import {
   View,
   Text,
@@ -14,7 +15,11 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
-import { useQueryClient } from '@tanstack/react-query';
+import { useIsRestoring, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { findEventRow, previewDetailsFromRow } from '@/utils/eventPreview';
+import { freshnessNote } from '@/utils/screenState';
+import { FreshnessNote } from '@/components/ui/QueryStates';
+import { useConnectivity } from '@/services/connectivity';
 import { queryKeys } from '@/hooks/queryKeys';
 import { useApp } from '@/contexts/AppContext';
 import { eventsService } from '@/services/events';
@@ -30,6 +35,10 @@ import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/th
 import { notify, notifyConfirm } from '@/utils/notify';
 import { ImageViewer } from '@/components/ImageViewer';
 import { Button } from '@/components/ui/Button';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { connectionErrorMessage } from '@/utils/networkErrors';
+import { runOrQueueWithNotice } from '@/services/pendingWrites';
+import { getConnectivity } from '@/utils/connectivity';
 import { Avatar } from '@/components/Avatar';
 import {
   AttendeesBottomSheet,
@@ -85,6 +94,29 @@ import * as Clipboard from 'expo-clipboard';
 import { ReportReasonSheet } from '@/components/ReportReasonSheet';
 
 
+type InitialDetails = { details: EventDetails | null; isPreview: boolean; updatedAt: number };
+
+/**
+ * What the page can show before the network answers: the details last
+ * shown for this event (kept on the device), or a preview built from any
+ * cached list row for it (utils/eventPreview.ts).
+ */
+function initialDetailsFromCache(queryClient: QueryClient, id: string | undefined): InitialDetails {
+  if (!id) return { details: null, isPreview: false, updatedAt: 0 };
+  const key = queryKeys.eventDetails(id);
+  const cached = queryClient.getQueryData<EventDetails>(key);
+  if (cached) {
+    return { details: cached, isPreview: false, updatedAt: queryClient.getQueryState(key)?.dataUpdatedAt ?? 0 };
+  }
+  const row = findEventRow(
+    queryClient.getQueryCache().getAll().map((q) => q.state.data),
+    id
+  );
+  return row
+    ? { details: previewDetailsFromRow(row), isPreview: true, updatedAt: 0 }
+    : { details: null, isPreview: false, updatedAt: 0 };
+}
+
 export default function EventDetail() {
   const insets = useSafeAreaInsets();
   // Hero paging and the cover width must follow the live window: a
@@ -101,8 +133,23 @@ export default function EventDetail() {
   // so they refetch instead of showing stale rows when the user goes back.
   const invalidateLists = () =>
     void queryClient.invalidateQueries({ queryKey: queryKeys.attendanceLists() });
-  const [details, setDetails] = useState<EventDetails | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Start from what this device already knows (docs/OFFLINE_PLAN.md §3.5):
+  // the details last shown for this event, or else a preview built from a
+  // cached list row, so the page opens instantly and works offline. The
+  // network load below replaces it.
+  const [initial] = useState(() => initialDetailsFromCache(queryClient, id));
+  const [details, setDetails] = useState<EventDetails | null>(initial.details);
+  // `details` is a list-row preview: actions wait for the real details.
+  const [isPreview, setIsPreview] = useState(initial.isPreview);
+  // When the details on screen were fetched; 0 for a preview.
+  const [detailsUpdatedAt, setDetailsUpdatedAt] = useState(initial.updatedAt);
+  const [lastLoadFailed, setLastLoadFailed] = useState(false);
+  const connectivity = useConnectivity();
+  const [loading, setLoading] = useState(!initial.details);
+  // First load failed (network / server). Kept apart from `details === null`,
+  // which means the event really doesn't exist.
+  const [loadError, setLoadError] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
   const [saving, setSaving] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
@@ -151,8 +198,7 @@ export default function EventDetail() {
         if (isCancelled()) return;
         setPreviewAttendees(page.items);
       } catch {
-        if (isCancelled()) return;
-        setPreviewAttendees([]);
+        // Keep the faces already shown; the next focus retries.
       }
     },
     [id]
@@ -170,6 +216,12 @@ export default function EventDetail() {
           const data = await eventsService.getEventDetails(id);
           if (cancelled) return;
           setDetails(data);
+          setIsPreview(false);
+          setDetailsUpdatedAt(Date.now());
+          setLastLoadFailed(false);
+          setLoadError(false);
+          // A deleted event shouldn't keep opening from the device cache.
+          if (!data) queryClient.removeQueries({ queryKey: queryKeys.eventDetails(id), exact: true });
           if (data && !hasLoadedRef.current) {
             eventsService.trackEventView(id).catch(() => {});
           }
@@ -180,7 +232,11 @@ export default function EventDetail() {
             setPreviewAttendees([]);
           }
         } catch {
-          if (!cancelled && !hasLoadedRef.current) setDetails(null);
+          // A failed refetch keeps the event on screen; only a failed first
+          // load shows the error state (never "Event not found").
+          if (cancelled) return;
+          setLastLoadFailed(true);
+          if (!hasLoadedRef.current) setLoadError(true);
         } finally {
           if (!cancelled) setLoading(false);
         }
@@ -189,8 +245,50 @@ export default function EventDetail() {
       return () => {
         cancelled = true;
       };
-    }, [id, loadAttendees])
+      // reloadTick is a trigger: bumping it from Retry re-runs the load.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [id, loadAttendees, reloadTick])
   );
+
+  // Mirror the details on screen (fetched or optimistically updated) into the
+  // device cache, so the event opens offline next time. Previews and the
+  // copy the screen started from aren't written back: that would stamp old
+  // data as fresh.
+  const mirroredRef = useRef<EventDetails | null>(initial.details);
+  useEffect(() => {
+    if (!id || !details || isPreview || details === mirroredRef.current) return;
+    mirroredRef.current = details;
+    queryClient.setQueryData(queryKeys.eventDetails(id), details);
+  }, [id, details, isPreview, queryClient]);
+
+  // Opened before the device cache finished restoring (cold start, deep
+  // link): adopt what it restored if nothing has loaded yet.
+  const isRestoring = useIsRestoring();
+  useEffect(() => {
+    if (isRestoring || details || hasLoadedRef.current) return;
+    const restored = initialDetailsFromCache(queryClient, id);
+    if (!restored.details) return;
+    mirroredRef.current = restored.details;
+    setDetails(restored.details);
+    setIsPreview(restored.isPreview);
+    setDetailsUpdatedAt(restored.updatedAt);
+    setLoading(false);
+    // Only the restore finishing should trigger this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRestoring]);
+
+  /** Actions need the real details; a list-row preview only has the basics. */
+  const blockedByPreview = () => {
+    if (!isPreview) return false;
+    notify.error(
+      getConnectivity() === 'offline'
+        ? "You're offline. Connect to load this event first."
+        : lastLoadFailed
+          ? "Couldn't load this event yet. Check your connection and try again."
+          : 'Still loading this event. Try again in a moment.'
+    );
+    return true;
+  };
 
   // A one-line preview of the latest chat message for the chat-entry row.
   // Focus-driven so it also refreshes when the user comes back from the chat.
@@ -216,7 +314,7 @@ export default function EventDetail() {
           if (!cancelled) setChatUnread(counts.find((row) => row.event_id === id)?.unread_count ?? 0);
         })
         .catch(() => {
-          if (!cancelled) setChatUnread(0);
+          // Keep the last known badge.
         });
       return () => {
         cancelled = true;
@@ -238,6 +336,8 @@ export default function EventDetail() {
     useCallback(() => {
       if (!id) return;
       const refetchCount = async () => {
+        // Nothing to gain offline; the focus refetch catches up on return.
+        if (getConnectivity() === 'offline') return;
         try {
           const data = await eventsService.getEventDetails(id);
           if (!data) return;
@@ -265,6 +365,10 @@ export default function EventDetail() {
 
   const businessId = details?.business.id;
 
+  // Business whose reviews are on screen; a failed reload for the same one
+  // keeps them instead of resetting to "no reviews".
+  const reviewsLoadedForRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!businessId) return;
     const loadReviews = async () => {
@@ -277,7 +381,9 @@ export default function EventDetail() {
         setReviews(list);
         setAverageRating(avg);
         setUserReview(mine ? { rating: mine.rating, text: mine.text || '' } : null);
+        reviewsLoadedForRef.current = businessId;
       } catch {
+        if (reviewsLoadedForRef.current === businessId) return;
         setReviews([]);
         setAverageRating({ average: 0, count: 0 });
         setUserReview(null);
@@ -287,26 +393,41 @@ export default function EventDetail() {
   }, [businessId, user]);
 
   const handleReviewSubmit = async (rating: number, text: string) => {
+    if (blockedOffline('post a review')) return;
     if (!businessId) return;
+    // Only the write can fail the form. The reload after it is best-effort,
+    // so a saved review is never reported as "failed".
     await reviewsService.createOrUpdateReview(businessId, rating, text || null);
-    const [list, avg] = await Promise.all([
-      reviewsService.getReviewsForBusiness(businessId),
-      reviewsService.getAverageRatingAndCount(businessId),
-    ]);
-    setReviews(list);
-    setAverageRating(avg);
     setUserReview({ rating, text });
     setShowReviewForm(false);
+    try {
+      const [list, avg] = await Promise.all([
+        reviewsService.getReviewsForBusiness(businessId),
+        reviewsService.getAverageRatingAndCount(businessId),
+      ]);
+      setReviews(list);
+      setAverageRating(avg);
+    } catch {
+      notify.success('Review saved. It will show here after the next refresh.');
+    }
   };
 
   const handleReviewRespond = async (reviewId: string, response: string) => {
     await reviewsService.updateBusinessResponse(reviewId, response);
+    // Show the saved response right away; the reload is best-effort.
+    setReviews((prev) =>
+      prev.map((r) => (r.id === reviewId ? { ...r, business_response: response } : r))
+    );
     if (!businessId) return;
-    const list = await reviewsService.getReviewsForBusiness(businessId);
-    setReviews(list);
+    reviewsService
+      .getReviewsForBusiness(businessId)
+      .then(setReviews)
+      .catch(() => {});
   };
 
   const handleRsvp = async (status: 'going' | 'interested') => {
+    if (blockedByPreview()) return;
+    if (blockedOffline('RSVP')) return;
     if (!user || !id) return;
     if (isBanned) {
       notify.error('Your account has been suspended. Please contact support.');
@@ -368,6 +489,8 @@ export default function EventDetail() {
   };
 
   const handleRemoveRsvp = async () => {
+    if (blockedByPreview()) return;
+    if (blockedOffline('change your RSVP')) return;
     if (!user || !id) return;
     setSaving(true);
     try {
@@ -385,14 +508,16 @@ export default function EventDetail() {
       );
       void loadAttendees();
       setAttendeesRefresh((n) => n + 1);
-    } catch {
-      notify.error('Failed to remove RSVP');
+    } catch (err) {
+      notify.error(connectionErrorMessage(err) ?? 'Failed to remove RSVP');
     } finally {
       setSaving(false);
     }
   };
 
   const handleJoinWaitlist = async () => {
+    if (blockedByPreview()) return;
+    if (blockedOffline('join the waitlist')) return;
     if (!user || !id || saving) return;
     setSaving(true);
     try {
@@ -436,6 +561,8 @@ export default function EventDetail() {
   };
 
   const handleLeaveWaitlist = async () => {
+    if (blockedByPreview()) return;
+    if (blockedOffline('leave the waitlist')) return;
     if (!user || !id || saving) return;
     setSaving(true);
     try {
@@ -453,8 +580,8 @@ export default function EventDetail() {
           : d
       );
       notify.success('Removed from the waitlist.');
-    } catch {
-      notify.error('Could not leave the waitlist. Please try again.');
+    } catch (err) {
+      notify.error(connectionErrorMessage(err) ?? 'Could not leave the waitlist. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -464,6 +591,8 @@ export default function EventDetail() {
   // first. The interested-star toggle still removes silently via
   // handleRemoveRsvp — only the explicit "Leave" button confirms.
   const handleLeaveEvent = () => {
+    if (blockedByPreview()) return;
+    if (blockedOffline('leave this event')) return;
     const cancellingRequest = details?.user_rsvp === 'requested';
     notifyConfirm({
       title: cancellingRequest ? 'Cancel request?' : 'Leave event?',
@@ -478,6 +607,7 @@ export default function EventDetail() {
   };
 
   const handleToggleSave = async () => {
+    if (blockedByPreview()) return;
     if (!user || !id || !details || togglingSave) return;
     const wasSaved = details.user_saved;
     setTogglingSave(true);
@@ -486,14 +616,16 @@ export default function EventDetail() {
       d ? { ...d, user_saved: !wasSaved, save_count: Math.max(0, d.save_count + (wasSaved ? -1 : 1)) } : d
     );
     try {
-      if (wasSaved) await socialService.unsaveEvent(id);
-      else await socialService.saveEvent(id);
-      invalidateLists();
-    } catch {
+      // Queued (kept as is) when offline; replayed on reconnect.
+      const result = await runOrQueueWithNotice({ kind: 'save', targetId: id, on: !wasSaved, label: details.event.title });
+      if (result === 'done') invalidateLists();
+    } catch (err) {
       setDetails((d) =>
         d ? { ...d, user_saved: wasSaved, save_count: Math.max(0, d.save_count + (wasSaved ? 1 : -1)) } : d
       );
-      notify.error(wasSaved ? 'Failed to remove from saved events' : 'Failed to save event');
+      notify.error(
+        connectionErrorMessage(err) ?? (wasSaved ? 'Failed to remove from saved events' : 'Failed to save event')
+      );
     } finally {
       setTogglingSave(false);
     }
@@ -517,16 +649,24 @@ export default function EventDetail() {
   };
 
   const handleToggleFollow = async () => {
+    if (blockedByPreview()) return;
     if (!user || !details || togglingFollow) return;
     const wasFollowing = details.user_following_business;
     setTogglingFollow(true);
     setDetails((d) => (d ? { ...d, user_following_business: !wasFollowing } : d));
     try {
-      if (wasFollowing) await socialService.unfollowBusiness(details.business.id);
-      else await socialService.followBusiness(details.business.id);
-    } catch {
+      await runOrQueueWithNotice({
+        kind: 'follow',
+        targetId: details.business.id,
+        on: !wasFollowing,
+        label: details.business.name,
+      });
+    } catch (err) {
       setDetails((d) => (d ? { ...d, user_following_business: wasFollowing } : d));
-      notify.error(wasFollowing ? 'Could not unfollow this organizer.' : 'Could not follow this organizer.');
+      notify.error(
+        connectionErrorMessage(err) ??
+          (wasFollowing ? 'Could not unfollow this organizer.' : 'Could not follow this organizer.')
+      );
     } finally {
       setTogglingFollow(false);
     }
@@ -614,11 +754,15 @@ export default function EventDetail() {
         notify.success("You've already reported this event. It's in the queue.");
         return;
       }
-      notify.error('Failed to submit report. Please try again.');
+      notify.error(connectionErrorMessage(err) ?? 'Failed to submit report. Please try again.');
     }
   };
 
-  const handleReportEvent = () => setReportSheetOpen(true);
+  const handleReportEvent = () => {
+    if (blockedByPreview()) return;
+    if (blockedOffline('report this event')) return;
+    setReportSheetOpen(true);
+  };
 
   // Dates and times render in the event's zone when it has one (20261103140000);
   // legacy events fall back to the viewer's zone, exactly as before.
@@ -726,19 +870,37 @@ export default function EventDetail() {
             </View>
           </View>
         </View>
-        <View style={styles.centerContainer}>
-          <Text style={styles.errorText}>Event not found</Text>
-          <Button
-            label="Back to Discover"
-            onPress={() => router.replace('/(tabs)/discover' as never)}
-            style={styles.notFoundButton}
-          />
-        </View>
+        {loadError ? (
+          <View style={styles.centerContainer}>
+            <ErrorState
+              title="Couldn't load this event"
+              onRetry={() => {
+                setLoading(true);
+                setReloadTick((t) => t + 1);
+              }}
+            />
+          </View>
+        ) : (
+          <View style={styles.centerContainer}>
+            <Text style={styles.errorText}>Event not found</Text>
+            <Button
+              label="Back to Discover"
+              onPress={() => router.replace('/(tabs)/discover' as never)}
+              style={styles.notFoundButton}
+            />
+          </View>
+        )}
       </View>
     );
   }
 
   const { event, business, category, links } = details;
+  // Why what's shown may be incomplete or old (docs/OFFLINE_PLAN.md §3.4).
+  const detailsNote = isPreview
+    ? connectivity !== 'online' || lastLoadFailed
+      ? 'Saved summary · Full details load when you reconnect'
+      : null
+    : freshnessNote({ hasData: true, dataUpdatedAt: detailsUpdatedAt, isError: lastLoadFailed, connectivity });
 
   const venueLat = Number.isFinite(event.lat) ? event.lat : business.lat;
   const venueLng = Number.isFinite(event.lng) ? event.lng : business.lng;
@@ -883,9 +1045,11 @@ export default function EventDetail() {
                 ))}
               </View>
             ) : null}
-            <View style={styles.heroCategoryPill}>
-              <Text style={styles.heroCategoryText}>{category.label.toUpperCase()}</Text>
-            </View>
+            {category.label ? (
+              <View style={styles.heroCategoryPill}>
+                <Text style={styles.heroCategoryText}>{category.label.toUpperCase()}</Text>
+              </View>
+            ) : null}
             <Text style={styles.heroTitle}>{event.title}</Text>
           </View>
         </View>
@@ -898,6 +1062,7 @@ export default function EventDetail() {
         />
 
         <View style={styles.contentCard}>
+          <FreshnessNote text={detailsNote} />
           {eventDraft && isOwner ? (
             <View style={styles.infoNotice} accessibilityRole="alert">
               <FileText size={18} color={Colors.text.secondary} />
@@ -1306,6 +1471,7 @@ export default function EventDetail() {
                 </TouchableOpacity>
               ) : null}
             </View>
+            {Number.isFinite(venueLat) && Number.isFinite(venueLng) ? (
             <View style={styles.venueMapCard}>
               {/* Below the fold — don't build the map WebView mid-transition.
                   DeferredMount renders the venueMapInner View itself. */}
@@ -1332,6 +1498,7 @@ export default function EventDetail() {
                 />
               </DeferredMount>
             </View>
+            ) : null}
           </View>
 
           {links.length > 0 && (
