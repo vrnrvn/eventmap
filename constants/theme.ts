@@ -128,11 +128,14 @@ export const DMSansFont = {
   bold: 'DMSans_700Bold',
 } as const;
 
-/** Inter – labels and compact UI metadata */
-export const InterFont = {
-  regular: 'Inter_400Regular',
-  medium: 'Inter_500Medium',
-  semibold: 'Inter_600SemiBold',
+/**
+ * Labels and compact UI metadata. Was Inter, which alone was ~670 KB of the
+ * ~1.2 MB of fonts loaded at startup (two weights, labels only); labels now
+ * use DM Sans weights that are loaded anyway for body text.
+ */
+export const LabelFont = {
+  medium: DMSansFont.medium,
+  semibold: DMSansFont.semibold,
 } as const;
 
 export const Typography = {
@@ -140,8 +143,8 @@ export const Typography = {
   fontFamilies: DMSansFont,
   displayFont: PlusJakartaSansFont.bold,
   displayFontFamilies: PlusJakartaSansFont,
-  labelFont: InterFont.medium,
-  labelFontFamilies: InterFont,
+  labelFont: LabelFont.medium,
+  labelFontFamilies: LabelFont,
   sizes: {
     /** Smallest legible label size — tiny badges and pills only */
     xxs: 11,

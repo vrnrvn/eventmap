@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ban, Flag, Lock, Pencil } from 'lucide-react-native';
+import { Ban, Flag, Lock, Pencil } from '@/components/icons.generated';
 import { useAuth } from '@/contexts/AuthContext';
 import { complaintsService } from '@/services/complaints';
 import { notify, notifyConfirm } from '@/utils/notify';

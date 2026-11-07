@@ -17,7 +17,7 @@ import {
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
-import { X } from 'lucide-react-native';
+import { X } from '@/components/icons.generated';
 import { EventmapSearch, EventmapMapPin } from '@/components/icons/EventmapIcons';
 import { useSearch, type SearchDateRange, type SearchLocation } from '@/contexts/SearchContext';
 import { geocodingService } from '@/services/geocoding';

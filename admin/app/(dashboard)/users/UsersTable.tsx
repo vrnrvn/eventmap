@@ -18,16 +18,8 @@ export function UsersTable({
   users: User[];
   bannedSet: Set<string>;
 }) {
-  const [filter, setFilter] = useState('');
   const [banned, setBanned] = useState(bannedSet);
   const [loading, setLoading] = useState<string | null>(null);
-
-  const filtered = users.filter(
-    (u) =>
-      !filter ||
-      u.name?.toLowerCase().includes(filter.toLowerCase()) ||
-      u.id.toLowerCase().includes(filter.toLowerCase())
-  );
 
   const handleBan = async (userId: string, reason: string) => {
     setLoading(userId);
@@ -68,13 +60,6 @@ export function UsersTable({
 
   return (
     <div>
-      <input
-        type="search"
-        placeholder="Search by name or ID..."
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        className="mb-4 w-full max-w-md rounded-md border border-zinc-300 px-3 py-2 text-sm"
-      />
       <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
         <table className="w-full text-sm">
           <thead className="bg-zinc-50">
@@ -87,7 +72,7 @@ export function UsersTable({
             </tr>
           </thead>
           <tbody>
-            {filtered.map((user) => {
+            {users.map((user) => {
               const isBanned = banned.has(user.id);
               return (
                 <tr key={user.id} className="border-t border-zinc-200">

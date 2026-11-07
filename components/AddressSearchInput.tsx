@@ -9,7 +9,7 @@ import {
   Keyboard,
   ActivityIndicator,
 } from 'react-native';
-import { MapPin, X } from 'lucide-react-native';
+import { MapPin, X } from '@/components/icons.generated';
 import {
   placesService,
   AutocompletePrediction,

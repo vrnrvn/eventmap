@@ -26,7 +26,7 @@ import {
   TrendingUp,
   UserRound,
   Users,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 import { useApp } from '@/contexts/AppContext';
 import { usePremium } from '@/contexts/PremiumContext';
 import {
@@ -116,7 +116,11 @@ export default function ProfileAnalyticsScreen() {
     placeholderData: keepPreviousData,
     staleTime: 60_000,
   });
-  useRefetchOnFocus(query.refetch, !!userBusiness && isBusinessMode);
+  useRefetchOnFocus(
+    query.refetch,
+    !!userBusiness && isBusinessMode,
+    queryKeys.businessAnalytics(userBusiness?.id, period)
+  );
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {
     setRefreshing(true);

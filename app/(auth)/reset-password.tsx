@@ -18,7 +18,7 @@ import { authErrorMessage } from '@/utils/authErrors';
 import { Button } from '@/components/ui/Button';
 import { TextField } from '@/components/ui/TextField';
 import { Colors, Typography, Spacing } from '@/constants/theme';
-import { ArrowLeft, Lock, KeyRound, LogIn } from 'lucide-react-native';
+import { ArrowLeft, Lock, KeyRound, LogIn } from '@/components/icons.generated';
 
 export default function ResetPasswordScreen() {
   const insets = useSafeAreaInsets();

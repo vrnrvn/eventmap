@@ -15,7 +15,7 @@ import { connectionErrorMessage } from '@/utils/networkErrors';
 import { notify, notifyConfirm } from '@/utils/notify';
 import { Business } from '@/types/database';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
-import { Heart, HeartOff, ChevronRight } from 'lucide-react-native';
+import { Heart, HeartOff, ChevronRight } from '@/components/icons.generated';
 import { Avatar } from '@/components/Avatar';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
@@ -33,24 +33,20 @@ export default function Following() {
   const [refreshing, setRefreshing] = useState(false);
   const [unfollowingId, setUnfollowingId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
+  // Ids of the last full load: follower counts refetch when this changes,
+  // not on every unfollow (removing a row doesn't change other counts).
+  const [loadedIdsKey, setLoadedIdsKey] = useState('');
+  const [countsLoad, setCountsLoad] = useState(0);
 
   const loadFollowing = useCallback(async () => {
     try {
-      const follows = await socialService.getUserFollows();
-      // One batched query instead of one getBusiness call per follow.
-      const businessesById = new Map(
-        (await socialService.getBusinessesByIds(follows.map((f) => f.business_id))).map(
-          (b) => [b.id, b] as const
-        )
-      );
-      const businessList: FollowedBusiness[] = [];
-      for (const f of follows) {
-        const biz = businessesById.get(f.business_id);
-        if (biz) {
-          businessList.push({ ...biz, followId: f.id });
-        }
-      }
+      // One request: follows with each business embedded.
+      const businessList: FollowedBusiness[] = await socialService.getFollowedBusinesses();
       setBusinesses(businessList);
+      setLoadedIdsKey(businessList.map((b) => b.id).join(','));
+      // Each full load (incl. pull-to-refresh) re-reads the counts; an
+      // unfollow alone doesn't (it changes no other business's count).
+      setCountsLoad((n) => n + 1);
       setLoadError(false);
     } catch (error) {
       console.error('Failed to load following:', error);
@@ -97,18 +93,21 @@ export default function Following() {
   const [followerCounts, setFollowerCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    if (businesses.length === 0) return;
-    const loadCounts = async () => {
-      // One follows query for all businesses instead of a count query each.
-      const counts = await socialService.getFollowerCountsByBusinessIds(
-        businesses.map((b) => b.id)
-      );
-      setFollowerCounts(counts);
+    if (!loadedIdsKey) return;
+    let cancelled = false;
+    socialService
+      .getFollowerCountsByBusinessIds(loadedIdsKey.split(','))
+      .then((counts) => {
+        if (!cancelled) setFollowerCounts(counts);
+      })
+      .catch(() => {
+        // Counts are decorative; the list renders fine without them.
+      });
+    return () => {
+      cancelled = true;
     };
-    loadCounts().catch(() => {
-      // Counts are decorative; the list renders fine without them.
-    });
-  }, [businesses]);
+    // countsLoad: re-run on every full load, even with the same ids.
+  }, [loadedIdsKey, countsLoad]);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>

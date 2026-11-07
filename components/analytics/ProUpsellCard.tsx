@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { Crown, Lock } from 'lucide-react-native';
+import { Crown, Lock } from '@/components/icons.generated';
 import { Button } from '@/components/ui/Button';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 

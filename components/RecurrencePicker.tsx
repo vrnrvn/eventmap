@@ -2,7 +2,7 @@ import React, { forwardRef, useImperativeHandle, useRef } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { NativeViewGestureHandler } from 'react-native-gesture-handler';
 import { BottomSheetModal, BottomSheetView, TouchableOpacity } from '@gorhom/bottom-sheet';
-import { Check } from 'lucide-react-native';
+import { Check } from '@/components/icons.generated';
 import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { RECURRENCE_OPTIONS, type RecurrenceOption } from '@/utils/recurrence';
 

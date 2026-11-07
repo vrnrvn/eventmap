@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import { Globe, Compass } from 'lucide-react-native';
+import { Globe, Compass } from '@/components/icons.generated';
 import { EventmapMapPin } from '@/components/icons/EventmapIcons';
 import { Colors, Spacing, Typography } from '@/constants/theme';
 

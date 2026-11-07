@@ -1,224 +1,125 @@
 // contexts/PremiumContext.tsx
 
-import {
-    createContext,
-    useContext,
-    useState,
-    useEffect,
-    useCallback,
-    useRef,
-    ReactNode,
-  } from 'react';
-  import { AppState } from 'react-native';
-  import {
-    premiumService,
-    PremiumPlan,
-    BusinessSubscription,
-  } from '@/services/premium';
-  import { useApp } from './AppContext';
-  import { useAuth } from './AuthContext';
-  import { readPremiumSnapshot, writePremiumSnapshot } from '@/services/offlineSnapshots';
-  import { getConnectivity, subscribeConnectivity } from '@/utils/connectivity';
+import { createContext, useContext, useEffect, useCallback, useMemo, useRef, ReactNode } from 'react';
+import { premiumService, PremiumPlan, BusinessSubscription } from '@/services/premium';
+import { useApp } from './AppContext';
+import { useAuth } from './AuthContext';
+import { derivePremiumState } from '@/utils/premiumState';
+import { getConnectivity } from '@/utils/connectivity';
 
-  type PremiumSnapshot = {
-    subscription: BusinessSubscription | null;
-    currentPlan: PremiumPlan | null;
-    eventCount: number;
-  };
+type FeatureKey =
+  | 'analytics'
+  | 'highlighted_markers'
+  | 'recurring_events'
+  | 'multi_photos';
 
-  const isPremiumSnapshot = (data: unknown): data is PremiumSnapshot =>
-    typeof data === 'object' &&
-    data !== null &&
-    'subscription' in data &&
-    'currentPlan' in data &&
-    typeof (data as { eventCount?: unknown }).eventCount === 'number';
-  
-  type FeatureKey =
-    | 'analytics'
-    | 'highlighted_markers'
-    | 'recurring_events'
-    | 'multi_photos';
-  
-  interface PremiumContextType {
-    subscription: BusinessSubscription | null;
-    currentPlan: PremiumPlan | null;
-    allPlans: PremiumPlan[];
-    loading: boolean;
-    isPremium: boolean;
-    tierSlug: string;
-    eventCount: number;
-    eventLimit: number;
-    canUse: (feature: FeatureKey) => boolean;
-    canCreateEvent: (currentCount?: number) => boolean;
-    refreshSubscription: () => Promise<void>;
-  }
-  
-  const PremiumContext = createContext<PremiumContextType>({
-    subscription: null,
-    currentPlan: null,
-    allPlans: [],
-    loading: true,
-    isPremium: false,
-    tierSlug: 'free',
-    eventCount: 0,
-    eventLimit: 2,
-    canUse: () => false,
-    canCreateEvent: () => true,
-    refreshSubscription: async () => {},
-  });
-  
-  export function PremiumProvider({ children }: { children: ReactNode }) {
-    const { userBusiness } = useApp();
-    const [subscription, setSubscription] =
-      useState<BusinessSubscription | null>(null);
-    const [currentPlan, setCurrentPlan] = useState<PremiumPlan | null>(null);
-    const [allPlans, setAllPlans] = useState<PremiumPlan[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [eventCount, setEventCount] = useState(0);
-  
-    const { sessionStale } = useAuth();
-    // Guards against a slow load for a previous business applying late.
-    const loadSeqRef = useRef(0);
-    // The last network load failed or was skipped; retried on reconnect.
-    const [premiumStale, setPremiumStale] = useState(false);
-    const skippedForStaleRef = useRef(false);
+interface PremiumContextType {
+  subscription: BusinessSubscription | null;
+  currentPlan: PremiumPlan | null;
+  allPlans: PremiumPlan[];
+  loading: boolean;
+  isPremium: boolean;
+  tierSlug: string;
+  eventCount: number;
+  eventLimit: number;
+  canUse: (feature: FeatureKey) => boolean;
+  canCreateEvent: (currentCount?: number) => boolean;
+  refreshSubscription: () => Promise<void>;
+}
 
-    /**
-     * A business's last known plan shows at once from the device snapshot,
-     * so an offline start doesn't silently drop a premium host to free-tier
-     * limits; the network result replaces it. Skipped while the session is
-     * unverified, since an anonymous read finds no subscription
-     * (docs/OFFLINE_PLAN.md §3.6).
-     */
-    const loadData = useCallback(async ({ useSnapshot = false } = {}) => {
-      const seq = ++loadSeqRef.current;
-      const businessId = userBusiness?.id;
-      const plans = await premiumService.getPlans();
-      if (seq !== loadSeqRef.current) return;
-      setAllPlans(plans);
+const PremiumContext = createContext<PremiumContextType>({
+  subscription: null,
+  currentPlan: null,
+  allPlans: [],
+  loading: true,
+  isPremium: false,
+  tierSlug: 'free',
+  eventCount: 0,
+  eventLimit: 2,
+  canUse: () => false,
+  canCreateEvent: () => true,
+  refreshSubscription: async () => {},
+});
 
-      if (!businessId) {
-        setSubscription(null);
-        setCurrentPlan(plans.find((p) => p.slug === 'free') ?? null);
-        setEventCount(0);
-        setPremiumStale(false);
-        setLoading(false);
-        return;
-      }
+/**
+ * Premium status, derived from the `businesses` row AppContext already holds
+ * (see utils/premiumState.ts). No fetching of its own: previously this
+ * provider re-fetched that same row three times on every startup, retry and
+ * reconnect, serialized behind the auth and business loads. AppContext owns
+ * loading, offline snapshots, verified-session gating and reconnect retries
+ * for the row; this provider inherits all of that for free.
+ */
+export function PremiumProvider({ children }: { children: ReactNode }) {
+  const { userBusiness, loading: appLoading, refreshBusiness } = useApp();
+  const { sessionStale } = useAuth();
 
-      let haveSnapshot = false;
-      if (useSnapshot) {
-        const snapshot = await readPremiumSnapshot(businessId, isPremiumSnapshot);
-        if (seq !== loadSeqRef.current) return;
-        if (snapshot) {
-          haveSnapshot = true;
-          setSubscription(snapshot.data.subscription);
-          setCurrentPlan(snapshot.data.currentPlan);
-          setEventCount(snapshot.data.eventCount);
-          setLoading(false);
-        }
-      }
-      if (sessionStale) {
-        skippedForStaleRef.current = true;
-        setPremiumStale(true);
-        setLoading(false);
-        return;
-      }
+  const allPlans = premiumService.getPlans();
+  const derived = useMemo(() => derivePremiumState(userBusiness), [userBusiness]);
+  const currentPlan = useMemo(
+    () => premiumService.getPlanBySlug(derived.planSlug) ?? null,
+    [derived.planSlug]
+  );
 
-      try {
-        if (!haveSnapshot) setLoading(true);
-        const [sub, limits, count] = await Promise.all([
-          premiumService.getSubscription(businessId),
-          premiumService.getFeatureLimits(businessId),
-          premiumService.getEventCount(businessId),
-        ]);
-        if (seq !== loadSeqRef.current) return;
-        setSubscription(sub);
-        setCurrentPlan(limits);
-        setEventCount(count);
-        setPremiumStale(false);
-        writePremiumSnapshot(businessId, { subscription: sub, currentPlan: limits, eventCount: count });
-      } catch (err) {
-        if (seq !== loadSeqRef.current) return;
-        // Keep what is shown (snapshot or an earlier load).
-        console.error('Failed to load premium data:', err);
-        setPremiumStale(true);
-      } finally {
-        if (seq === loadSeqRef.current) setLoading(false);
-      }
-    }, [userBusiness?.id, sessionStale]);
-
-    useEffect(() => {
-      loadData({ useSnapshot: true });
-      // Reload only when the business changes; the effect below handles a
-      // session that becomes verified.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [userBusiness?.id]);
-
-    useEffect(() => {
-      if (!premiumStale || sessionStale || !userBusiness) return;
-      if (skippedForStaleRef.current) {
-        skippedForStaleRef.current = false;
-        loadData();
-      }
-      let previous = getConnectivity();
-      const unsubscribe = subscribeConnectivity((status) => {
-        const wasOnline = previous === 'online';
-        previous = status;
-        if (status === 'online' && !wasOnline) loadData();
+  // A lapsed simulated subscription needs a one-off downgrade write so
+  // server-side gating (recurring trigger, event limit) agrees with the UI,
+  // which already derives it as free. Guarded per business + expiry so a
+  // re-render or retry can't send it twice (the old load path could race two
+  // cancels), and re-armed if a later row shows premium again.
+  const downgradedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!derived.lapsed || !userBusiness) return;
+    // Only with a verified session: an unverified (anonymous) write matches
+    // no rows yet reports success, which would mark this done for the session.
+    if (sessionStale || getConnectivity() === 'offline') return;
+    const key = `${userBusiness.id}:${userBusiness.subscription_expires_at ?? ''}`;
+    if (downgradedForRef.current === key) return;
+    downgradedForRef.current = key;
+    premiumService
+      .cancelSubscription(userBusiness.id)
+      .then(() => refreshBusiness())
+      .catch((err) => {
+        console.error('Failed to downgrade lapsed subscription:', err);
+        // Allow another attempt on the next business refresh.
+        downgradedForRef.current = null;
       });
-      const appState = AppState.addEventListener('change', (state) => {
-        if (state === 'active' && getConnectivity() !== 'offline') loadData();
-      });
-      return () => {
-        unsubscribe();
-        appState.remove();
-      };
-    }, [premiumStale, sessionStale, userBusiness, loadData]);
+  }, [derived.lapsed, userBusiness, refreshBusiness, sessionStale]);
 
-    const isPremium =
-      subscription?.status === 'active' &&
-      currentPlan != null &&
-      currentPlan.slug !== 'free';
-  
-    const tierSlug = currentPlan?.slug ?? 'free';
-    const eventLimit = currentPlan?.max_events ?? 2;
+  const canUse = useCallback(
+    (feature: FeatureKey) => {
+      if (!currentPlan) return false;
+      return premiumService.canUseFeature(currentPlan, feature);
+    },
+    [currentPlan]
+  );
 
-    const canUse = useCallback(
-      (feature: FeatureKey) => {
-        if (!currentPlan) return false;
-        return premiumService.canUseFeature(currentPlan, feature);
-      },
-      [currentPlan]
-    );
+  const eventCount = derived.eventCount;
+  const canCreateEvent = useCallback(
+    (currentCount = eventCount) => {
+      if (!currentPlan) return true;
+      return premiumService.canCreateEvent(currentPlan, currentCount);
+    },
+    [currentPlan, eventCount]
+  );
 
-    const canCreateEvent = useCallback(
-      (currentCount = eventCount) => {
-        if (!currentPlan) return true;
-        return premiumService.canCreateEvent(currentPlan, currentCount);
-      },
-      [currentPlan, eventCount]
-    );
+  const value = useMemo<PremiumContextType>(
+    () => ({
+      subscription: derived.subscription,
+      currentPlan,
+      allPlans,
+      loading: appLoading,
+      isPremium: derived.subscription !== null,
+      tierSlug: derived.planSlug,
+      eventCount,
+      eventLimit: currentPlan?.max_events ?? 2,
+      canUse,
+      canCreateEvent,
+      // The subscription IS the business row; refreshing one refreshes both.
+      refreshSubscription: refreshBusiness,
+    }),
+    [derived, currentPlan, allPlans, appLoading, eventCount, canUse, canCreateEvent, refreshBusiness]
+  );
 
-    return (
-      <PremiumContext.Provider
-        value={{
-          subscription,
-          currentPlan,
-          allPlans,
-          loading,
-          isPremium,
-          tierSlug,
-          eventCount,
-          eventLimit,
-          canUse,
-          canCreateEvent,
-          refreshSubscription: () => loadData(),
-        }}
-      >
-        {children}
-      </PremiumContext.Provider>
-    );
-  }
-  
-  export const usePremium = () => useContext(PremiumContext);
+  return <PremiumContext.Provider value={value}>{children}</PremiumContext.Provider>;
+}
+
+export const usePremium = () => useContext(PremiumContext);

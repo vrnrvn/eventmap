@@ -3,25 +3,16 @@ import { Text, AppState } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
-import {
-  useFonts,
-  PlusJakartaSans_400Regular,
-  PlusJakartaSans_500Medium,
-  PlusJakartaSans_600SemiBold,
-  PlusJakartaSans_700Bold,
-  PlusJakartaSans_800ExtraBold,
-} from '@expo-google-fonts/plus-jakarta-sans';
-import {
-  DMSans_400Regular,
-  DMSans_500Medium,
-  DMSans_600SemiBold,
-  DMSans_700Bold,
-} from '@expo-google-fonts/dm-sans';
-import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-} from '@expo-google-fonts/inter';
+import { useFonts } from 'expo-font';
+// Per-weight entry points: the package index require()s every weight and
+// italic, which shipped 30+ unused font files in every bundle.
+import { PlusJakartaSans_600SemiBold } from '@expo-google-fonts/plus-jakarta-sans/600SemiBold';
+import { PlusJakartaSans_700Bold } from '@expo-google-fonts/plus-jakarta-sans/700Bold';
+import { PlusJakartaSans_800ExtraBold } from '@expo-google-fonts/plus-jakarta-sans/800ExtraBold';
+import { DMSans_400Regular } from '@expo-google-fonts/dm-sans/400Regular';
+import { DMSans_500Medium } from '@expo-google-fonts/dm-sans/500Medium';
+import { DMSans_600SemiBold } from '@expo-google-fonts/dm-sans/600SemiBold';
+import { DMSans_700Bold } from '@expo-google-fonts/dm-sans/700Bold';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { AuthRedirectHandler } from '@/components/AuthRedirectHandler';
@@ -169,14 +160,41 @@ function useReactQueryAppStateFocus() {
   }, []);
 }
 
+/** Shortest time the branded splash shows, so it never flashes. */
+const SPLASH_MIN_MS = 450;
+/** Never hold the app behind the splash longer than this. */
+const SPLASH_MAX_MS = 1150;
+
+/**
+ * The branded splash is an overlay; the app mounts and loads underneath it.
+ * It used to stay a fixed 1150 ms after fonts loaded regardless of readiness;
+ * now it lifts as soon as the session restore (and profile/snapshot) settles,
+ * after a short minimum, and still caps at the old duration.
+ */
+function StartupSplash() {
+  const { loading } = useAuth();
+  const [minElapsed, setMinElapsed] = useState(false);
+  const [maxElapsed, setMaxElapsed] = useState(false);
+  useEffect(() => {
+    const min = setTimeout(() => setMinElapsed(true), SPLASH_MIN_MS);
+    const max = setTimeout(() => setMaxElapsed(true), SPLASH_MAX_MS);
+    return () => {
+      clearTimeout(min);
+      clearTimeout(max);
+    };
+  }, []);
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => {
+    if (!dismissed && (maxElapsed || (minElapsed && !loading))) setDismissed(true);
+  }, [dismissed, maxElapsed, minElapsed, loading]);
+  return <BrandedSplashScreen visible={!dismissed} />;
+}
+
 export default function RootLayout() {
   useFrameworkReady();
   useReactQueryAppStateFocus();
-  const [showBrandedSplash, setShowBrandedSplash] = useState(true);
 
   const [fontsLoaded, fontError] = useFonts({
-    PlusJakartaSans_400Regular,
-    PlusJakartaSans_500Medium,
     PlusJakartaSans_600SemiBold,
     PlusJakartaSans_700Bold,
     PlusJakartaSans_800ExtraBold,
@@ -184,9 +202,6 @@ export default function RootLayout() {
     DMSans_500Medium,
     DMSans_600SemiBold,
     DMSans_700Bold,
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
   });
 
   useEffect(() => {
@@ -195,17 +210,6 @@ export default function RootLayout() {
     }
   }, [fontsLoaded, fontError]);
 
-  useEffect(() => {
-    if (!fontsLoaded && !fontError) {
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      setShowBrandedSplash(false);
-    }, 1150);
-
-    return () => clearTimeout(timeout);
-  }, [fontError, fontsLoaded]);
 
   useEffect(() => {
     if (fontsLoaded) {
@@ -214,35 +218,45 @@ export default function RootLayout() {
     }
   }, [fontsLoaded]);
 
-  if (!fontsLoaded && !fontError) {
-    return null;
-  }
+  // Providers mount right away so session restore, the device-cache
+  // restore and the business load run WHILE fonts load (the whole tree used
+  // to wait for all font files first). Only things that draw text or
+  // navigate wait for fonts; the native splash covers the screen until then.
+  const uiReady = fontsLoaded || !!fontError;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <AuthRedirectHandler />
-          <PushNavigationGate />
+          {uiReady ? (
+            <>
+              <AuthRedirectHandler />
+              <PushNavigationGate />
+            </>
+          ) : null}
           <QueryCachePersistence>
           <PendingWritesSync />
           <AppProvider>
             <PremiumProvider>
               <SearchProvider>
               <BottomSheetModalProvider>
-                <Stack screenOptions={{ headerShown: false }}>
-                <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-                <Stack.Screen name="(onboarding)" options={{ headerShown: false }} />
-                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                <Stack.Screen name="premium" options={{ headerShown: false }} />
-                <Stack.Screen name="+not-found" />
-              </Stack>
-              <BrandedSplashScreen visible={showBrandedSplash} />
-              <OfflineBanner />
-              <AppToast />
+              {uiReady ? (
+                <>
+                  <Stack screenOptions={{ headerShown: false }}>
+                    <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+                    <Stack.Screen name="(onboarding)" options={{ headerShown: false }} />
+                    <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                    <Stack.Screen name="premium" options={{ headerShown: false }} />
+                    <Stack.Screen name="+not-found" />
+                  </Stack>
+                  <StartupSplash />
+                  <OfflineBanner />
+                  <AppToast />
+                </>
+              ) : null}
               </BottomSheetModalProvider>
               </SearchProvider>
-              <StatusBar style="auto" />
+              {uiReady ? <StatusBar style="auto" /> : null}
             </PremiumProvider>
           </AppProvider>
           </QueryCachePersistence>

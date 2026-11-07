@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, LayoutAnimation, Linking, Platform, UIManager } from 'react-native';
-import { ChevronDown, Mail } from 'lucide-react-native';
+import { ChevronDown, Mail } from '@/components/icons.generated';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Colors, Typography } from '@/constants/theme';
 const subtleBorderColor = Colors.border.light;

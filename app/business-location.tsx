@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { MapPin, Check } from 'lucide-react-native';
+import { MapPin, Check } from '@/components/icons.generated';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
 import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView';

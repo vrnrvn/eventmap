@@ -1,13 +1,14 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { memo, useState, useCallback, useEffect, useRef } from 'react';
 import {
   AccessibilityInfo,
+  ActivityIndicator,
   Animated,
   Easing,
+  FlatList,
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  ScrollView,
   RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -29,7 +30,7 @@ import {
   Megaphone,
   ListOrdered,
   ShieldAlert,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import {
   getNotificationsPage,
@@ -102,6 +103,80 @@ const getIconMeta = (type: NotificationType) => {
       return { Icon: Mail, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
   }
 };
+
+type NotificationCardProps = {
+  notification: Notification;
+  /** Current time for relative labels; changes once a minute while focused. */
+  now: number;
+  onPress: (notification: Notification) => void;
+  onDismiss: (id: string) => void;
+};
+
+/**
+ * One notification row. Memoized so realtime inserts and read / dismiss
+ * changes only re-render the rows whose data actually changed.
+ */
+const NotificationCard = memo(function NotificationCard({
+  notification,
+  now,
+  onPress,
+  onDismiss,
+}: NotificationCardProps) {
+  const unread = isUnreadStyle(notification);
+  const iconMeta = getIconMeta(notification.type);
+
+  return (
+    <TouchableOpacity
+      style={[styles.card, !unread && styles.cardRead]}
+      activeOpacity={0.86}
+      onPress={() => onPress(notification)}
+      accessibilityRole="button"
+      accessibilityLabel={unread ? `Unread: ${notification.title}` : notification.title}
+    >
+      <View style={styles.cardTopRow}>
+        <View style={styles.cardLeft}>
+          <View style={[styles.iconWrap, { backgroundColor: unread ? iconMeta.bg : Palette.readIconBg }]}>
+            <iconMeta.Icon
+              size={22}
+              color={unread ? iconMeta.color : Palette.subtle}
+            />
+          </View>
+
+          <View style={styles.contentWrap}>
+            <View style={styles.titleRow}>
+              <Text style={[styles.title, !unread && styles.titleRead]} numberOfLines={1}>
+                {notification.title}
+              </Text>
+              <View style={styles.timeRow}>
+                <Text style={[styles.timeLabel, !unread && styles.timeRead]}>
+                  {formatRelativeLabel(notification.timestamp, new Date(now))}
+                </Text>
+                {unread ? <View style={styles.unreadDot} /> : null}
+              </View>
+            </View>
+            <Text style={[styles.body, !unread && styles.bodyRead]}>
+              {notification.body}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      <TouchableOpacity
+        style={styles.dismissButton}
+        onPress={() => onDismiss(notification.id)}
+        hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+        accessibilityRole="button"
+        accessibilityLabel="Dismiss notification"
+      >
+        <X size={16} color={Palette.subtle} />
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
+});
+
+const ItemSeparator = () => <View style={styles.separator} />;
+
+const keyExtractor = (n: Notification) => n.id;
 
 type CachedNotifications = { items: Notification[]; hasMore: boolean; unreadCount: number };
 
@@ -253,8 +328,13 @@ export default function NotificationsScreen() {
     };
   }, [user?.id, loadNotifications]);
 
+  // Set when an older page failed: scroll-paging stops (no retry loop at
+  // the list end) and the footer offers an explicit retry instead.
+  const [loadMoreFailed, setLoadMoreFailed] = useState(false);
   const loadMore = useCallback(async () => {
-    if (loadingMore || !hasMore) return;
+    // onEndReached also fires while the list is empty (loading / error).
+    if (loadingMore || !hasMore || loading || error) return;
+    setLoadMoreFailed(false);
     setLoadingMore(true);
     try {
       const { items, hasMore: more } = await getNotificationsPage({
@@ -266,16 +346,23 @@ export default function NotificationsScreen() {
       });
       setHasMore(more);
     } catch {
-      // Keep the button so a transient failure can be retried.
+      // The footer shows a retry control (see listFooter).
+      setLoadMoreFailed(true);
       notify.error("Couldn't load older notifications.");
     } finally {
       setLoadingMore(false);
     }
-  }, [loadingMore, hasMore, notifications.length]);
+  }, [loadingMore, hasMore, loading, error, notifications.length]);
 
   // Realtime pauses while backgrounded, so the list can drift from the badge.
+  // Skips the first focus: the mount load above already fetched the count.
+  const firstFocusRef = useRef(true);
   useFocusEffect(
     useCallback(() => {
+      if (firstFocusRef.current) {
+        firstFocusRef.current = false;
+        return;
+      }
       getUnreadNotificationCount()
         .then(setUnreadCount)
         .catch(() => {});
@@ -354,25 +441,25 @@ export default function NotificationsScreen() {
     [markAsRead]
   );
 
-  return (
-    <View style={styles.root}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={Palette.primary}
-            colors={[Palette.primary]}
-          />
-        }
-        contentContainerStyle={{
-          paddingTop: insets.top + 12,
-          paddingBottom: insets.bottom + 130,
-          paddingHorizontal: 16,
-        }}
-      >
-        <View style={styles.editorialHeader}>
+  // Rows are memoized, so "5m ago" labels need an explicit clock: refreshed
+  // on focus and once a minute while this tab is focused.
+  const [now, setNow] = useState(() => Date.now());
+  useFocusEffect(
+    useCallback(() => {
+      setNow(Date.now());
+      const timer = setInterval(() => setNow(Date.now()), 60_000);
+      return () => clearInterval(timer);
+    }, [])
+  );
+  const renderItem = useCallback(
+    ({ item }: { item: Notification }) => (
+      <NotificationCard notification={item} now={now} onPress={handlePress} onDismiss={dismissNotification} />
+    ),
+    [now, handlePress, dismissNotification]
+  );
+
+  const listHeader = (
+    <View style={styles.editorialHeader}>
           <Text style={styles.editorialTitle}>Notifications</Text>
           <Text style={styles.editorialSubtitle}>
             Stay in the loop with your latest event activity.
@@ -391,132 +478,111 @@ export default function NotificationsScreen() {
               </Text>
             </TouchableOpacity>
           ) : null}
+      {!loading && !error ? (
+        <FreshnessNote
+          style={styles.freshness}
+          text={freshnessNote({
+            hasData: notifications.length > 0,
+            dataUpdatedAt: updatedAt,
+            isError: lastLoadFailed,
+            connectivity,
+          })}
+        />
+      ) : null}
+    </View>
+  );
+
+  const listEmpty = loading ? (
+    <NotificationSkeleton />
+  ) : error && connectivity === 'offline' ? (
+    <OfflineState
+      onRetry={() => {
+        setLoading(true);
+        loadNotifications();
+      }}
+    />
+  ) : error ? (
+    <ErrorState
+      title="Couldn't load notifications"
+      onRetry={() => {
+        setLoading(true);
+        loadNotifications();
+      }}
+    />
+  ) : (
+    <View style={styles.emptyCard}>
+      <View style={styles.emptyIconWrap}>
+        <BellOff size={28} color={Palette.primary} />
+      </View>
+      <Text style={styles.emptyTitle}>All caught up</Text>
+      <Text style={styles.emptySub}>
+        You have no notifications right now. We will let you know when something happens.
+      </Text>
+    </View>
+  );
+
+  const listFooter = (
+    <>
+      {!loading && !error && loadingMore ? (
+        <View style={styles.loadMoreButton} accessibilityLabel="Loading older notifications">
+          <ActivityIndicator color={Palette.primary} />
         </View>
+      ) : null}
+      {!loading && !error && !loadingMore && loadMoreFailed && hasMore ? (
+        <TouchableOpacity
+          style={styles.historyButton}
+          activeOpacity={0.84}
+          onPress={() => void loadMore()}
+          accessibilityRole="button"
+          accessibilityLabel="Retry loading older notifications"
+        >
+          <Text style={styles.historyText}>Couldn&apos;t load older notifications · Retry</Text>
+        </TouchableOpacity>
+      ) : null}
+      {!loading && !error && unreadCount > 0 ? (
+        <TouchableOpacity
+          style={styles.historyButton}
+          activeOpacity={0.84}
+          onPress={markAllRead}
+          accessibilityRole="button"
+          accessibilityLabel="Mark all notifications as read"
+        >
+          <Text style={styles.historyText}>Mark all as read</Text>
+          <CheckCheck size={17} color={Palette.text} />
+        </TouchableOpacity>
+      ) : null}
+    </>
+  );
 
-        <View style={styles.listWrap}>
-          {!loading && !error ? (
-            <FreshnessNote
-              text={freshnessNote({
-                hasData: notifications.length > 0,
-                dataUpdatedAt: updatedAt,
-                isError: lastLoadFailed,
-                connectivity,
-              })}
-            />
-          ) : null}
-          {loading ? (
-            <NotificationSkeleton />
-          ) : error && connectivity === 'offline' ? (
-            <OfflineState
-              onRetry={() => {
-                setLoading(true);
-                loadNotifications();
-              }}
-            />
-          ) : error ? (
-            <ErrorState
-              title="Couldn't load notifications"
-              onRetry={() => {
-                setLoading(true);
-                loadNotifications();
-              }}
-            />
-          ) : notifications.length === 0 ? (
-            <View style={styles.emptyCard}>
-              <View style={styles.emptyIconWrap}>
-                <BellOff size={28} color={Palette.primary} />
-              </View>
-              <Text style={styles.emptyTitle}>All caught up</Text>
-              <Text style={styles.emptySub}>
-                You have no notifications right now. We will let you know when something happens.
-              </Text>
-            </View>
-          ) : (
-            notifications.map((notification) => {
-              const unread = isUnreadStyle(notification);
-              const iconMeta = getIconMeta(notification.type);
-
-              return (
-                <TouchableOpacity
-                  key={notification.id}
-                  style={[styles.card, !unread && styles.cardRead]}
-                  activeOpacity={0.86}
-                  onPress={() => handlePress(notification)}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    unread ? `Unread: ${notification.title}` : notification.title
-                  }
-                >
-                  <View style={styles.cardTopRow}>
-                    <View style={styles.cardLeft}>
-                      <View style={[styles.iconWrap, { backgroundColor: unread ? iconMeta.bg : Palette.readIconBg }]}>
-                        <iconMeta.Icon
-                          size={22}
-                          color={unread ? iconMeta.color : Palette.subtle}
-                        />
-                      </View>
-
-                      <View style={styles.contentWrap}>
-                        <View style={styles.titleRow}>
-                          <Text style={[styles.title, !unread && styles.titleRead]} numberOfLines={1}>
-                            {notification.title}
-                          </Text>
-                          <View style={styles.timeRow}>
-                            <Text style={[styles.timeLabel, !unread && styles.timeRead]}>
-                              {formatRelativeLabel(notification.timestamp)}
-                            </Text>
-                            {unread ? <View style={styles.unreadDot} /> : null}
-                          </View>
-                        </View>
-                        <Text style={[styles.body, !unread && styles.bodyRead]}>
-                          {notification.body}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-
-                  <TouchableOpacity
-                    style={styles.dismissButton}
-                    onPress={() => dismissNotification(notification.id)}
-                    hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
-                    accessibilityRole="button"
-                    accessibilityLabel="Dismiss notification"
-                  >
-                    <X size={16} color={Palette.subtle} />
-                  </TouchableOpacity>
-                </TouchableOpacity>
-              );
-            })
-          )}
-          {!loading && !error && hasMore ? (
-            <TouchableOpacity
-              style={styles.loadMoreButton}
-              onPress={() => void loadMore()}
-              disabled={loadingMore}
-              activeOpacity={0.84}
-              accessibilityRole="button"
-              accessibilityLabel="Load older notifications"
-            >
-              <Text style={styles.loadMoreText}>
-                {loadingMore ? 'Loading…' : 'Load older notifications'}
-              </Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-
-        {!loading && !error && unreadCount > 0 ? (
-          <TouchableOpacity
-            style={styles.historyButton}
-            activeOpacity={0.84}
-            onPress={markAllRead}
-            accessibilityRole="button"
-            accessibilityLabel="Mark all notifications as read"
-          >
-            <Text style={styles.historyText}>Mark all as read</Text>
-            <CheckCheck size={17} color={Palette.text} />
-          </TouchableOpacity>
-        ) : null}
-      </ScrollView>
+  return (
+    <View style={styles.root}>
+      <FlatList
+        data={loading || error ? [] : notifications}
+        renderItem={renderItem}
+        keyExtractor={keyExtractor}
+        ItemSeparatorComponent={ItemSeparator}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={listEmpty}
+        ListFooterComponent={listFooter}
+        onEndReached={() => {
+          if (!loadMoreFailed) void loadMore();
+        }}
+        onEndReachedThreshold={0.4}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={Palette.primary}
+            colors={[Palette.primary]}
+          />
+        }
+        contentContainerStyle={{
+          paddingTop: insets.top + 12,
+          paddingBottom: insets.bottom + 130,
+          paddingHorizontal: 16,
+        }}
+      />
     </View>
   );
 }
@@ -606,8 +672,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Typography.labelFontFamilies.semibold,
   },
-  listWrap: {
-    gap: 12,
+  separator: {
+    height: 12,
+  },
+  freshness: {
+    marginTop: Spacing.xs,
+    marginBottom: 0,
   },
   card: {
     backgroundColor: Palette.card,
@@ -725,11 +795,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: Spacing.lg,
     marginTop: Spacing.sm,
-  },
-  loadMoreText: {
-    fontSize: Typography.sizes.sm,
-    color: Palette.primary,
-    fontFamily: Typography.fontFamilies.semibold,
   },
   historyButton: {
     marginTop: 26,

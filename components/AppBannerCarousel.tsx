@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Linking } from 'react-native';
+import { Image } from 'expo-image';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import type { AppBanner } from '@/services/banners';
 
@@ -32,7 +33,9 @@ export function AppBannerCarousel({ banners }: AppBannerCarouselProps) {
             <Image
               source={{ uri: banner.image_url }}
               style={styles.bannerImage}
-              resizeMode="cover"
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={150}
               onError={() => {
                 const url = banner.image_url!;
                 setFailed((prev) => new Set(prev).add(url));

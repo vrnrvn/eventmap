@@ -1,5 +1,6 @@
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, getSessionUser } from './supabase';
+import { signalEventWrites } from '@/utils/eventDataVersion';
 import { isConnectionError } from '@/utils/networkErrors';
 import { EventChatMessage, EventChatMessageWithSender, Profile } from '@/types/database';
 
@@ -818,3 +819,17 @@ export const eventChatService = {
     };
   },
 };
+
+// Chat writes change the event page's chat preview / unread badge, so they
+// bump the shared version (EventDetail refreshes them on its next focus).
+signalEventWrites(eventChatService, [
+  'sendMessage',
+  'deleteMessage',
+  'markRead',
+  'restoreMessage',
+  'setSettings',
+  'setMode',
+  'setPin',
+  'blockUser',
+  'unblockUser',
+]);

@@ -15,7 +15,7 @@ import {
   UserCheck,
   UserPlus,
   Users,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 import { queryKeys } from '@/hooks/queryKeys';
 import { shouldRetryQuery } from '@/utils/queryRetry';
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
@@ -84,7 +84,7 @@ export default function EventInsightsScreen() {
       !(error instanceof InsightsForbiddenError || error instanceof InsightsNotFoundError) &&
       shouldRetryQuery(count, error),
   });
-  useRefetchOnFocus(query.refetch, !!id);
+  useRefetchOnFocus(query.refetch, !!id, queryKeys.eventInsights(id, days));
   const [pulling, setPulling] = useState(false);
 
   const data = query.data;

@@ -1,6 +1,6 @@
 import React, { ReactNode } from 'react';
 import { StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
-import { ChevronRight } from 'lucide-react-native';
+import { ChevronRight } from '@/components/icons.generated';
 import { alpha, Colors, Typography } from '@/constants/theme';
 
 type BaseProps = {

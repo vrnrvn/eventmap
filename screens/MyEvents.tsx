@@ -43,7 +43,7 @@ import {
   ChevronRight,
   Clock,
   FileText,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 
 const PAGE_SIZE = 30;
 

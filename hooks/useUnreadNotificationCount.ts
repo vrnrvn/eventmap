@@ -6,6 +6,8 @@ import {
   subscribeToNotifications,
 } from '@/services/notifications';
 
+const BADGE_REFETCH_DEBOUNCE_MS = 400;
+
 /**
  * Lightweight unread-notification count for the tab badge.
  * Uses an exact head-only count query (not a windowed row fetch, so counts
@@ -23,7 +25,7 @@ export function useUnreadNotificationCount(userId: string | undefined): number {
     }
     let active = true;
 
-    const refetch = () => {
+    const fetchCount = () => {
       getUnreadNotificationCount()
         .then((unread) => {
           if (active) setCount(unread);
@@ -33,7 +35,19 @@ export function useUnreadNotificationCount(userId: string | undefined): number {
         });
     };
 
-    refetch();
+    // Coalesce bursts: "mark all read" (or a batch of inserts) delivers one
+    // realtime event per row, which used to fire one count request per row.
+    // A short trailing debounce turns that into a single request.
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const refetch = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        fetchCount();
+      }, BADGE_REFETCH_DEBOUNCE_MS);
+    };
+
+    fetchCount();
 
     // Any insert/update/delete can change the unread total; the head-only
     // count query is cheap, so just refetch instead of mirroring row state.
@@ -66,6 +80,7 @@ export function useUnreadNotificationCount(userId: string | undefined): number {
 
     return () => {
       active = false;
+      if (debounceTimer) clearTimeout(debounceTimer);
       unsubscribe();
       appStateSub.remove();
       unsubscribeConnectivity();

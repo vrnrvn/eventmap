@@ -40,7 +40,7 @@ import {
   Eye,
   Sparkles,
   AtSign,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 import { useAuth } from '@/contexts/AuthContext';
 import { categoriesService } from '@/services/categories';
 import { profilesService } from '@/services/profiles';

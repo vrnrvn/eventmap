@@ -1,6 +1,6 @@
 import { memo, useMemo } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight } from '@/components/icons.generated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { monthMatrix, type CalendarSource, type DayMarker, type MonthCell, type WeekStart } from '@/utils/calendar';

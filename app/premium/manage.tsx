@@ -13,7 +13,7 @@ import {
   Crown,
   CreditCard,
   Check,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 import { usePremium } from '@/contexts/PremiumContext';
 import { notify, notifyConfirm } from '@/utils/notify';
 import { Button } from '@/components/ui/Button';
@@ -46,7 +46,6 @@ export default function ManageSubscriptionScreen() {
     subscription,
     currentPlan,
     isPremium,
-    refreshSubscription,
   } = usePremium();
   const [canceling, setCanceling] = useState(false);
 
@@ -79,8 +78,8 @@ export default function ManageSubscriptionScreen() {
         setCanceling(true);
         try {
           await premiumService.cancelSubscription(userBusiness.id);
+          // refreshSubscription is the same business-row refresh; one call.
           await refreshBusiness();
-          await refreshSubscription();
         } catch (err) {
           console.error('Failed to cancel:', err);
           notify.error('Failed to cancel subscription. Please try again.');
@@ -89,7 +88,7 @@ export default function ManageSubscriptionScreen() {
         }
       },
     });
-  }, [subscription, userBusiness, refreshBusiness, refreshSubscription]);
+  }, [subscription, userBusiness, refreshBusiness]);
 
   const handleUpgrade = useCallback(() => {
     router.push('/premium/plans' as never);

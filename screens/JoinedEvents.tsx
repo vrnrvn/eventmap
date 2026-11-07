@@ -34,7 +34,7 @@ import {
   MessageCircle,
   Repeat,
   History,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 
 const PAGE_SIZE = 20;
 
@@ -83,7 +83,9 @@ export default function JoinedEvents() {
     getNextPageParam: (lastPage, allPages) =>
       lastPage.length >= PAGE_SIZE ? allPages.reduce((n, page) => n + page.length, 0) : undefined,
   });
-  useRefetchOnFocus(query.refetch, !!userId);
+  useRefetchOnFocus(query.refetch, !!userId, queryKeys.joinedEvents(userId, scope));
+  // The tab counts are marked stale by RSVP writes too; catch up on focus.
+  useRefetchOnFocus(countsQuery.refetch, !!userId, queryKeys.attendanceCounts(userId));
 
   const items = useMemo(() => dedupeById(query.data?.pages.flat() ?? []), [query.data]);
   const hasData = query.data !== undefined;

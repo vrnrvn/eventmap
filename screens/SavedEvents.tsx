@@ -1,14 +1,15 @@
-import { useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { useInfiniteQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { queryKeys } from '@/hooks/queryKeys';
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
 import { useScreenState } from '@/hooks/useScreenState';
 import { PERSISTED_QUERY } from '@/utils/queryPersistence';
 import {
+  ActivityIndicator,
   View,
   Text,
   StyleSheet,
-  ScrollView,
+  SectionList,
   TouchableOpacity,
   RefreshControl,
 } from 'react-native';
@@ -31,9 +32,78 @@ import {
   BookmarkX,
   ChevronRight,
   Repeat,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 
 const PAGE_SIZE = 30;
+
+type SavedEventSection = { key: string; title: string | null; data: RankedEvent[] };
+
+/**
+ * One saved-event row. Memoized so paging in more rows (or toggling a save)
+ * does not re-render every card in the list.
+ */
+const SavedEventRow = memo(function SavedEventRow({
+  event,
+  onUnsave,
+}: {
+  event: RankedEvent;
+  onUnsave: (event: RankedEvent) => void;
+}) {
+  const cancelled = event.status === 'cancelled';
+  const ended = !!event.has_ended;
+  const when = ended ? event.start_datetime : event.next_start_datetime || event.start_datetime;
+  // Event-zone time with a "your time" line when the viewer's clock differs
+  // (rows carry `timezone` from 20261104130000; legacy rows render as before).
+  const display = describeEventDateTime(when, event.timezone);
+  const metaLines: string[] = [];
+  if (display.secondary && !ended) metaLines.push(display.secondary);
+  if (event.distance_km > 0) {
+    metaLines.push(`${formatDistance(event.distance_km)} away`);
+  }
+  if (event.rsvp_count > 0 && !ended) {
+    metaLines.push(
+      `${event.rsvp_count} ${event.rsvp_count === 1 ? 'person' : 'people'} going`
+    );
+  }
+  return (
+    <View style={styles.cardSpacing}>
+      <EventListItem
+        title={event.title}
+        subtitle={event.business_name}
+        dateLine={`${display.primary}${event.is_recurring && !ended ? ' · repeats' : ''}`}
+        thumbnailUrl={event.cover_image_url}
+        dimmed={ended || cancelled}
+        badge={
+          cancelled
+            ? { label: 'Cancelled', tone: 'danger' }
+            : ended
+              ? { label: 'Ended', tone: 'neutral' }
+              : null
+        }
+        dateIcon={
+          event.is_recurring ? <Repeat size={12} color={Colors.text.tertiary} /> : undefined
+        }
+        metaLines={metaLines}
+        rightAccessory={
+          <TouchableOpacity
+            style={styles.bookmarkBadge}
+            onPress={() => onUnsave(event)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Remove ${event.title} from saved events`}
+            accessibilityState={{ selected: true }}
+          >
+            <Bookmark size={14} color={Colors.primary} fill={Colors.primary} />
+          </TouchableOpacity>
+        }
+        onPress={() => router.push(`/event/${event.id}` as never)}
+        accessibilityLabel={`${event.title}, ${display.primary}${display.secondary ? `, ${display.secondary}` : ''}${ended ? ', ended' : ''}`}
+      />
+    </View>
+  );
+});
+
+const keyExtractor = (event: RankedEvent) => event.id;
 
 export default function SavedEvents() {
   const insets = useSafeAreaInsets();
@@ -52,7 +122,7 @@ export default function SavedEvents() {
       lastPage.length >= PAGE_SIZE ? allPages.reduce((n, page) => n + page.length, 0) : undefined,
   });
   // Saves are toggled from event pages; refresh whenever we come back here.
-  useRefetchOnFocus(query.refetch);
+  useRefetchOnFocus(query.refetch, true, queryKeys.savedEvents());
 
   const events = useMemo(() => {
     const seen = new Set<string>();
@@ -128,63 +198,37 @@ export default function SavedEvents() {
     [queryClient]
   );
 
-  const upcoming = events.filter((e) => !e.has_ended);
-  const past = events.filter((e) => e.has_ended);
+  // Split memoized on the flattened pages so paging / unrelated re-renders
+  // do not rebuild the section arrays (which would re-render every row).
+  const sections = useMemo<SavedEventSection[]>(() => {
+    const upcoming = events.filter((e) => !e.has_ended);
+    const past = events.filter((e) => e.has_ended);
+    const result: SavedEventSection[] = [];
+    if (upcoming.length > 0) result.push({ key: 'upcoming', title: null, data: upcoming });
+    if (past.length > 0) {
+      result.push({
+        key: 'past',
+        title: upcoming.length > 0 ? 'Already happened' : 'All of these have ended',
+        data: past,
+      });
+    }
+    return result;
+  }, [events]);
 
-  const renderCard = (event: RankedEvent) => {
-    const cancelled = event.status === 'cancelled';
-    const ended = !!event.has_ended;
-    const when = ended ? event.start_datetime : event.next_start_datetime || event.start_datetime;
-    // Event-zone time with a "your time" line when the viewer's clock differs
-    // (rows carry `timezone` from 20261104130000; legacy rows render as before).
-    const display = describeEventDateTime(when, event.timezone);
-    const metaLines: string[] = [];
-    if (display.secondary && !ended) metaLines.push(display.secondary);
-    if (event.distance_km > 0) {
-      metaLines.push(`${formatDistance(event.distance_km)} away`);
-    }
-    if (event.rsvp_count > 0 && !ended) {
-      metaLines.push(
-        `${event.rsvp_count} ${event.rsvp_count === 1 ? 'person' : 'people'} going`
-      );
-    }
-    return (
-      <View key={event.id} style={styles.cardSpacing}>
-        <EventListItem
-          title={event.title}
-          subtitle={event.business_name}
-          dateLine={`${display.primary}${event.is_recurring && !ended ? ' · repeats' : ''}`}
-          thumbnailUrl={event.cover_image_url}
-          dimmed={ended || cancelled}
-          badge={
-            cancelled
-              ? { label: 'Cancelled', tone: 'danger' }
-              : ended
-                ? { label: 'Ended', tone: 'neutral' }
-                : null
-          }
-          dateIcon={
-            event.is_recurring ? <Repeat size={12} color={Colors.text.tertiary} /> : undefined
-          }
-          metaLines={metaLines}
-          rightAccessory={
-            <TouchableOpacity
-              style={styles.bookmarkBadge}
-              onPress={() => handleUnsave(event)}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityRole="button"
-              accessibilityLabel={`Remove ${event.title} from saved events`}
-              accessibilityState={{ selected: true }}
-            >
-              <Bookmark size={14} color={Colors.primary} fill={Colors.primary} />
-            </TouchableOpacity>
-          }
-          onPress={() => router.push(`/event/${event.id}` as never)}
-          accessibilityLabel={`${event.title}, ${display.primary}${display.secondary ? `, ${display.secondary}` : ''}${ended ? ', ended' : ''}`}
-        />
-      </View>
-    );
-  };
+  const renderItem = useCallback(
+    ({ item }: { item: RankedEvent }) => <SavedEventRow event={item} onUnsave={handleUnsave} />,
+    [handleUnsave]
+  );
+
+  const renderSectionHeader = useCallback(
+    ({ section }: { section: SavedEventSection }) =>
+      section.title ? <Text style={styles.groupLabel}>{section.title}</Text> : null,
+    []
+  );
+
+  const onEndReached = useCallback(() => {
+    if (query.hasNextPage && !query.isFetchingNextPage) void query.fetchNextPage();
+  }, [query]);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -235,7 +279,12 @@ export default function SavedEvents() {
           ))}
         </View>
       ) : (
-        <ScrollView
+        <SectionList
+          sections={screenState === 'offline' || screenState === 'error' ? [] : sections}
+          renderItem={renderItem}
+          renderSectionHeader={renderSectionHeader}
+          keyExtractor={keyExtractor}
+          stickySectionHeadersEnabled={false}
           style={styles.scroll}
           contentContainerStyle={[
             styles.scrollContent,
@@ -251,56 +300,62 @@ export default function SavedEvents() {
               colors={[Colors.primary]}
             />
           }
-        >
-          {screenState === 'offline' ? (
-            <OfflineState onRetry={retryLoad} />
-          ) : screenState === 'error' ? (
-            <ErrorState
-              title="Couldn't load saved events"
-              message="Could not load your saved events."
-              onRetry={retryLoad}
-            />
-          ) : events.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <View style={styles.emptyIconWrap}>
-                <BookmarkX size={36} color={Colors.primary} />
-              </View>
-              <Text style={styles.emptyTitle}>No Saved Events</Text>
-              <Text style={styles.emptySubtitle}>
-                Tap the bookmark on any event to keep it here for later.
-              </Text>
-              <Button
-                label="Explore Events"
-                onPress={() => router.push('/(tabs)/discover' as never)}
-                variant="ghost"
-                icon={<ChevronRight size={16} color={Colors.primary} />}
-                style={styles.exploreCta}
-              />
-            </View>
-          ) : (
-            <>
+          ListHeaderComponent={
+            screenState !== 'offline' && screenState !== 'error' && events.length > 0 ? (
               <FreshnessNote text={freshness} />
-              {upcoming.map(renderCard)}
-              {past.length > 0 ? (
-                <>
-                  <Text style={styles.groupLabel}>
-                    {upcoming.length > 0 ? 'Already happened' : 'All of these have ended'}
-                  </Text>
-                  {past.map(renderCard)}
-                </>
-              ) : null}
-              {query.hasNextPage ? (
+            ) : null
+          }
+          ListEmptyComponent={
+            screenState === 'offline' ? (
+              <OfflineState onRetry={retryLoad} />
+            ) : screenState === 'error' ? (
+              <ErrorState
+                title="Couldn't load saved events"
+                message="Could not load your saved events."
+                onRetry={retryLoad}
+              />
+            ) : (
+              <View style={styles.emptyContainer}>
+                <View style={styles.emptyIconWrap}>
+                  <BookmarkX size={36} color={Colors.primary} />
+                </View>
+                <Text style={styles.emptyTitle}>No Saved Events</Text>
+                <Text style={styles.emptySubtitle}>
+                  Tap the bookmark on any event to keep it here for later.
+                </Text>
                 <Button
-                  label={query.isFetchingNextPage ? 'Loading…' : 'Load more saved events'}
-                  onPress={() => void query.fetchNextPage()}
+                  label="Explore Events"
+                  onPress={() => router.push('/(tabs)/discover' as never)}
                   variant="ghost"
-                  disabled={query.isFetchingNextPage}
-                  style={styles.loadMore}
+                  icon={<ChevronRight size={16} color={Colors.primary} />}
+                  style={styles.exploreCta}
                 />
-              ) : null}
-            </>
-          )}
-        </ScrollView>
+              </View>
+            )
+          }
+          onEndReached={onEndReached}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={
+            query.isFetchingNextPage ? (
+              <ActivityIndicator
+                color={Colors.primary}
+                style={styles.loadMore}
+                accessibilityLabel="Loading more saved events"
+              />
+            ) : query.isFetchNextPageError && query.hasNextPage ? (
+              // onEndReached won't fire again until the data changes, so a
+              // failed page needs an explicit retry (the old button did this).
+              <TouchableOpacity
+                style={styles.loadMore}
+                onPress={() => void query.fetchNextPage()}
+                accessibilityRole="button"
+                accessibilityLabel="Retry loading more saved events"
+              >
+                <Text style={styles.loadMoreRetryText}>Couldn&apos;t load more · Retry</Text>
+              </TouchableOpacity>
+            ) : null
+          }
+        />
       )}
     </View>
   );
@@ -317,6 +372,12 @@ const styles = StyleSheet.create({
   loadMore: {
     alignSelf: 'center',
     marginTop: Spacing.sm,
+  },
+  loadMoreRetryText: {
+    fontSize: Typography.sizes.sm,
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+    paddingVertical: Spacing.sm,
   },
   groupLabel: {
     marginTop: 8,

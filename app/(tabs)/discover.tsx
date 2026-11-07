@@ -13,6 +13,7 @@ import {
   Modal,
   Linking,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -34,7 +35,7 @@ import { RankedEvent } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { getCategoryIconColor } from '@/constants/categoryIcons';
 import { CategoryIcon } from '@/components/CategoryIcon';
-import { X, Search, SlidersHorizontal, Plus, MapPin, Flame } from 'lucide-react-native';
+import { X, Search, SlidersHorizontal, Plus, MapPin, Flame } from '@/components/icons.generated';
 import { EventmapFilter, EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView';
 import { SearchOverlay } from '@/components/SearchOverlay';
@@ -134,12 +135,21 @@ export default function DiscoverScreen() {
   const [showSearchOverlay, setShowSearchOverlay] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [center, setCenter] = useState(lastArea?.center ?? DEFAULT_CENTER);
-  const [mapCenter, setMapCenter] = useState(lastArea?.center ?? DEFAULT_CENTER);
+  // Where the map actually sits. A ref, not state: it changes on every pan
+  // moveend, and nothing renders from it — render-side code uses
+  // `centerForMap` (set only on explicit moves) or reads the ref in handlers.
+  // As state it re-rendered this whole screen once per pan for nothing.
+  const mapCenterRef = useRef(lastArea?.center ?? DEFAULT_CENTER);
+  const setMapCenter = (loc: { lat: number; lng: number }) => {
+    mapCenterRef.current = loc;
+  };
+  // The center the map component is told to show; only explicit moves
+  // (search, locate-me, restore) update it — user pans must not fight it.
+  const [centerForMap, setCenterForMap] = useState(lastArea?.center ?? DEFAULT_CENTER);
   const [mapBounds, setMapBounds] = useState<{
     ne: { lat: number; lng: number };
     sw: { lat: number; lng: number };
   } | null>(null);
-  const [explicitMoveTrigger, setExplicitMoveTrigger] = useState(0);
   const [sheetIndex, setSheetIndex] = useState(0);
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
   const [showFloatingCard, setShowFloatingCard] = useState(false);
@@ -220,8 +230,6 @@ export default function DiscoverScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterSignature]);
 
-  const mapCenterRef = useRef(mapCenter);
-  mapCenterRef.current = mapCenter;
   const mapBoundsRef = useRef(mapBounds);
   mapBoundsRef.current = mapBounds;
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -283,7 +291,7 @@ export default function DiscoverScreen() {
           setCenter(loc);
           setMapCenter(loc);
           beginProgrammaticMove(1200);
-          setExplicitMoveTrigger((t) => t + 1);
+          setCenterForMap(loc);
           mapRef.current?.animateTo(loc.lat, loc.lng);
         }
       } else if (!hasInitializedMapRef.current) {
@@ -291,7 +299,7 @@ export default function DiscoverScreen() {
         setCenter(loc);
         setMapCenter(loc);
         beginProgrammaticMove(1200);
-        setExplicitMoveTrigger((t) => t + 1);
+        setCenterForMap(loc);
         hasInitializedMapRef.current = true;
         await loadEventsWithCenter(fetchLat, fetchLng);
       } else if (
@@ -302,7 +310,7 @@ export default function DiscoverScreen() {
         setCenter(profileLocation);
         setMapCenter(profileLocation);
         beginProgrammaticMove(1200);
-        setExplicitMoveTrigger((t) => t + 1);
+        setCenterForMap(profileLocation);
         mapRef.current?.animateTo(profileLocation.lat, profileLocation.lng);
         await loadEventsWithCenter(profileLocation.lat, profileLocation.lng);
       }
@@ -472,7 +480,7 @@ export default function DiscoverScreen() {
           beginProgrammaticMove(1200);
           setCenter(target);
           setMapCenter(target);
-          setExplicitMoveTrigger((t) => t + 1);
+          setCenterForMap(target);
           mapRef.current?.animateTo(target.lat, target.lng);
           void loadEventsWithCenterRef.current(target.lat, target.lng);
         } catch {
@@ -518,7 +526,7 @@ export default function DiscoverScreen() {
       beginProgrammaticMove(1200);
       setCenter(target);
       setMapCenter(target);
-      setExplicitMoveTrigger((t) => t + 1);
+      setCenterForMap(target);
       mapRef.current?.animateTo(target.lat, target.lng);
       // Pass the new keyword/dates explicitly: this closure still holds the
       // pre-search state, and the signature claim above means the filter
@@ -585,7 +593,7 @@ export default function DiscoverScreen() {
           setCenter(pending);
           setMapCenter(pending);
           beginProgrammaticMove(1200);
-          setExplicitMoveTrigger((t) => t + 1);
+          setCenterForMap(pending);
           mapRef.current?.animateTo(pending.lat, pending.lng);
         });
         return;
@@ -614,7 +622,7 @@ export default function DiscoverScreen() {
     setCenter(area.center);
     setMapCenter(area.center);
     beginProgrammaticMove(1200);
-    setExplicitMoveTrigger((t) => t + 1);
+    setCenterForMap(area.center);
     mapRef.current?.animateTo(area.center.lat, area.center.lng);
   }, [isRestoring, loadError, queryClient, beginProgrammaticMove]);
 
@@ -643,7 +651,7 @@ export default function DiscoverScreen() {
     beginProgrammaticMove(1200);
     setCenter(target);
     setMapCenter(target);
-    setExplicitMoveTrigger((t) => t + 1);
+    setCenterForMap(target);
     mapRef.current?.animateTo(target.lat, target.lng, zoomForPoints(points));
   }, [offscreenEvents, beginProgrammaticMove]);
 
@@ -761,11 +769,6 @@ export default function DiscoverScreen() {
     [headerHeight, windowHeight]
   );
 
-  const centerForMap = useMemo(
-    () => mapCenter,
-    [explicitMoveTrigger]
-  );
-
   const mapMarkers = useMemo(
     () =>
       events.map((e) => ({
@@ -810,7 +813,19 @@ export default function DiscoverScreen() {
       ? '100+ events'
       : `${visibleEvents.length} event${visibleEvents.length !== 1 ? 's' : ''}`;
 
-  const renderListHeader = () => (
+  // A stable element, not an inline render function: FlatList treats a new
+  // function identity as a new component type and remounts the whole header —
+  // every pan rebuilt the banner carousel (losing its failed-image state).
+  // Outside the memo: the note reads the clock ("Updated 5 min ago"), so it
+  // must refresh on every render like it did before the header was memoized.
+  const freshnessText = freshnessNote({
+    hasData: events.length > 0,
+    dataUpdatedAt: eventsUpdatedAt,
+    isError: loadError,
+    connectivity,
+  });
+  const listHeader = useMemo(
+    () => (
     <View style={styles.sheetHeader}>
       <View style={styles.sheetHeaderRow}>
         <View>
@@ -829,15 +844,10 @@ export default function DiscoverScreen() {
       </View>
       {banners.length > 0 ? <AppBannerCarousel banners={banners} /> : null}
       <Text style={styles.sheetSummary}>{eventCountLabel}</Text>
-      <FreshnessNote
-        text={freshnessNote({
-          hasData: events.length > 0,
-          dataUpdatedAt: eventsUpdatedAt,
-          isError: loadError,
-          connectivity,
-        })}
-      />
+      <FreshnessNote text={freshnessText} />
     </View>
+    ),
+    [banners, eventCountLabel, freshnessText]
   );
 
   return (
@@ -850,7 +860,7 @@ export default function DiscoverScreen() {
           markers={mapMarkers}
           activeMarkerId={activeMarkerId}
           onMarkerPress={handleMarkerPress}
-          onMarkerDetailsPress={(eventId) => router.push(`/event/${eventId}` as never)}
+          onMarkerDetailsPress={openEvent}
           onRegionChange={handleRegionChange}
           style={styles.map}
         />
@@ -874,10 +884,13 @@ export default function DiscoverScreen() {
             >
               <View style={styles.floatingCardImageSection}>
                 {activeEvent.cover_image_url ? (
-                  <Image
+                  <ExpoImage
                     source={{ uri: activeEvent.cover_image_url }}
                     style={styles.floatingCardImage}
-                    resizeMode="cover"
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    recyclingKey={activeEvent.id}
+                    transition={150}
                   />
                 ) : (
                   <View style={[styles.floatingCardImage, styles.floatingCardPlaceholder]}>
@@ -1233,7 +1246,7 @@ export default function DiscoverScreen() {
             renderItem={renderEventCard}
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            ListHeaderComponent={renderListHeader}
+            ListHeaderComponent={listHeader}
             ListEmptyComponent={
             loading ? (
               <View style={styles.loadingRow}>

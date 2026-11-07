@@ -21,10 +21,17 @@ export default defineConfig({
     environmentMatchGlobs: [['tests/**/*.dom.test.ts', 'jsdom']],
   },
   resolve: {
-    alias: {
-      'react-native': path.resolve(root, 'tests/stubs/react-native.ts'),
-      'lucide-react-native': path.resolve(root, 'tests/stubs/lucide-react-native.ts'),
-      '@': path.resolve(root),
-    },
+    // Order matters: the icon aliases must win over the generic '@' prefix.
+    alias: [
+      { find: 'react-native', replacement: path.resolve(root, 'tests/stubs/react-native.ts') },
+      // App code imports icons via the generated deep-import module
+      // (components/icons.generated.ts); tests stub it like the package.
+      {
+        find: '@/components/icons.generated',
+        replacement: path.resolve(root, 'tests/stubs/lucide-react-native.ts'),
+      },
+      { find: /^lucide-react-native(\/.*)?$/, replacement: path.resolve(root, 'tests/stubs/lucide-react-native.ts') },
+      { find: '@', replacement: path.resolve(root) },
+    ],
   },
 });

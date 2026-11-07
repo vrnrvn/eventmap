@@ -17,7 +17,7 @@ import {
   Trophy,
   Palette,
   MapPin,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 
 export type CategoryIconSize = 'sm' | 'md' | 'lg';
 

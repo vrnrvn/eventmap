@@ -11,7 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Check, Search, X } from 'lucide-react-native';
+import { Check, Search, X } from '@/components/icons.generated';
 import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
 import {
   getDeviceTimeZone,

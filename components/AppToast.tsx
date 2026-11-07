@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CheckCircle, AlertCircle } from 'lucide-react-native';
+import { CheckCircle, AlertCircle } from '@/components/icons.generated';
 import { alpha, Colors, Typography, Spacing, BorderRadius, Shadows } from '@/constants/theme';
 import { OFFLINE_BANNER_OFFSET, useBannerKind } from '@/components/OfflineBanner';
 import { useConnectivity } from '@/services/connectivity';

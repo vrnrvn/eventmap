@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
-import { CalendarDays } from 'lucide-react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Image } from 'expo-image';
+import { CalendarDays } from '@/components/icons.generated';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { useImageFallback } from '@/hooks/useImageFallback';
 
@@ -66,7 +67,7 @@ export function EventListItem({
   dimmed = false,
   testID,
 }: EventListItemProps) {
-  const thumb = useImageFallback(thumbnailUrl);
+  const thumb = useImageFallback(thumbnailUrl, { thumbnail: true });
   const tone = badgeTones[badge?.tone ?? 'neutral'];
   return (
     <TouchableOpacity
@@ -80,7 +81,15 @@ export function EventListItem({
     >
       <View style={styles.mainRow}>
         {thumbnailUrl && !thumb.failed ? (
-          <Image source={{ uri: thumbnailUrl }} style={styles.thumb} onError={thumb.onError} />
+          <Image
+            source={{ uri: thumb.src ?? undefined }}
+            style={styles.thumb}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            recyclingKey={thumb.src ?? undefined}
+            transition={150}
+            onError={thumb.onError}
+          />
         ) : (
           <View style={[styles.thumb, styles.thumbPlaceholder]}>
             <CalendarDays size={22} color={Colors.primary} />

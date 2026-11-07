@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import { CalendarDays, Download, Repeat } from 'lucide-react-native';
+import { CalendarDays, Download, Repeat } from '@/components/icons.generated';
 import { useAuth } from '@/contexts/AuthContext';
 import { useApp } from '@/contexts/AppContext';
 import { useCalendarEvents, type CalendarRow } from '@/hooks/useCalendarEvents';

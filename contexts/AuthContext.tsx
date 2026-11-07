@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { Session, User } from '@supabase/supabase-js';
 import { authService } from '@/services/auth';
@@ -14,6 +14,7 @@ import {
 import { isRetryableError } from '@/utils/networkErrors';
 import { flushPendingWrites } from '@/services/pendingWrites';
 import { getConnectivity, subscribeConnectivity } from '@/utils/connectivity';
+import { createRetryGate } from '@/utils/retryBackoff';
 
 /**
  * How long startup waits for supabase-js to restore (and, if expired,
@@ -28,6 +29,12 @@ type AuthContextType = {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
+  /**
+   * True only while the stored session is being restored — unlike `loading`,
+   * this does not wait for the profile fetch, so providers that only need
+   * the user id (AppContext's business load) can start in parallel with it.
+   */
+  sessionLoading: boolean;
   /** True when the signed-in user's profile failed to load (network/server error). */
   profileError: boolean;
   /**
@@ -165,7 +172,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const applySession = (next: Session | null) => {
       setSession(next);
-      setUser(next?.user ?? null);
+      // TOKEN_REFRESHED delivers a fresh user object for the same account
+      // (~hourly). Keeping the previous object when nothing user-visible
+      // changed stops every effect keyed on `user` from re-running on each
+      // refresh (the EventDetail reviews reload was one such casualty).
+      setUser((prev) => {
+        const nextUser = next?.user ?? null;
+        if (!prev || !nextUser) return nextUser;
+        return prev.id === nextUser.id && prev.updated_at === nextUser.updated_at ? prev : nextUser;
+      });
       setSessionStale(false);
     };
     // Stay signed in on the stored session; the server hasn't vouched for it.
@@ -319,20 +334,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Refresh a snapshot / stale / failed profile without the user asking:
   // as soon as the session is verified, on reconnect and on foreground.
   const needsProfileRefresh = !!userId && !sessionStale && (profileStale || profileError);
+  const profileRetryGate = useRef(createRetryGate());
+  useEffect(() => {
+    if (!needsProfileRefresh) profileRetryGate.current.reset();
+  }, [needsProfileRefresh]);
   useEffect(() => {
     if (!needsProfileRefresh || !userId) return;
     if (skippedForStaleRef.current) {
       skippedForStaleRef.current = false;
       loadProfile(userId);
     }
-    const retry = () => {
-      if (getConnectivity() !== 'offline') loadProfile(userId);
+    // Backed off (utils/retryBackoff): a weak link flapping degraded ↔
+    // online, or repeated foregrounds, used to retry every time.
+    const retry = (force = false) => {
+      if (getConnectivity() === 'offline') return;
+      if (profileRetryGate.current.tryAcquire({ force })) loadProfile(userId);
     };
     let previous = getConnectivity();
     const unsubscribe = subscribeConnectivity((status) => {
-      const wasOnline = previous === 'online';
+      const was = previous;
       previous = status;
-      if (status === 'online' && !wasOnline) retry();
+      if (status === 'online' && was !== 'online') retry(was === 'offline');
     });
     const appState = AppState.addEventListener('change', (state) => {
       if (state === 'active') retry();
@@ -370,13 +392,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Profile loading for all sign-in variants is handled by the userId effect
   // above (no manual loadProfile here — avoids a double fetch with the
   // auth-state listener).
-  const signIn = async (email: string, password: string) => {
+  const signIn = useCallback(async (email: string, password: string) => {
     const data = await authService.signIn(email, password);
     setSession(data.session);
     setUser(data.user);
-  };
+  }, []);
 
-  const signUp = async (email: string, password: string, name: string) => {
+  const signUp = useCallback(async (email: string, password: string, name: string) => {
     const data = await authService.signUp(email, password, name);
     // With email confirmation on, signUp returns a user but no session. Putting
     // that user in state would kick off a profile fetch and a push-token
@@ -390,9 +412,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { user: data.user, session: data.session };
     }
     return null;
-  };
+  }, []);
 
-  const signInWithOAuth = async (provider: 'google' | 'facebook') => {
+  const signInWithOAuth = useCallback(async (provider: 'google' | 'facebook') => {
     const data = await authService.signInWithOAuth(provider);
     if (!data?.user) return;
     const name =
@@ -408,11 +430,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setSession(data.session);
     setUser(data.user);
-  };
+  }, []);
 
   // Best-effort sign-out: server revoke and push-token cleanup may fail
   // offline, but local state is always cleared so the user is never stranded.
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     // Send anything queued offline first: sign-out removes the queue with
     // the rest of this user's device data. Returns at once when offline.
     await flushPendingWrites().catch(() => {});
@@ -435,9 +457,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfileError(false);
     setIsBanned(false);
     setActivePushToken(null);
-  };
+  }, [activePushToken]);
 
-  const refreshProfile = async () => {
+  const refreshProfile = useCallback(async () => {
     if (!user) return;
     if (sessionStaleRef.current) {
       // Verify the session first; on success TOKEN_REFRESHED clears the
@@ -446,33 +468,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     await loadProfile(user.id);
-  };
+  }, [user]);
 
   const hasCompletedOnboarding = profile?.has_completed_onboarding === true;
   const loading = initializing || (!!user && profileLoadedFor !== user.id);
 
-  return (
-    <AuthContext.Provider
-      value={{
-        session,
-        user,
-        profile,
-        loading,
-        profileError,
-        sessionStale,
-        profileStale,
-        hasCompletedOnboarding,
-        isBanned,
-        signIn,
-        signUp,
-        signInWithOAuth,
-        signOut,
-        refreshProfile,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  // Memoized: every screen consumes this context, so a fresh object each
+  // render would re-render the whole app on any provider state change.
+  const value = useMemo(
+    () => ({
+      session,
+      user,
+      profile,
+      loading,
+      sessionLoading: initializing,
+      profileError,
+      sessionStale,
+      profileStale,
+      hasCompletedOnboarding,
+      isBanned,
+      signIn,
+      signUp,
+      signInWithOAuth,
+      signOut,
+      refreshProfile,
+    }),
+    [
+      session,
+      user,
+      profile,
+      loading,
+      initializing,
+      profileError,
+      sessionStale,
+      profileStale,
+      hasCompletedOnboarding,
+      isBanned,
+      signIn,
+      signUp,
+      signInWithOAuth,
+      signOut,
+      refreshProfile,
+    ]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

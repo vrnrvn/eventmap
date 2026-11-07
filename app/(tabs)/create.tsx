@@ -23,7 +23,7 @@ import {
   ChevronDown,
   MapPin,
   Sparkles,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 import { useApp } from '@/contexts/AppContext';
 import { usePremium } from '@/contexts/PremiumContext';
 import { useAuth } from '@/contexts/AuthContext';

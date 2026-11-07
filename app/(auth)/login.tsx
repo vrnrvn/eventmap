@@ -20,7 +20,7 @@ import { oauthEnabled } from '@/services/runtime';
 import { notify } from '@/utils/notify';
 import { authErrorMessage } from '@/utils/authErrors';
 import { Colors, Typography, BorderRadius, Spacing, alpha } from '@/constants/theme';
-import { ArrowLeft, Mail, Lock } from 'lucide-react-native';
+import { ArrowLeft, Mail, Lock } from '@/components/icons.generated';
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();

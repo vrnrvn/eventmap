@@ -24,13 +24,26 @@ export type WallClock = {
 
 const FALLBACK_ZONE = 'UTC';
 
-/** The device's IANA zone, or 'UTC' if the runtime can't say. */
+/**
+ * The device's IANA zone, or 'UTC' if the runtime can't say. Memoized for a
+ * few seconds: constructing Intl.DateTimeFormat is expensive on Hermes and
+ * list rows call this several times each; the TTL keeps a mid-session zone
+ * change (travel, settings) visible within moments.
+ */
+let deviceZoneCache: { zone: string; at: number } | null = null;
+const DEVICE_ZONE_TTL_MS = 10_000;
+
 export function getDeviceTimeZone(): string {
+  const now = Date.now();
+  if (deviceZoneCache && now - deviceZoneCache.at < DEVICE_ZONE_TTL_MS) return deviceZoneCache.zone;
+  let zone = FALLBACK_ZONE;
   try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || FALLBACK_ZONE;
+    zone = Intl.DateTimeFormat().resolvedOptions().timeZone || FALLBACK_ZONE;
   } catch {
-    return FALLBACK_ZONE;
+    zone = FALLBACK_ZONE;
   }
+  deviceZoneCache = { zone, at: now };
+  return zone;
 }
 
 /** Whether Intl accepts `tz` as a zone id. Accepts 'UTC'; rejects '', junk, offsets like '+02:00'. */
@@ -39,13 +52,22 @@ export function isValidTimeZone(tz: string | null | undefined): tz is string {
   // Newer ICU accepts "+02:00"-style offset zones; we only store named zones
   // (they carry DST rules, offsets don't). 'UTC' is the single slash-less id.
   if (tz !== 'UTC' && !/^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)+$/.test(tz)) return false;
+  // Validity never changes for a given id; constructing a DateTimeFormat to
+  // find out is the expensive part, so remember the verdict.
+  const cached = zoneValidityCache.get(tz);
+  if (cached !== undefined) return cached;
+  let valid: boolean;
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: tz }).format(0);
-    return true;
+    valid = true;
   } catch {
-    return false;
+    valid = false;
   }
+  if (zoneValidityCache.size < 500) zoneValidityCache.set(tz, valid);
+  return valid;
 }
+
+const zoneValidityCache = new Map<string, boolean>();
 
 /**
  * A reasonable list when `Intl.supportedValuesOf` is missing (older Hermes).
@@ -190,9 +212,17 @@ export function dateKeyInZone(date: Date, tz: string): string {
 }
 
 /** Short zone name at `date` ("PST", "GMT+1", "WET"), or the id on failure. */
+const abbreviationFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
 export function zoneAbbreviation(tz: string, date: Date = new Date(), locale?: string): string {
   try {
-    const parts = new Intl.DateTimeFormat(locale, { timeZone: tz, timeZoneName: 'short' }).formatToParts(date);
+    const key = `${locale ?? ''}|${tz}`;
+    let f = abbreviationFormatterCache.get(key);
+    if (!f) {
+      f = new Intl.DateTimeFormat(locale, { timeZone: tz, timeZoneName: 'short' });
+      if (abbreviationFormatterCache.size < 200) abbreviationFormatterCache.set(key, f);
+    }
+    const parts = f.formatToParts(date);
     return parts.find((p) => p.type === 'timeZoneName')?.value ?? tz;
   } catch {
     return tz;
@@ -254,14 +284,24 @@ export function searchTimeZones(options: TimeZoneOption[], query: string): TimeZ
 }
 
 /** Locale-formatted date/time of an instant as seen in `tz`. */
+const inZoneFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
 export function formatInZone(
   date: Date,
   tz: string,
   options: Intl.DateTimeFormatOptions,
   locale?: string
 ): string {
+  // Few distinct option shapes exist (call sites pass literals), so the cache
+  // stays tiny while list rows stop constructing a formatter per render.
+  const key = `${locale ?? ''}|${tz}|${JSON.stringify(options)}`;
   try {
-    return new Intl.DateTimeFormat(locale, { ...options, timeZone: tz }).format(date);
+    let f = inZoneFormatterCache.get(key);
+    if (!f) {
+      f = new Intl.DateTimeFormat(locale, { ...options, timeZone: tz });
+      if (inZoneFormatterCache.size < 300) inZoneFormatterCache.set(key, f);
+    }
+    return f.format(date);
   } catch {
     return new Intl.DateTimeFormat(locale, options).format(date);
   }

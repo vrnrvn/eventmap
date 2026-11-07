@@ -1,4 +1,5 @@
-import { View, Image, StyleSheet, useWindowDimensions } from 'react-native';
+import { View, StyleSheet, useWindowDimensions } from 'react-native';
+import { Image } from 'expo-image';
 import Animated, {
   useAnimatedScrollHandler,
   useSharedValue,
@@ -118,7 +119,15 @@ function StaticImage({
       ]}
     >
       {uri && !isPlaceholder && !image.failed ? (
-        <Image source={{ uri }} style={styles.image} resizeMode="cover" onError={image.onError} />
+        <Image
+          source={{ uri }}
+          style={styles.image}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          recyclingKey={uri}
+          transition={150}
+          onError={image.onError}
+        />
       ) : (
         <View style={[styles.image, styles.placeholder]}>
           <EventmapCalendar size={40} color={Colors.text.tertiary} />
@@ -165,7 +174,15 @@ function CarouselImage({
   return (
     <Animated.View style={[styles.imageWrapper, { width: cardWidth, height: imageHeight }, animatedStyle]}>
       {uri && !isPlaceholder && !image.failed ? (
-        <Image source={{ uri }} style={styles.image} resizeMode="cover" onError={image.onError} />
+        <Image
+          source={{ uri }}
+          style={styles.image}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          recyclingKey={uri}
+          transition={150}
+          onError={image.onError}
+        />
       ) : (
         <View style={[styles.image, styles.placeholder]}>
           <EventmapCalendar size={40} color={Colors.text.tertiary} />

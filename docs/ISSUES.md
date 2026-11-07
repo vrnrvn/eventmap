@@ -1049,3 +1049,146 @@ for this effort: **no database writes**. DB changes are prepared under
   instance, so two sessions' tests can silently share one browser. Use a
   fresh `mktemp -d` directory and random free ports per run, and check
   `lsof` first.
+
+---
+
+# Performance refactor — regression pass (2026-11-06)
+
+Scope: everything from the 2026-11-06 performance work (client app, admin,
+build config) plus the six prepared `supabase/migrations/20261106*.sql`
+(NOT applied; reviewed as text only). Method: three independent read-only
+diff reviews vs `HEAD` (data/state layer, screens/UI, admin+build+SQL), full
+typecheck / 571 unit tests / lint, and a headless-Chrome startup smoke test
+of a production web export pointed at a dead backend URL (no DB access).
+
+## Regressions found and fixed in this pass
+- [x] Admin Users/Businesses tables kept client state across pages (Next 16
+  reuses the component when only search params change): page 2+ showed wrong
+  ban status, and premium/verified toggles sent the inverse value. Tables are
+  now keyed by page (+ query).
+- [x] Admin paginated lists sorted on non-unique columns (subscriptions by
+  tier) → rows repeated/vanished between pages. `.order('id')` tiebreaker added.
+- [x] Admin dashboard totals switched to `count: 'estimated'` during the perf
+  work; RLS-aware planner estimates can be far off. Reverted to exact.
+- [x] Host tools on older DBs: the session "RPC missing" memo was keyed by
+  function name, which broke the deliberate retry of `host_remove_attendee`
+  without `p_ban` (and `host_set_event_settings` without approval mode). Now
+  keyed by function + argument names.
+- [x] Chat slow-mode countdown didn't restart after a retry/auto-resend (the
+  interval now stops at 0). Every clock update goes through one helper that
+  restarts it.
+- [x] Focus refetch skip (fresh-query gate) could leave Profile/Saved stale
+  after create/edit/cancel/unsave from another screen. `useRefetchOnFocus`
+  now also refetches after any event write (`utils/eventDataVersion`);
+  `createEvent` and `duplicateEvent` now count as writes.
+- [x] Saved Events lost its retry after a failed "load more" (button → scroll
+  paging). Retry footer added.
+- [x] Notifications "5m ago" labels froze in memoized rows. Minute clock while
+  focused.
+- [x] Discover offline "Updated N min ago" froze inside the memoized header.
+- [x] EventDetail chat preview counted as fresh before (or without) loading.
+- [x] Review responses posted on BusinessDetail didn't clear EventDetail's
+  5-minute review cache.
+- [x] Following counts no longer refreshed on pull-to-refresh.
+- [x] Lapsed-subscription downgrade could run on an unverified session and be
+  marked done for the session; now waits for a verified session.
+- [x] Image-cleanup pre-read could make edits wait out a request timeout on a
+  weak connection; skipped unless online.
+- [x] (Pre-existing at HEAD) Signing out while the device cache was still
+  being read could hydrate the previous user's data into the cleared cache.
+- [x] Admin promotions business search didn't neutralize the `*` wildcard.
+- [x] Stale `@teovilla/react-native-web-maps` reference in
+  `.github/copilot-instructions.md`.
+
+## Flagged for a later fix
+- [ ] **Release hazard (decide before shipping):** `expo-image` adds native
+  code (and `react-native-maps` was removed) but `app.json` keeps
+  `runtimeVersion: { policy: "appVersion" }` at version 1.0.0. An EAS Update
+  to existing 1.0.0 binaries would crash on the first image render. Bump
+  `version` (or move to the `fingerprint` policy) and ship a new binary.
+- [ ] Admin filters that are still page-local after server pagination
+  (each needs its filter UI moved into URL params, ~15–25 lines per page):
+  - Businesses name/category search filters only the current 50 rows.
+  - Complaints status filter ("pending") only filters the current page.
+  - Events search matches title only (HEAD also matched business name; one
+    PostgREST query can't OR an embedded table's column — needs an RPC or a
+    second query).
+  - Users search accepts a full UUID only (HEAD matched partial ids).
+- [ ] Admin: a `?page=` past the end redirects to the last page; when the
+  count is null because of an unrelated error, it redirects to page 1
+  instead of surfacing the error.
+- [ ] Event Insights / business analytics (`['insights', …]` keys) are now
+  skipped on focus while < 60 s old and nothing invalidates them. Accepted
+  (rarely backgrounded across a relevant change); revisit if hosts report it.
+- [ ] (Pre-existing, web) Gradient primary buttons ("Get Started", "Login")
+  render vertically squashed on web; identical in a `HEAD` build.
+- [ ] **[DB]** Once `20261106120000` is applied, list `rsvp_count` comes from
+  `event_rsvp_counts`, whose trigger recounts from its own snapshot and can
+  briefly undercount under concurrent RSVPs (self-corrects on the next
+  change). The planned ±1-delta trigger fixes this — do them together.
+- [ ] **[DB]** Storage cleanup stays inert until `20261106170000` is applied.
+
+## Verified correct (no action)
+Icons (all 114 deep-import mappings incl. lucide aliases; generator output is
+byte-identical), Metro Google-provider redirect, Android font embedding paths,
+removed packages (no remaining references), premium derivation vs old rules,
+query-cache restore/save/byte-cap/trim, delayed reconnect, chat composer
+(typing, mentions, outbox, restore, styles identical to HEAD), ManageEvent
+rows/actions, Discover map moves, list virtualization features, expo-image
+props, prepared SQL vs client signatures and policy ordering.
+
+## Test-environment note
+The local shell exports `EXPO_NO_DOTENV=1`, so `expo export` ignores
+`.env.local` unless it is sourced explicitly (`set -a; source .env.local`).
+
+---
+
+# Final test pass — edge cases, stress, variables (2026-11-06)
+
+No database access throughout. Methods:
+- **Unit/property/stress (vitest, node):** 10 new files, 107 tests. Fuzzing
+  (10k strings, ~75k URLs, 300 random caches), model-checked retry backoff
+  (200 seeds × 2,000 steps), a 10-zone time-zone matrix in child processes,
+  a real `QueryClient` integration test of the custom persister, and the
+  onlineManager delay with the real NetInfo listener path. Serializer stress:
+  5,000 queries / 5.3 MB in 11–35 ms, output held at ≤ 1 MB.
+- **Browser E2E with a fake backend** (`scripts/fake-backend-e2e/`, kept for
+  future runs): web export pointed at a dead address, every request answered
+  from an in-memory fake over CDP. 4 suites, 89 checks: signed-in startup,
+  persistence, full-offline restart, oversized/corrupt caches, expired
+  tokens, list paging + failure/retry, event-page freshness, live count poll,
+  chat composer, business mode, viewports, sign-out, 5,000-row and 400-event
+  stress, offline→online recovery.
+- **Build checks:** admin `next build` (18 routes); Android `expo prebuild`
+  in a throwaway copy (fonts land in `assets/fonts/` with the code's names).
+
+## Bugs found and fixed
+- [x] **Regression (this refactor):** EventDetail's live count/status poll
+  never ran — `supabase.from` was stored in a variable, which drops `this`,
+  so every tick threw inside its try/catch. Now bound. Found by E2E B4.
+- [x] **Pre-existing, high:** creating an event from the app threw before
+  reaching the server (`const untyped = supabase.rpc` unbound in
+  `eventsService.createEvent`); `trackEventInteraction` silently did nothing
+  for the same reason. Both bound; a source guard test
+  (`tests/supabaseBinding.test.ts`) now forbids unbound client methods.
+  **Re-test event creation on a device** — it was broken before this pass.
+- [x] **Pre-existing, medium:** monthly event count read as 0 all month for
+  users west of UTC (Postgres `date` parsed as UTC midnight, compared with
+  local months). Now compared in UTC like the server's reset, in both
+  `derivePremiumState` and `checkEventLimit`. Verified in six host zones.
+- [x] Low: cache envelope header measured in UTF-16 units instead of bytes.
+- [x] Low: in-memory trim counted non-persisted queries toward a persisted
+  prefix's cap and could evict an entry storage would keep.
+
+## Measured
+- Chat: ~1.15 → ~0.47 ms per keystroke vs `HEAD` (same harness, desktop).
+- Offline→online recovery: one request per endpoint. Expired token: exactly
+  one refresh, no duplicated startup fetches. 12 quick tab returns: 2 profile
+  overview requests.
+
+## Still needs a device (can't be covered on web)
+- [ ] Android: embedded fonts make `useFonts` resolve on the first render.
+- [ ] iOS/Android: expo-image disk cache across cold starts; thumbnails.
+- [ ] Event creation end to end (fixed above; never exercised on web here
+  because location search needs live geocoding).
+- [ ] Relative-time labels ticking after a minute (timer-based; not waited out).

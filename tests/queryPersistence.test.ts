@@ -5,6 +5,9 @@ import {
   PERSISTED_QUERY,
   PERSIST_MAX_AGE_MS,
   cacheBuster,
+  isPersistRelevantCacheEvent,
+  utf8ByteLength,
+  queriesToTrim,
   serializeForStorage,
   shouldPersistQuery,
 } from '../utils/queryPersistence';
@@ -103,8 +106,60 @@ describe('serializeForStorage', () => {
     ];
     // Room for exactly two of the three.
     const two = serializeForStorage(client(queries.slice(0, 2))).length;
-    const out = parse(serializeForStorage(client(queries), { maxChars: two }));
+    const out = parse(serializeForStorage(client(queries), { maxBytes: two }));
     expect(out.clientState.queries.map((q) => q.queryKey[0])).toEqual(['new', 'mid']);
+  });
+});
+
+describe('serializeForStorage (save cost)', () => {
+  it('output is stable for unchanged data: no per-save dehydratedAt stamp', () => {
+    const q = (at: number) => ({ ...query('saved', ['a']), dehydratedAt: at }) as Q;
+    const a = serializeForStorage(client([q(111)]));
+    const b = serializeForStorage(client([q(222)]));
+    expect(a).toBe(b);
+    expect('dehydratedAt' in parse(a).clientState.queries[0]).toBe(false);
+  });
+
+  it('applies per-prefix caps before the size budget, keeping the newest', () => {
+    const detail = (n: number) => ({
+      ...query('event', { n }, { dataUpdatedAt: n }),
+      queryKey: ['event', 'details', `e${n}`],
+    }) as Q;
+    const queries = [1, 2, 3, 4, 5].map(detail);
+    const out = parse(
+      serializeForStorage(client(queries), { limits: [{ prefix: ['event', 'details'], max: 2 }] })
+    );
+    expect(out.clientState.queries.map((q) => q.queryKey[2])).toEqual(['e5', 'e4']);
+  });
+
+  it('produces valid JSON for an empty cache, keeping buster and timestamp', () => {
+    const out = parse(serializeForStorage(client([])));
+    expect(out).toEqual({ timestamp: 1, buster: 'b', clientState: { mutations: [], queries: [] } });
+  });
+});
+
+describe('isPersistRelevantCacheEvent', () => {
+  const persisted = { meta: { persist: true }, state: { data: [1] } };
+  const plain = { meta: undefined, state: { data: [1] } };
+
+  it('schedules a save when persisted data changes or a persisted query goes away', () => {
+    expect(isPersistRelevantCacheEvent({ type: 'updated', query: persisted, action: { type: 'success' } })).toBe(true);
+    expect(isPersistRelevantCacheEvent({ type: 'updated', query: persisted, action: { type: 'setState' } })).toBe(true);
+    expect(isPersistRelevantCacheEvent({ type: 'removed', query: persisted })).toBe(true);
+    expect(isPersistRelevantCacheEvent({ type: 'added', query: persisted })).toBe(true);
+  });
+
+  it('ignores fetch lifecycle, observers and non-persisted queries', () => {
+    for (const action of ['fetch', 'failed', 'pause', 'continue', 'invalidate', 'error']) {
+      expect(isPersistRelevantCacheEvent({ type: 'updated', query: persisted, action: { type: action } })).toBe(false);
+    }
+    expect(isPersistRelevantCacheEvent({ type: 'observerAdded', query: persisted })).toBe(false);
+    expect(isPersistRelevantCacheEvent({ type: 'observerResultsUpdated', query: persisted })).toBe(false);
+    expect(isPersistRelevantCacheEvent({ type: 'updated', query: plain, action: { type: 'success' } })).toBe(false);
+    expect(isPersistRelevantCacheEvent({ type: 'removed', query: plain })).toBe(false);
+    expect(
+      isPersistRelevantCacheEvent({ type: 'added', query: { meta: { persist: true }, state: { data: undefined } } })
+    ).toBe(false);
   });
 });
 
@@ -150,5 +205,50 @@ describe('freshnessNote', () => {
     expect(formatUpdated(now - 5 * 60_000, now)).toBe('Updated 5 min ago');
     expect(formatUpdated(now - 30 * 60 * 60_000, now)).toBe('Updated yesterday');
     expect(formatUpdated(now - 3 * 24 * 60 * 60_000, now)).toBe('Updated 3 days ago');
+  });
+});
+
+describe('queriesToTrim', () => {
+  const q = (key: unknown[], at: number, observers = 0) => ({
+    queryKey: key,
+    meta: { persist: true },
+    state: { dataUpdatedAt: at },
+    getObserversCount: () => observers,
+  });
+
+  it('drops only unobserved entries beyond the cap, oldest first', () => {
+    const qs = [
+      q(['event', 'details', 'a'], 1),
+      q(['event', 'details', 'b'], 2, 1), // over cap but on screen: kept
+      q(['event', 'details', 'c'], 3),
+      q(['event', 'details', 'd'], 4),
+      q(['other'], 0),
+    ];
+    const out = queriesToTrim(qs, [{ prefix: ['event', 'details'], max: 2 }]);
+    expect(out.map((x) => x.queryKey[2])).toEqual(['a']);
+  });
+
+  it('caps calendar ranges by default', async () => {
+    const { PERSIST_LIMITS } = await import('../utils/queryPersistence');
+    expect(PERSIST_LIMITS.some((l) => l.prefix.join('/') === 'events/calendar')).toBe(true);
+  });
+});
+
+describe('utf8ByteLength / byte budget', () => {
+  it('counts UTF-8 bytes, not UTF-16 units', () => {
+    expect(utf8ByteLength('abc')).toBe(3);
+    expect(utf8ByteLength('café')).toBe(5);
+    expect(utf8ByteLength('€')).toBe(3);
+    expect(utf8ByteLength('🎉')).toBe(4);
+    expect(utf8ByteLength('a🎉é')).toBe(Buffer.byteLength('a🎉é', 'utf8'));
+  });
+
+  it('a non-ASCII cache stays within the byte cap', () => {
+    const queries = Array.from({ length: 20 }, (_, i) =>
+      query(`q${i}`, '🎉é'.repeat(200), { dataUpdatedAt: i })
+    );
+    const raw = serializeForStorage(client(queries), { maxBytes: 5000 });
+    expect(Buffer.byteLength(raw, 'utf8')).toBeLessThanOrEqual(5000);
+    expect(parse(raw).clientState.queries.length).toBeGreaterThan(0);
   });
 });

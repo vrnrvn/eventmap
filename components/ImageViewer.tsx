@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
-  Image,
   Modal,
   FlatList,
   StyleSheet,
@@ -10,7 +9,8 @@ import {
   Dimensions,
   StatusBar,
 } from 'react-native';
-import { X } from 'lucide-react-native';
+import { Image } from 'expo-image';
+import { X } from '@/components/icons.generated';
 import { Colors, Typography } from '@/constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -97,7 +97,10 @@ export function ImageViewer({ visible, images, initialIndex = 0, onClose }: Imag
                 <Image
                   source={{ uri: item }}
                   style={styles.image}
-                  resizeMode="contain"
+                  contentFit="contain"
+                  cachePolicy="memory-disk"
+                  recyclingKey={item}
+                  transition={150}
                   onError={() => setFailed((prev) => new Set(prev).add(item))}
                 />
               )}

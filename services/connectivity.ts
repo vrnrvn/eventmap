@@ -49,6 +49,9 @@ export function deviceConnectivityFrom(state: NetInfoState): DeviceConnectivity 
   return 'unknown';
 }
 
+/** Delay before React Query treats the app as back online (see below). */
+const RECONNECT_REFETCH_DELAY_MS = 1000;
+
 let started = false;
 
 /** Call once at startup (app/_layout.tsx). Safe to call again. */
@@ -65,9 +68,34 @@ export function startConnectivityMonitoring() {
   // React Query pauses retries while "offline" and refetches active queries
   // when the connection returns. Degraded still counts as online: requests
   // may get through, and the timeout bounds the ones that don't.
+  //
+  // Coming back online is applied after a short delay (going offline is
+  // immediate). Reconnecting fires many things at once — the pending-writes
+  // flush, the session refresh, context retries, realtime rejoins — and
+  // React Query's reconnect refetch of every active query used to land in
+  // the same tick, then again after the flushed writes invalidated lists.
+  // Letting the writes and session go first means one refetch that already
+  // sees the synced state, and a smaller burst on a weak link.
   onlineManager.setEventListener((setOnline) => {
     setOnline(getConnectivity() !== 'offline');
-    return subscribeConnectivity((status) => setOnline(status !== 'offline'));
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = subscribeConnectivity((status) => {
+      if (status === 'offline') {
+        if (timer) clearTimeout(timer);
+        timer = null;
+        setOnline(false);
+        return;
+      }
+      if (onlineManager.isOnline() || timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        if (getConnectivity() !== 'offline') setOnline(true);
+      }, RECONNECT_REFETCH_DELAY_MS);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
   });
 }
 

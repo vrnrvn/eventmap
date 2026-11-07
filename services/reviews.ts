@@ -4,6 +4,7 @@
  */
 
 import { supabase, getSessionUser } from './supabase';
+import { isMissingDbFunction } from '@/utils/rpcErrors';
 
 export type Review = {
   id: string;
@@ -24,6 +25,12 @@ export type AverageRatingResult = {
   average: number;
   count: number;
 };
+
+// Prepared RPC (20261106150000) found missing this session; skip retries.
+let summaryRpcUnavailable = false;
+/** The prepared RPC isn't in the generated types yet. */
+const untypedRpc = (fn: string, args: Record<string, unknown>) =>
+  (supabase.rpc as unknown as (f: string, a: Record<string, unknown>) => ReturnType<typeof supabase.rpc>)(fn, args);
 
 export const reviewsService = {
   async createOrUpdateReview(
@@ -103,6 +110,23 @@ export const reviewsService = {
   },
 
   async getAverageRatingAndCount(businessId: string): Promise<AverageRatingResult> {
+    // Server-side aggregate (prepared RPC): one row instead of every rating
+    // row — the device download was unbounded and silently wrong past
+    // PostgREST's max_rows for well-reviewed businesses.
+    if (!summaryRpcUnavailable) {
+      const { data, error } = await untypedRpc('get_business_review_summary', {
+        p_business_id: businessId,
+      });
+      if (!error) {
+        const row = (Array.isArray(data) ? data[0] : data) as
+          | { average: number | string | null; review_count: number | string | null }
+          | undefined;
+        return { average: Number(row?.average ?? 0), count: Number(row?.review_count ?? 0) };
+      }
+      if (!isMissingDbFunction(error)) throw error;
+      summaryRpcUnavailable = true;
+    }
+
     const { data, error } = await supabase
       .from('reviews')
       .select('rating')

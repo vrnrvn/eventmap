@@ -24,6 +24,18 @@ export const queryKeys = {
   /** Prefix for every attendance-derived list (joined tabs + saved + calendar). */
   attendanceLists: () => ['events'] as const,
   /**
+   * Marks every attendance-derived list stale WITHOUT refetching it now.
+   * Screens catch up on their next focus: useRefetchOnFocus refetches stale
+   * queries (and any query after an event write, via utils/eventDataVersion),
+   * so eager refetching here only re-ran every page of every mounted-but-
+   * hidden tab (joined × scope, saved, calendar ranges, profile overview).
+   */
+  markAttendanceListsStale: (queryClient: { invalidateQueries: (f: {
+    queryKey: readonly unknown[];
+    refetchType: 'none';
+  }) => Promise<void> }) =>
+    void queryClient.invalidateQueries({ queryKey: ['events'], refetchType: 'none' }),
+  /**
    * Full details of one event, as last shown on its page. Kept on the device
    * (most recent PERSIST_LIMITS.eventDetails) so events open offline.
    */

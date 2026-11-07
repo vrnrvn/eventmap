@@ -12,7 +12,7 @@ import { router } from 'expo-router';
 import { businessesService } from '@/services/businesses';
 import { useApp } from '@/contexts/AppContext';
 import { alpha, BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
-import { ChevronRight, Users } from 'lucide-react-native';
+import { ChevronRight, Users } from '@/components/icons.generated';
 import { Avatar } from '@/components/Avatar';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { ErrorState } from '@/components/ui/ErrorState';

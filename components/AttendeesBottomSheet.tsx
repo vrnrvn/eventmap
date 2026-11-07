@@ -10,7 +10,7 @@ import {
 import { BottomSheetModal, BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Search, Users } from 'lucide-react-native';
+import { Search, Users } from '@/components/icons.generated';
 import { Avatar } from '@/components/Avatar';
 import { socialService } from '@/services/social';
 import { PublicAttendee } from '@/types/database';

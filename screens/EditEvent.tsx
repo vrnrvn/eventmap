@@ -17,7 +17,7 @@ import {
 import DateTimePicker, {
   DateTimePickerAndroid,
 } from '@react-native-community/datetimepicker';
-import { Repeat, ChevronRight, MapPin } from 'lucide-react-native';
+import { Repeat, ChevronRight, MapPin } from '@/components/icons.generated';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useNavigation, usePreventRemove } from '@react-navigation/native';
 import { RecurrenceEndRow } from '@/components/RecurrenceEndRow';

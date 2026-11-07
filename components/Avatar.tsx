@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { View, Image, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Image } from 'expo-image';
+import { useImageFallback } from '@/hooks/useImageFallback';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Camera } from 'lucide-react-native';
+import { Camera } from '@/components/icons.generated';
 import { Colors, Typography } from '@/constants/theme';
 
 // Brand-token pairs only — every background is dark enough for white
@@ -45,20 +46,26 @@ type AvatarProps = {
 };
 
 export function Avatar({ imageUrl, name, size, editable, onPress }: AvatarProps) {
-  // Track which URL failed so a newly uploaded avatar isn't blocked by a
-  // previous URL's load error.
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  // Per-URL failure tracking (a newly uploaded avatar isn't blocked by a
+  // previous URL's error), plus the small variant for marked uploads
+  // (business logos): avatars render at 24-96 pt.
+  const image = useImageFallback(imageUrl, { thumbnail: true });
   const borderRadius = size / 2;
   const fontSize = size * 0.38;
   const cameraSize = Math.max(size * 0.3, 20);
 
-  const showImage = imageUrl && failedUrl !== imageUrl;
+  const showImage = !!imageUrl && !image.failed;
 
   const content = showImage ? (
     <Image
-      source={{ uri: imageUrl }}
+      source={{ uri: image.src ?? undefined }}
       style={{ width: size, height: size, borderRadius }}
-      onError={() => setFailedUrl(imageUrl)}
+      contentFit="cover"
+      cachePolicy="memory-disk"
+      // Avatars render in list rows (attendees, chat, followers); keyed by
+      // URL so a recycled row never flashes the previous user's photo.
+      recyclingKey={image.src ?? undefined}
+      onError={image.onError}
     />
   ) : (
     <LinearGradient

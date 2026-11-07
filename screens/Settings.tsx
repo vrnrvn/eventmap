@@ -68,7 +68,7 @@ import {
   UserPlus,
   Sparkles,
   Clock,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 
 const Palette = {
   gradientStart: Colors.primary,

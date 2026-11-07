@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet } from 'react-native';
-import { Star } from 'lucide-react-native';
+import { Star } from '@/components/icons.generated';
 import { Colors, Spacing, Typography } from '@/constants/theme';
 
 type StarRatingDisplayProps = {

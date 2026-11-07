@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
-import { AlertTriangle, MapPin, Bell, Shield, FileText } from 'lucide-react-native';
+import { AlertTriangle, MapPin, Bell, Shield, FileText } from '@/components/icons.generated';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Colors, Typography } from '@/constants/theme';
 

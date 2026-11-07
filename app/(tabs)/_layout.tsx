@@ -1,7 +1,7 @@
 import { Redirect, Tabs } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { Colors, Typography } from '@/constants/theme';
-import { Compass, PlusCircle, Bell, User } from 'lucide-react-native';
+import { Compass, PlusCircle, Bell, User } from '@/components/icons.generated';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUnreadNotificationCount } from '@/hooks/useUnreadNotificationCount';

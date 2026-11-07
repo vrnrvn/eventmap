@@ -23,15 +23,13 @@ export default async function DashboardLayout({
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login');
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('name, is_admin')
-    .eq('id', user.id)
-    .single();
+  const [{ data: profile }, { data: pendingChatReports }] = await Promise.all([
+    supabase.from('profiles').select('name, is_admin').eq('id', user.id).single(),
+    supabase.rpc('admin_count_pending_chat_reports'),
+  ]);
 
   if (!profile?.is_admin) redirect('/unauthorized');
 
-  const { data: pendingChatReports } = await supabase.rpc('admin_count_pending_chat_reports');
   const badges: Record<string, number> = {
     '/chat-moderation': typeof pendingChatReports === 'number' ? pendingChatReports : 0,
   };

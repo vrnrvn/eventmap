@@ -1,6 +1,7 @@
 import { supabase, getSessionUser } from './supabase';
+import { imageCleanupMayRun, releaseEventImages } from './storageCleanup';
+import { sameUtcMonth } from '@/utils/premiumState';
 import { profilesService } from './profiles';
-import { eventsService } from './events';
 import { Business, BusinessLink, BusinessPhoto } from '@/types/database';
 
 export const businessesService = {
@@ -61,12 +62,19 @@ export const businessesService = {
     businessId: string,
     updates: Partial<Business>
   ): Promise<void> {
+    // A replaced logo may leave its file unused (services/storageCleanup).
+    let previousLogo: string | null = null;
+    if ('logo_url' in updates && imageCleanupMayRun()) {
+      const { data } = await supabase.from('businesses').select('logo_url').eq('id', businessId).maybeSingle();
+      previousLogo = (data as { logo_url?: string | null } | null)?.logo_url ?? null;
+    }
     const { error } = await supabase
       .from('businesses')
       .update(updates)
       .eq('id', businessId);
 
     if (error) throw error;
+    if (previousLogo && previousLogo !== updates.logo_url) releaseEventImages([previousLogo]);
   },
 
   async deleteBusiness(businessId: string): Promise<void> {
@@ -89,15 +97,8 @@ export const businessesService = {
     const maxCount = business.subscription_tier === 'premium' ? 30 : 2;
     let currentCount = business.events_created_this_month;
 
-    const now = new Date();
-    const lastReset = business.last_reset_date
-      ? new Date(business.last_reset_date)
-      : null;
-    if (
-      lastReset &&
-      (now.getMonth() !== lastReset.getMonth() ||
-        now.getFullYear() !== lastReset.getFullYear())
-    ) {
+    // UTC month, like the server's reset (see utils/premiumState).
+    if (business.last_reset_date && !sameUtcMonth(new Date(business.last_reset_date), new Date())) {
       currentCount = 0;
     }
 
@@ -199,12 +200,16 @@ export const businessesService = {
   },
 
   async deleteBusinessPhoto(photoId: string): Promise<void> {
+    const { data: row } = imageCleanupMayRun()
+      ? await supabase.from('business_photos').select('image_url').eq('id', photoId).maybeSingle()
+      : { data: null };
     const { error } = await supabase
       .from('business_photos')
       .delete()
       .eq('id', photoId);
 
     if (error) throw error;
+    releaseEventImages([(row as { image_url?: string } | null)?.image_url]);
   },
 };
 

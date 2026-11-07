@@ -12,7 +12,6 @@ import {
   NativeSyntheticEvent,
   Platform,
   ScrollView,
-  TextInput,
   AppState,
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -28,13 +27,12 @@ import {
   Info,
   Lock,
   MessageCircle,
-  SendHorizontal,
   ShieldAlert,
   ShieldCheck,
   Users,
   Pin,
   X,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 import { socialService, BlockingUnavailableError } from '@/services/social';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsRestoring, useQueryClient } from '@tanstack/react-query';
@@ -52,6 +50,7 @@ import {
 import { complaintsService } from '@/services/complaints';
 import { ReportReasonSheet } from '@/components/ReportReasonSheet';
 import { ChatModerationSheet } from '@/components/ChatModerationSheet';
+import { ChatComposer, type ChatComposerHandle } from '@/components/ChatComposer';
 import { useAuth } from '@/contexts/AuthContext';
 import { eventsService } from '@/services/events';
 import {
@@ -104,6 +103,10 @@ const COUNTER_VISIBLE_FROM = MAX_MESSAGE_LENGTH - 100;
 const TYPING_IDLE_MS = 2500;
 const TYPING_EXPIRE_MS = 4000;
 const MARK_READ_DEBOUNCE_MS = 800;
+/** Most often the room is mirrored into the persisted device cache. */
+const ROOM_MIRROR_INTERVAL_MS = 5000;
+/** An @mention reloads the attendee list when it is older than this. */
+const MENTION_LIST_STALE_MS = 60_000;
 // The notification trigger skips recipients who read within the last minute;
 // heartbeat well inside that window while the user is watching the chat.
 const READ_HEARTBEAT_MS = 30000;
@@ -132,7 +135,11 @@ export default function EventChatScreen() {
   const listRef = useRef<FlatList<ListRow>>(null);
   const [details, setDetails] = useState<EventDetails | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [draft, setDraft] = useState('');
+  // Draft text lives inside <ChatComposer> so keystrokes re-render only that
+  // small component; this ref mirrors it for send/outbox/mention logic, and
+  // the handle writes back (restore, mention insert, clear).
+  const draftRef = useRef('');
+  const composerRef = useRef<ChatComposerHandle>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -162,6 +169,14 @@ export default function EventChatScreen() {
   // What's on screen came from the device cache (provisionally or offline):
   // not mirrored back, which would stamp it as fresh.
   const roomFromCacheRef = useRef(false);
+  // Room state waiting to be mirrored into the device cache (see the mirror
+  // effect below); newer than the cache while set.
+  const pendingRoomMirrorRef = useRef<{ id: string; uid: string | undefined; room: CachedChatRoom } | null>(null);
+  // Who is signed in right now (assigned during render, so a sign-out is
+  // visible here before this screen unmounts or its mirror timer fires).
+  const currentUidRef = useRef(user?.id);
+  currentUidRef.current = user?.id;
+  const roomMirrorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queryClient = useQueryClient();
   // The room's outbox (unsent messages + composer draft) has been read and
   // merged in; only then is it written back (utils/chatOutbox).
@@ -536,21 +551,38 @@ export default function EventChatScreen() {
     });
   }, []);
 
-  // Slow mode countdown for the composer (server enforces too).
+  // Slow mode countdown for the composer (server enforces too). The interval
+  // stops at 0, so every write to lastSentAtRef goes through advanceSlowClock,
+  // which also restarts it (a retry/resend doesn't change messages.length).
+  const [slowClock, setSlowClock] = useState(0);
+  const advanceSlowClock = useCallback((at: number) => {
+    if (at > lastSentAtRef.current) {
+      lastSentAtRef.current = at;
+      setSlowClock((t) => t + 1);
+    }
+  }, []);
   const slowSeconds = postStatus?.slow_mode_seconds ?? 0;
   useEffect(() => {
     if (!slowSeconds || isModerator) {
       setSlowRemaining(0);
       return;
     }
+    // The interval only needs to run while a countdown is showing; before
+    // this it ticked once a second for the whole life of a slow-mode room.
     const tick = () => {
       const remaining = Math.ceil((lastSentAtRef.current + slowSeconds * 1000 - Date.now()) / 1000);
       setSlowRemaining(remaining > 0 ? remaining : 0);
+      if (remaining <= 0 && timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
     };
+    let timer: ReturnType<typeof setInterval> | null = setInterval(tick, 1000);
     tick();
-    const timer = setInterval(tick, 1000);
-    return () => clearInterval(timer);
-  }, [slowSeconds, isModerator, messages.length]);
+    return () => {
+      if (timer !== null) clearInterval(timer);
+    };
+  }, [slowSeconds, isModerator, messages.length, slowClock]);
 
   // Expire stale typing indicators (a client that lost connection never sends
   // its "stopped typing").
@@ -578,7 +610,9 @@ export default function EventChatScreen() {
   // a bad connection), replaced when it succeeds; no offline banner yet.
   const openCachedRoom = useCallback(({ provisional = false } = {}) => {
     if (!id) return false;
-    const cached = queryClient.getQueryData<CachedChatRoom>(queryKeys.chatRoom(id));
+    const pending = pendingRoomMirrorRef.current;
+    const cached =
+      pending?.id === id ? pending.room : queryClient.getQueryData<CachedChatRoom>(queryKeys.chatRoom(id));
     if (!cached?.details || !Array.isArray(cached.messages)) return false;
     roomFromCacheRef.current = true;
     setDetails(cached.details);
@@ -637,7 +671,7 @@ export default function EventChatScreen() {
           openedLastReadRef.current = status?.last_read_at ?? null;
         }
         if (status?.last_post_at) {
-          lastSentAtRef.current = Math.max(lastSentAtRef.current, new Date(status.last_post_at).getTime());
+          advanceSlowClock(new Date(status.last_post_at).getTime());
         }
 
         let initialMessages = await eventChatService.getMessages(id);
@@ -781,6 +815,7 @@ export default function EventChatScreen() {
   }, [
     id,
     reloadKey,
+    advanceSlowClock,
     openCachedRoom,
     handleIncoming,
     markDeleted,
@@ -811,7 +846,10 @@ export default function EventChatScreen() {
         if (outbox) {
           if (outbox.pending.length) setMessages((current) => sortMessages(mergePending(current, outbox.pending)));
           if (outbox.draft.trim()) {
-            setDraft((current) => (current.trim() ? current : outbox.draft));
+            // The composer may not be mounted yet (access still resolving);
+            // the ref seeds its initialText in that case.
+            if (!draftRef.current.trim()) draftRef.current = outbox.draft;
+            composerRef.current?.setTextIfEmpty(outbox.draft);
             draftMentionsRef.current = outbox.draftMentions;
           }
         }
@@ -825,31 +863,88 @@ export default function EventChatScreen() {
   // Keep the room's unsent messages and composer draft on the device
   // (debounced), so a dropped connection or a killed app loses neither.
   // Not before the stored outbox was read: that would overwrite it.
-  useEffect(() => {
+  // Scheduled from the messages effect below AND from every composer text
+  // change (the draft is a ref, so keystrokes don't re-run effects).
+  const outboxRestoredRef = useRef(false);
+  outboxRestoredRef.current = outboxRestored;
+  const outboxTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleOutboxWrite = useCallback(() => {
     const uid = user?.id;
-    if (!id || !uid || !outboxRestored) return;
-    const timer = setTimeout(() => {
-      const outbox = buildOutbox(messages, draft, draftMentionsRef.current);
+    if (!id || !uid || !outboxRestoredRef.current) return;
+    if (outboxTimerRef.current) clearTimeout(outboxTimerRef.current);
+    outboxTimerRef.current = setTimeout(() => {
+      outboxTimerRef.current = null;
+      const outbox = buildOutbox(messagesRef.current, draftRef.current, draftMentionsRef.current);
       const key = outboxKey(uid, id);
       (outbox ? AsyncStorage.setItem(key, JSON.stringify(outbox)) : AsyncStorage.removeItem(key)).catch(() => {});
     }, 600);
-    return () => clearTimeout(timer);
-  }, [id, user?.id, messages, draft, outboxRestored]);
+  }, [id, user?.id]);
+  useEffect(() => {
+    if (!outboxRestored) return;
+    scheduleOutboxWrite();
+  }, [messages, outboxRestored, scheduleOutboxWrite]);
+  useEffect(
+    () => () => {
+      if (outboxTimerRef.current) clearTimeout(outboxTimerRef.current);
+    },
+    []
+  );
 
   // Mirror the newest server messages and access state into the device cache
   // (5 most recent rooms), so the room opens offline. Not while showing that
   // cached copy: it would be re-stamped as fresh.
+  //
+  // Throttled: the chat room key is persisted, so every write schedules a
+  // save of the whole device cache. Writing on each message (or send-status
+  // change) kept a busy room re-serializing that cache every couple of
+  // seconds. Changes collect in a ref and land at most every
+  // ROOM_MIRROR_INTERVAL_MS, and immediately when the room is left.
+  const flushRoomMirror = useCallback(() => {
+    if (roomMirrorTimerRef.current) {
+      clearTimeout(roomMirrorTimerRef.current);
+      roomMirrorTimerRef.current = null;
+    }
+    const pending = pendingRoomMirrorRef.current;
+    if (!pending) return;
+    pendingRoomMirrorRef.current = null;
+    // Signed out / switched account since: the cache was cleared for the
+    // next user; writing this room back would leak it into their cache.
+    if (!pending.uid || pending.uid !== currentUidRef.current) return;
+    queryClient.setQueryData(queryKeys.chatRoom(pending.id), pending.room);
+  }, [queryClient]);
   useEffect(() => {
     if (!id || !details || offlineRoom || roomFromCacheRef.current || loading || !canChat) return;
-    const room: CachedChatRoom = {
-      details,
-      postStatus,
-      messages: messages.filter((m) => !m.localStatus).slice(-CACHED_ROOM_MESSAGES),
+    // A different room is pending (the param changed): write it out first.
+    if (pendingRoomMirrorRef.current && pendingRoomMirrorRef.current.id !== id) flushRoomMirror();
+    pendingRoomMirrorRef.current = {
+      id,
+      uid: user?.id,
+      room: {
+        details,
+        postStatus,
+        messages: messages.filter((m) => !m.localStatus).slice(-CACHED_ROOM_MESSAGES),
+      },
     };
-    queryClient.setQueryData(queryKeys.chatRoom(id), room);
-  }, [id, details, postStatus, messages, offlineRoom, loading, canChat, queryClient]);
+    if (!roomMirrorTimerRef.current) {
+      roomMirrorTimerRef.current = setTimeout(flushRoomMirror, ROOM_MIRROR_INTERVAL_MS);
+    }
+  }, [id, user?.id, details, postStatus, messages, offlineRoom, loading, canChat, flushRoomMirror]);
+  // Leaving the screen (unmount) writes whatever is pending; so does the app
+  // leaving the foreground (it may be killed before the timer fires).
+  useEffect(() => flushRoomMirror, [flushRoomMirror]);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') flushRoomMirror();
+    });
+    return () => sub.remove();
+  }, [flushRoomMirror]);
 
   // Attendees for @mention autocomplete (public, non-anonymous, not self).
+  // Loaded once per room; refreshed only when the user starts an @mention
+  // and the list is over a minute old (it used to re-download the whole
+  // attendee list on every RSVP count change while the room was open).
+  const [mentionRefreshTick, setMentionRefreshTick] = useState(0);
+  const mentionsLoadedAtRef = useRef(0);
   useEffect(() => {
     if (!id || !canPost) {
       setMentionCandidates([]);
@@ -860,6 +955,7 @@ export default function EventChatScreen() {
       .getEventAttendees(id)
       .then((list) => {
         if (cancelled) return;
+        mentionsLoadedAtRef.current = Date.now();
         setMentionCandidates(
           list.filter((attendee) => !attendee.is_anonymous && attendee.id !== userIdRef.current)
         );
@@ -870,7 +966,7 @@ export default function EventChatScreen() {
     return () => {
       cancelled = true;
     };
-  }, [id, canPost, details?.rsvp_count]);
+  }, [id, canPost, mentionRefreshTick]);
 
   // Access can change while this screen is in the stack (RSVPs elsewhere);
   // re-check it and fill any message gap whenever the screen regains focus.
@@ -889,8 +985,9 @@ export default function EventChatScreen() {
       return () => {
         isFocusedRef.current = false;
         markReadNow();
+        flushRoomMirror();
       };
-    }, [refreshDetails, catchUp, markReadNow])
+    }, [refreshDetails, catchUp, markReadNow, flushRoomMirror])
   );
 
   const handleScroll = useCallback(
@@ -937,7 +1034,7 @@ export default function EventChatScreen() {
       }
       try {
         const sent = await eventChatService.sendMessage(id, pending.body, pending.id, pending.mentions);
-        lastSentAtRef.current = Math.max(lastSentAtRef.current, new Date(sent.created_at).getTime());
+        advanceSlowClock(new Date(sent.created_at).getTime());
         mergeMessages([sent]);
         scheduleMarkRead();
       } catch (err) {
@@ -973,7 +1070,7 @@ export default function EventChatScreen() {
           // Never lose what they typed: if a new draft is already underway,
           // append the rejected text rather than replacing it, and restore
           // the mention ids so an @Name still resolves on re-send.
-          setDraft((current) => (current.trim() ? `${current}\n${pending.body}` : pending.body));
+          composerRef.current?.appendLine(pending.body);
           const restored = Object.entries(pending.mention_names ?? {}).map(([mentionId, name]) => ({ id: mentionId, name }));
           if (restored.length) {
             const known = new Set(draftMentionsRef.current.map((m) => m.id));
@@ -994,7 +1091,7 @@ export default function EventChatScreen() {
         }
       }
     },
-    [id, scrollToLatest, mergeMessages, scheduleMarkRead, refreshDetails, showNotice]
+    [id, scrollToLatest, mergeMessages, scheduleMarkRead, refreshDetails, showNotice, advanceSlowClock]
   );
 
   // Messages waiting for a connection are re-sent once it's back (and right
@@ -1030,12 +1127,20 @@ export default function EventChatScreen() {
     }
   }, []);
 
-  const handleDraftChange = (text: string) => {
-    setDraft(text);
+  // Called for every composer text change; `typed` is false for programmatic
+  // changes (mention insert, restore, clear), which must not broadcast typing.
+  const handleDraftChange = (text: string, typed: boolean) => {
+    draftRef.current = text;
+    scheduleOutboxWrite();
     const trigger = MENTION_TRIGGER.exec(text);
+    if (trigger && typed && Date.now() - mentionsLoadedAtRef.current > MENTION_LIST_STALE_MS) {
+      // Mark fresh now so a burst of keystrokes triggers one reload.
+      mentionsLoadedAtRef.current = Date.now();
+      setMentionRefreshTick((t) => t + 1);
+    }
     setMentionQuery(trigger && mentionCandidates.length > 0 ? trigger[2].toLowerCase() : null);
-    if (!text.trim()) {
-      stopTyping();
+    if (!text.trim() || !typed) {
+      if (!text.trim()) stopTyping();
       return;
     }
     // Receivers expire indicators after a few seconds; keep re-broadcasting
@@ -1051,11 +1156,14 @@ export default function EventChatScreen() {
   };
 
   const insertMention = (attendee: PublicAttendee) => {
-    const next = draft.replace(MENTION_TRIGGER, (_match, lead: string) => `${lead}@${attendee.name} `);
+    const next = draftRef.current.replace(
+      MENTION_TRIGGER,
+      (_match, lead: string) => `${lead}@${attendee.name} `
+    );
     if (!draftMentionsRef.current.some((entry) => entry.id === attendee.id)) {
       draftMentionsRef.current.push({ name: attendee.name, id: attendee.id });
     }
-    setDraft(next);
+    composerRef.current?.setText(next);
     setMentionQuery(null);
     haptic('send');
   };
@@ -1069,16 +1177,16 @@ export default function EventChatScreen() {
 
   const handleSend = () => {
     if (!id || !user) return;
-    const body = draft.trim();
+    const body = draftRef.current.trim();
     if (!body || body.length > MAX_MESSAGE_LENGTH) return;
     if (slowRemaining > 0) {
       showNotice(`Slow mode — you can post again in ${slowRemaining}s.`);
       return;
     }
     // Optimistically start the slow-mode clock; corrected from the server copy.
-    if (slowSeconds && !isModerator) lastSentAtRef.current = Date.now();
+    if (slowSeconds && !isModerator) advanceSlowClock(Date.now());
 
-    setDraft('');
+    composerRef.current?.clear();
     setMentionQuery(null);
     stopTyping();
     haptic('send');
@@ -1489,7 +1597,6 @@ export default function EventChatScreen() {
   };
 
   const showLockedNotice = !loading && !loadError && details && !canChat && messages.length > 0;
-  const remainingChars = MAX_MESSAGE_LENGTH - draft.length;
   const typingText = typingLabel(Object.values(typingUsers).map((entry) => entry.name));
   const slowText =
     slowRemaining > 0
@@ -1498,7 +1605,6 @@ export default function EventChatScreen() {
         ? 'Chat is locked — only you can post'
         : '';
   const statusLine = notice ?? (typingText || slowText);
-  const sendDisabled = !draft.trim() || slowRemaining > 0;
 
   return (
     <KeyboardAvoidingView
@@ -1742,43 +1848,18 @@ export default function EventChatScreen() {
               ))}
             </ScrollView>
           ) : null}
-          <View style={styles.statusRow}>
-            <Text
-              style={[styles.statusText, notice && styles.statusTextNotice]}
-              numberOfLines={1}
-              accessibilityLiveRegion="polite"
-            >
-              {statusLine}
-            </Text>
-            {remainingChars <= MAX_MESSAGE_LENGTH - COUNTER_VISIBLE_FROM ? (
-              <Text style={[styles.charCounter, remainingChars <= 20 && styles.charCounterWarn]}>
-                {remainingChars}
-              </Text>
-            ) : null}
-          </View>
-          <View style={styles.composer}>
-            <TextInput
-              style={styles.input}
-              value={draft}
-              onChangeText={handleDraftChange}
-              onBlur={stopTyping}
-              placeholder="Message the event chat"
-              placeholderTextColor={Colors.text.tertiary}
-              multiline
-              maxLength={MAX_MESSAGE_LENGTH}
-              accessibilityLabel="Message input"
-            />
-            <TouchableOpacity
-              style={[styles.sendButton, sendDisabled && styles.sendButtonDisabled]}
-              onPress={handleSend}
-              disabled={sendDisabled}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Send message"
-            >
-              <SendHorizontal size={20} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
+          <ChatComposer
+            ref={composerRef}
+            initialText={draftRef.current}
+            maxLength={MAX_MESSAGE_LENGTH}
+            counterVisibleAtRemaining={MAX_MESSAGE_LENGTH - COUNTER_VISIBLE_FROM}
+            sendBlocked={slowRemaining > 0}
+            statusLine={statusLine}
+            statusIsNotice={!!notice}
+            onChangeText={handleDraftChange}
+            onBlur={stopTyping}
+            onSend={handleSend}
+          />
         </View>
       ) : null}
 
@@ -2042,62 +2123,9 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.border.light,
   },
-  statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 18,
-    paddingHorizontal: Spacing.xs,
-    marginBottom: 2,
-  },
-  statusText: {
-    flex: 1,
-    fontSize: Typography.sizes.xs,
-    lineHeight: 16,
-    color: Colors.text.tertiary,
-    fontFamily: Typography.labelFontFamilies.medium,
-  },
-  statusTextNotice: {
-    color: Colors.text.secondary,
-  },
-  charCounter: {
-    marginLeft: Spacing.sm,
-    fontSize: Typography.sizes.xs,
-    lineHeight: 16,
-    color: Colors.text.tertiary,
-    fontFamily: Typography.labelFontFamilies.medium,
-  },
-  charCounterWarn: {
-    color: Colors.error,
-  },
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: Spacing.sm,
-  },
-  input: {
-    flex: 1,
-    minHeight: 44,
-    maxHeight: 120,
-    borderRadius: 22,
-    paddingHorizontal: Spacing.md,
-    paddingTop: Platform.OS === 'ios' ? 12 : 10,
-    paddingBottom: Platform.OS === 'ios' ? 12 : 10,
-    backgroundColor: Colors.background.secondary,
-    color: Colors.text.primary,
-    fontSize: Typography.sizes.md,
-    lineHeight: 20,
-    fontFamily: Typography.fontFamilies.regular,
-  },
-  sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: BorderRadius.round,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.primary,
-  },
-  sendButtonDisabled: {
-    backgroundColor: Colors.border.medium,
   },
 });

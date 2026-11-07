@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useCallback, useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Business } from '@/types/database';
@@ -6,6 +6,7 @@ import { businessesService } from '@/services/businesses';
 import { useAuth } from './AuthContext';
 import { readBusinessSnapshot, writeBusinessSnapshot } from '@/services/offlineSnapshots';
 import { getConnectivity, subscribeConnectivity } from '@/utils/connectivity';
+import { createRetryGate } from '@/utils/retryBackoff';
 import { UserMode } from '@/types/app';
 
 type AppContextType = {
@@ -24,7 +25,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 const userModeStorageKey = (userId: string) => `eventmap.userMode.${userId}`;
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const { user, loading: authLoading, sessionStale } = useAuth();
+  const { user, loading: authLoading, sessionLoading, sessionStale } = useAuth();
   const [userMode, setUserModeState] = useState<UserMode>('user');
   const [userBusiness, setUserBusiness] = useState<Business | null>(null);
   const [loading, setLoading] = useState(true);
@@ -74,15 +75,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     const uid = user.id;
-    const storedMode = await AsyncStorage.getItem(userModeStorageKey(uid)).catch(() => null);
+    // One parallel read instead of two serial ones; both are startup-blocking.
+    const [storedMode, snapshot] = await Promise.all([
+      AsyncStorage.getItem(userModeStorageKey(uid)).catch(() => null),
+      useSnapshot ? readBusinessSnapshot(uid) : Promise.resolve(null),
+    ]);
     if (seq !== loadSeqRef.current) return;
-    if (useSnapshot) {
-      const snapshot = await readBusinessSnapshot(uid);
-      if (seq !== loadSeqRef.current) return;
-      if (snapshot) {
-        applyBusiness(snapshot.data.business, storedMode);
-        setLoading(false);
-      }
+    if (snapshot) {
+      applyBusiness(snapshot.data.business, storedMode);
+      setLoading(false);
     }
     if (sessionStale) {
       skippedForStaleRef.current = true;
@@ -107,12 +108,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Keyed on sessionLoading, not the full auth loading: the business fetch
+  // only needs the user id, so it runs in parallel with the profile fetch
+  // instead of behind it (startup was a 4-step serial chain).
   useEffect(() => {
-    if (!authLoading) {
+    if (!sessionLoading) {
       loadBusiness({ useSnapshot: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, authLoading]);
+  }, [user?.id, sessionLoading]);
+
+  const businessRetryGate = useRef(createRetryGate());
+  useEffect(() => {
+    if (!businessStale) businessRetryGate.current.reset();
+  }, [businessStale]);
 
   // Retry a failed or skipped load once the session is verified, on
   // reconnect and on foreground.
@@ -122,14 +131,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       skippedForStaleRef.current = false;
       loadBusiness();
     }
-    const retry = () => {
-      if (getConnectivity() !== 'offline') loadBusiness();
+    // Backed off (utils/retryBackoff); a real reconnect always retries.
+    const retry = (force = false) => {
+      if (getConnectivity() === 'offline') return;
+      if (businessRetryGate.current.tryAcquire({ force })) loadBusiness();
     };
     let previous = getConnectivity();
     const unsubscribe = subscribeConnectivity((status) => {
-      const wasOnline = previous === 'online';
+      const was = previous;
       previous = status;
-      if (status === 'online' && !wasOnline) retry();
+      if (status === 'online' && was !== 'online') retry(was === 'offline');
     });
     const appState = AppState.addEventListener('change', (state) => {
       if (state === 'active') retry();
@@ -141,25 +152,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessStale, sessionStale, user?.id]);
 
-  const refreshBusiness = async () => {
-    setLoading(true);
-    await loadBusiness();
-  };
+  // Stable identity: PremiumContext re-exports this as refreshSubscription
+  // and other callers keep it in dependency arrays.
+  const loadBusinessRef = useRef(loadBusiness);
+  loadBusinessRef.current = loadBusiness;
+  // Only a refresh with nothing loaded yet shows as loading. PremiumContext's
+  // refreshSubscription is this function, called after every event create
+  // and subscription change; flipping the app-wide flag there hid the
+  // Create tab and blanked business UI until the request returned.
+  const hasBusinessRef = useRef(false);
+  hasBusinessRef.current = !!userBusiness;
+  const refreshBusiness = useCallback(async () => {
+    if (!hasBusinessRef.current) setLoading(true);
+    await loadBusinessRef.current();
+  }, []);
 
-  return (
-    <AppContext.Provider
-      value={{
-        userMode,
-        setUserMode,
-        userBusiness,
-        loading: loading || authLoading,
-        refreshBusiness,
-        hasBusiness: !!userBusiness,
-      }}
-    >
-      {children}
-    </AppContext.Provider>
+  const value = useMemo(
+    () => ({
+      userMode,
+      setUserMode,
+      userBusiness,
+      loading: loading || authLoading,
+      refreshBusiness,
+      hasBusiness: !!userBusiness,
+    }),
+    [userMode, setUserMode, userBusiness, loading, authLoading, refreshBusiness]
   );
+
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 
 export function useApp() {

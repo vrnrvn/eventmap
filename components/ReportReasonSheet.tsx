@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { X } from 'lucide-react-native';
+import { X } from '@/components/icons.generated';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 
 export const REPORT_REASONS = [

@@ -9,7 +9,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import { Eye, EyeOff } from 'lucide-react-native';
+import { Eye, EyeOff } from '@/components/icons.generated';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 
 export interface TextFieldProps extends TextInputProps {

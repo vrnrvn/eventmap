@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View, ViewStyle, StyleProp } from 'react-native';
-import { CloudAlert as AlertIcon } from 'lucide-react-native';
+import { CloudAlert as AlertIcon } from '@/components/icons.generated';
 import { Colors, Typography, BorderRadius, Spacing } from '@/constants/theme';
 import { Button } from '@/components/ui/Button';
 

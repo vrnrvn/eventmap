@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CloudAlert, CloudOff, Wifi } from 'lucide-react-native';
+import { CloudAlert, CloudOff, Wifi } from '@/components/icons.generated';
 import { Colors, Typography, Spacing, BorderRadius, Shadows } from '@/constants/theme';
 import { useConnectivity } from '@/services/connectivity';
 import type { ConnectivityStatus } from '@/utils/connectivity';

@@ -6,7 +6,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Image,
   Linking,
   FlatList,
   useWindowDimensions,
@@ -15,14 +14,16 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
-import { useIsRestoring, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useIsRestoring, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { findEventRow, previewDetailsFromRow } from '@/utils/eventPreview';
 import { freshnessNote } from '@/utils/screenState';
 import { FreshnessNote } from '@/components/ui/QueryStates';
 import { useConnectivity } from '@/services/connectivity';
 import { queryKeys } from '@/hooks/queryKeys';
 import { useApp } from '@/contexts/AppContext';
+import { Image as ExpoImage } from 'expo-image';
 import { eventsService } from '@/services/events';
+import { getEventDataVersion } from '@/utils/eventDataVersion';
 import { eventChatService } from '@/services/eventChat';
 import { socialService } from '@/services/social';
 import { reviewsService, type ReviewWithProfile } from '@/services/reviews';
@@ -30,6 +31,7 @@ import {
   EventDetails,
   type EventChatMessageWithSender,
   type PublicAttendee,
+  EventStatus,
 } from '@/types/database';
 import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { notify, notifyConfirm } from '@/utils/notify';
@@ -70,7 +72,7 @@ import {
   Bookmark,
   BookmarkCheck,
   Ban,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 import {
   classifyRsvpError,
   rsvpErrorMessage,
@@ -117,6 +119,9 @@ function initialDetailsFromCache(queryClient: QueryClient, id: string | undefine
     : { details: null, isPreview: false, updatedAt: 0 };
 }
 
+/** A focus within this long of the last fetch, with no writes since, reuses it. */
+const FOCUS_FRESH_MS = 15_000;
+
 export default function EventDetail() {
   const insets = useSafeAreaInsets();
   // Hero paging and the cover width must follow the live window: a
@@ -131,8 +136,7 @@ export default function EventDetail() {
   const queryClient = useQueryClient();
   // Joined / Saved lists are React Query caches; tell them this event changed
   // so they refetch instead of showing stale rows when the user goes back.
-  const invalidateLists = () =>
-    void queryClient.invalidateQueries({ queryKey: queryKeys.attendanceLists() });
+  const invalidateLists = () => queryKeys.markAttendanceListsStale(queryClient);
   // Start from what this device already knows (docs/OFFLINE_PLAN.md §3.5):
   // the details last shown for this event, or else a preview built from a
   // cached list row, so the page opens instantly and works offline. The
@@ -176,7 +180,8 @@ export default function EventDetail() {
     if (!details) return [];
     const urls: string[] = [];
     if (details.photos?.length) {
-      details.photos
+      // Copy first: `details` can be the shared React Query cache object.
+      [...details.photos]
         .sort((a, b) => a.sort_order - b.sort_order)
         .forEach((p) => urls.push(p.image_url));
     } else if (details.event.cover_image_url) {
@@ -207,14 +212,33 @@ export default function EventDetail() {
   // Details (RSVP state, counts) are re-fetched every time the screen gains
   // focus, so returning from chat, attendee profiles, or the host's edit
   // screen shows current data. Only the very first load shows the spinner.
+  // When the details on screen were last fetched, and the write version at
+  // that moment (utils/eventDataVersion). Returning within FOCUS_FRESH_MS
+  // with no write anywhere since (RSVP, follow, edit, host action…) skips
+  // the refetch: back from a photo, profile or business page costs nothing
+  // instead of details + attendees requests.
+  const lastFetchRef = useRef<{ at: number; version: number; tick: number } | null>(null);
   useFocusEffect(
     useCallback(() => {
       if (!id) return;
+      const last = lastFetchRef.current;
+      if (
+        last &&
+        hasLoadedRef.current &&
+        last.tick === reloadTick &&
+        Date.now() - last.at < FOCUS_FRESH_MS &&
+        last.version === getEventDataVersion()
+      ) {
+        return;
+      }
       let cancelled = false;
       const load = async () => {
+        const startedVersion = getEventDataVersion();
         try {
           const data = await eventsService.getEventDetails(id);
           if (cancelled) return;
+          // Only a result that was applied counts as fresh.
+          lastFetchRef.current = { at: Date.now(), version: startedVersion, tick: reloadTick };
           setDetails(data);
           setIsPreview(false);
           setDetailsUpdatedAt(Date.now());
@@ -292,29 +316,43 @@ export default function EventDetail() {
 
   // A one-line preview of the latest chat message for the chat-entry row.
   // Focus-driven so it also refreshes when the user comes back from the chat.
+  // Same freshness rule as the details load: a return within FOCUS_FRESH_MS
+  // with no write since (sending or reading in the chat counts) reuses it.
+  const lastChatPreviewRef = useRef<{ at: number; version: number; id: string } | null>(null);
   useFocusEffect(
     useCallback(() => {
       if (!id || !chatIsOpen) {
+        lastChatPreviewRef.current = null;
         setChatPreview(null);
         setChatUnread(0);
         return;
       }
+      const last = lastChatPreviewRef.current;
+      if (
+        last &&
+        last.id === id &&
+        Date.now() - last.at < FOCUS_FRESH_MS &&
+        last.version === getEventDataVersion()
+      ) {
+        return;
+      }
+      const startedVersion = getEventDataVersion();
       let cancelled = false;
-      eventChatService
-        .getLatestMessage(id)
-        .then((message) => {
+      // Fresh only once both parts applied; a failure or a discarded result
+      // (screen left first) must not suppress the next focus's reload.
+      Promise.all([
+        eventChatService.getLatestMessage(id).then((message) => {
           if (!cancelled) setChatPreview(message);
-        })
-        .catch(() => {
-          // Keep the generic subtitle when the preview can't load.
-        });
-      eventChatService
-        .getUnreadCounts([id])
-        .then((counts) => {
+        }),
+        eventChatService.getUnreadCounts([id]).then((counts) => {
           if (!cancelled) setChatUnread(counts.find((row) => row.event_id === id)?.unread_count ?? 0);
+        }),
+      ])
+        .then(() => {
+          if (!cancelled) lastChatPreviewRef.current = { at: Date.now(), version: startedVersion, id };
         })
         .catch(() => {
-          // Keep the last known badge.
+          // Keep the generic subtitle / last known badge; retried next focus.
         });
       return () => {
         cancelled = true;
@@ -335,25 +373,33 @@ export default function EventDetail() {
   useFocusEffect(
     useCallback(() => {
       if (!id) return;
+      const applyCountAndStatus = (rsvpCount: number, nextStatus: EventStatus) => {
+        setDetails((d) => {
+          if (!d) return d;
+          const prevStatus = d.event.status ?? 'active';
+          if (d.rsvp_count === rsvpCount && prevStatus === nextStatus) return d;
+          // Merge only the count and lifecycle status: the user's own RSVP
+          // state may have an optimistic local update in flight.
+          return { ...d, rsvp_count: rsvpCount, event: { ...d.event, status: nextStatus } };
+        });
+      };
       const refetchCount = async () => {
         // Nothing to gain offline; the focus refetch catches up on return.
         if (getConnectivity() === 'offline') return;
         try {
+          // Two tiny selects instead of the full details payload (event +
+          // business + photos + links + waitlist re-fetched every tick).
+          const live = await eventsService.getEventLiveStatus(id);
+          if (live && live.status !== null) {
+            applyCountAndStatus(live.goingCount ?? 0, live.status as EventStatus);
+            return;
+          }
+          // live === null: counts table not on this backend — full fetch.
+          // status === null: the row vanished for this viewer (cancelled or
+          // unpublished mid-view); the RPC still reveals which.
           const data = await eventsService.getEventDetails(id);
           if (!data) return;
-          setDetails((d) => {
-            if (!d) return d;
-            const nextStatus = data.event.status ?? 'active';
-            const prevStatus = d.event.status ?? 'active';
-            if (d.rsvp_count === data.rsvp_count && prevStatus === nextStatus) return d;
-            // Merge only the count and lifecycle status: the user's own RSVP
-            // state may have an optimistic local update in flight.
-            return {
-              ...d,
-              rsvp_count: data.rsvp_count,
-              event: { ...d.event, status: nextStatus },
-            };
-          });
+          applyCountAndStatus(data.rsvp_count, data.event.status ?? 'active');
         } catch {
           // Transient failure; the next tick retries.
         }
@@ -365,32 +411,43 @@ export default function EventDetail() {
 
   const businessId = details?.business.id;
 
-  // Business whose reviews are on screen; a failed reload for the same one
-  // keeps them instead of resetting to "no reviews".
-  const reviewsLoadedForRef = useRef<string | null>(null);
-
+  // Reviews for the business, cached per business + viewer: opening several
+  // events from the same business (or coming back) no longer re-runs the
+  // three review requests each time. A failed refetch keeps the cached data
+  // (React Query semantics), matching the old "keep what's shown" rule.
+  const viewerId = user?.id ?? null;
+  const reviewsKey = useMemo(() => ['business-reviews', businessId ?? 'none', viewerId ?? 'anon'] as const, [businessId, viewerId]);
+  const reviewsQuery = useQuery({
+    queryKey: reviewsKey,
+    enabled: !!businessId,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async () => {
+      const [list, avg, mine] = await Promise.all([
+        reviewsService.getReviewsForBusiness(businessId!),
+        reviewsService.getAverageRatingAndCount(businessId!),
+        viewerId ? reviewsService.getUserReview(businessId!) : Promise.resolve(null),
+      ]);
+      return {
+        list,
+        avg,
+        mine: mine ? { rating: mine.rating, text: mine.text || '' } : null,
+      };
+    },
+  });
   useEffect(() => {
-    if (!businessId) return;
-    const loadReviews = async () => {
-      try {
-        const [list, avg, mine] = await Promise.all([
-          reviewsService.getReviewsForBusiness(businessId),
-          reviewsService.getAverageRatingAndCount(businessId),
-          user ? reviewsService.getUserReview(businessId) : Promise.resolve(null),
-        ]);
-        setReviews(list);
-        setAverageRating(avg);
-        setUserReview(mine ? { rating: mine.rating, text: mine.text || '' } : null);
-        reviewsLoadedForRef.current = businessId;
-      } catch {
-        if (reviewsLoadedForRef.current === businessId) return;
+    const data = reviewsQuery.data;
+    if (!data) {
+      if (reviewsQuery.isError) {
         setReviews([]);
         setAverageRating({ average: 0, count: 0 });
         setUserReview(null);
       }
-    };
-    loadReviews();
-  }, [businessId, user]);
+      return;
+    }
+    setReviews(data.list);
+    setAverageRating(data.avg);
+    setUserReview(data.mine);
+  }, [reviewsQuery.data, reviewsQuery.isError]);
 
   const handleReviewSubmit = async (rating: number, text: string) => {
     if (blockedOffline('post a review')) return;
@@ -398,6 +455,7 @@ export default function EventDetail() {
     // Only the write can fail the form. The reload after it is best-effort,
     // so a saved review is never reported as "failed".
     await reviewsService.createOrUpdateReview(businessId, rating, text || null);
+    void queryClient.invalidateQueries({ queryKey: ['business-reviews', businessId], refetchType: 'none' });
     setUserReview({ rating, text });
     setShowReviewForm(false);
     try {
@@ -414,6 +472,9 @@ export default function EventDetail() {
 
   const handleReviewRespond = async (reviewId: string, response: string) => {
     await reviewsService.updateBusinessResponse(reviewId, response);
+    if (businessId) {
+      void queryClient.invalidateQueries({ queryKey: ['business-reviews', businessId], refetchType: 'none' });
+    }
     // Show the saved response right away; the reload is best-effort.
     setReviews((prev) =>
       prev.map((r) => (r.id === reviewId ? { ...r, business_response: response } : r))
@@ -1016,10 +1077,13 @@ export default function EventDetail() {
                   accessibilityRole="button"
                   accessibilityLabel={`View photo ${index + 1} of ${allPhotoUrls.length}`}
                 >
-                  <Image
+                  <ExpoImage
                     source={{ uri: item }}
                     style={[styles.coverImage, { width: windowWidth }]}
-                    resizeMode="cover"
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    recyclingKey={item}
+                    transition={150}
                   />
                 </TouchableOpacity>
               )}

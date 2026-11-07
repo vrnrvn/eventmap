@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
-import { CloudOff } from 'lucide-react-native';
+import { CloudOff } from '@/components/icons.generated';
 import { Colors, Typography, Spacing, BorderRadius } from '@/constants/theme';
 import { Button } from '@/components/ui/Button';
 

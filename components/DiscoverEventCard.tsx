@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
-import { MapPin, BookmarkCheck } from 'lucide-react-native';
+import { MapPin, BookmarkCheck } from '@/components/icons.generated';
 import { Avatar } from '@/components/Avatar';
 import { EventCardCarousel } from '@/components/EventCardCarousel';
 import type { RankedEvent } from '@/types/database';

@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
-import { Link2, Plus, X } from 'lucide-react-native';
+import { Link2, Plus, X } from '@/components/icons.generated';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { MAX_EVENT_LINKS, normalizeLinkUrl, type EventLinkDraft } from '@/utils/eventLinks';
 

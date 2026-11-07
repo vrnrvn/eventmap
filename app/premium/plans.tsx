@@ -13,7 +13,7 @@ import { router } from 'expo-router';
 import {
   Crown,
   Check,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 import { usePremium } from '@/contexts/PremiumContext';
 import { notify } from '@/utils/notify';
 import { Button } from '@/components/ui/Button';
@@ -43,7 +43,6 @@ export default function PremiumPlansScreen() {
     subscription,
     isPremium,
     loading: contextLoading,
-    refreshSubscription,
   } = usePremium();
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   const [subscribingPlanId, setSubscribingPlanId] = useState<string | null>(null);
@@ -67,8 +66,8 @@ export default function PremiumPlansScreen() {
           billingCycle
         );
         if (success) {
+          // refreshSubscription is the same business-row refresh; one call.
           await refreshBusiness();
-          await refreshSubscription();
           router.back();
         }
       } catch (err) {
@@ -78,7 +77,7 @@ export default function PremiumPlansScreen() {
         setSubscribingPlanId(null);
       }
     },
-    [billingCycle, refreshBusiness, refreshSubscription, subscribingPlanId, userBusiness]
+    [billingCycle, refreshBusiness, subscribingPlanId, userBusiness]
   );
 
   const proMonthly = proPlan?.price_monthly ?? 0;

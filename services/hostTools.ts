@@ -9,23 +9,37 @@
  * hide controls that need the real thing.
  */
 import { supabase } from './supabase';
+import { signalEventWrites } from '@/utils/eventDataVersion';
 import { socialService } from './social';
 import { eventsService } from './events';
 import type { EventDetails, RsvpMode, RsvpStatus, WaitlistMode } from '@/types/database';
+import {
+  isMissingDbFunction,
+  isRpcKnownMissing,
+  markRpcMissing,
+  MISSING_RPC_ERROR,
+  rpcSignatureKey,
+} from '@/utils/rpcErrors';
 
-type RpcError = { code?: string; message?: string } | null;
+// Re-exported from the pure module so existing importers keep working;
+// services without native deps import '@/utils/rpcErrors' directly.
+export { isMissingDbFunction };
 
-/** 42883 = undefined_function, PGRST202 = not in PostgREST schema cache. */
-export function isMissingDbFunction(error: RpcError): boolean {
-  return !!error && (error.code === '42883' || error.code === 'PGRST202');
-}
-
-/** The prepared RPCs aren't in the generated types yet. */
-const untypedRpc = (fn: string, args: Record<string, unknown>) =>
-  (supabase.rpc as unknown as (f: string, a: Record<string, unknown>) => ReturnType<typeof supabase.rpc>)(
-    fn,
-    args
-  );
+/**
+ * The prepared RPCs aren't in the generated types yet. Once a function comes
+ * back as missing (migration not applied on this backend), that result is
+ * remembered for the session and later calls short-circuit to the fallback
+ * instead of paying a failed round trip each time.
+ */
+const untypedRpc = async (fn: string, args: Record<string, unknown>) => {
+  const signature = rpcSignatureKey(fn, args);
+  if (isRpcKnownMissing(signature)) return { data: null, error: MISSING_RPC_ERROR };
+  const result = await (
+    supabase.rpc as unknown as (f: string, a: Record<string, unknown>) => ReturnType<typeof supabase.rpc>
+  )(fn, args);
+  if (result.error && isMissingDbFunction(result.error)) markRpcMissing(signature);
+  return result;
+};
 
 /**
  * Raised by the `guard_event_capacity_shrink` trigger when a plain UPDATE
@@ -490,3 +504,7 @@ export const hostToolsService = {
     throw error;
   },
 };
+
+// Writes that can change an event page bump the shared version, so
+// EventDetail can safely skip a focus refetch when nothing changed.
+signalEventWrites(hostToolsService, ['removeAttendee', 'setCapacity', 'setEventSettings', 'reviewRsvp', 'publishEvent', 'postponeEvent', 'rescheduleEvent', 'unbanAttendee', 'promoteFromWaitlist', 'duplicateEvent']);

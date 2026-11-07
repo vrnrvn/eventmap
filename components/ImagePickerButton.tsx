@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
-  Image,
   Text,
   StyleSheet,
   TouchableOpacity,
   type LayoutChangeEvent,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
@@ -16,7 +16,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { Plus, Star, X } from 'lucide-react-native';
+import { Plus, Star, X } from '@/components/icons.generated';
 import { Colors, Typography, Spacing } from '@/constants/theme';
 import { notify } from '@/utils/notify';
 import {
@@ -447,7 +447,12 @@ function DraggableThumb({
           else if (action === 'remove') onRemove(index);
         }}
       >
-        <Image source={{ uri: img.remoteUrl || img.uri }} style={styles.thumb} />
+        <Image
+          source={{ uri: img.remoteUrl || img.uri }}
+          style={styles.thumb}
+          contentFit="cover"
+          recyclingKey={img.remoteUrl || img.uri}
+        />
         {isCover ? (
           <View style={styles.coverBadge}>
             <Text style={styles.coverBadgeText}>Cover</Text>

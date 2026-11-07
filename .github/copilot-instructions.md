@@ -111,7 +111,7 @@ async getRankedEvents(userLat, userLng, filters) {
 ## Integration Points & External Dependencies
 
 - **Supabase**: Database, auth, storage, RPC functions
-- **Google Maps API**: Location-based features (geocoding, map display) via `@teovilla/react-native-web-maps`
+- **Maps**: WebView-rendered map pages (`components/GoogleMapView.tsx`): Leaflet/OpenStreetMap by default (`utils/openMapHtml.ts`), Google Maps JS when `EXPO_PUBLIC_MAP_PROVIDER=google` (`utils/googleMapHtml.ts`); geocoding via Google APIs
 - **Google/Facebook OAuth**: OAuth providers for sign-in (configured in Supabase Auth)
 - **Bottom Sheet Modal**: `@gorhom/bottom-sheet` for mobile modals (AddressMapPicker, AttendeesBottomSheet)
 - **React Query**: Data fetching/caching; no Redux needed due to context + query combo

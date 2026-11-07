@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useMemo, useState, useCallback } from 'react';
 
 export type SearchLocation = {
   lat: number;
@@ -41,20 +41,12 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
 
   const hasSelection = location != null || dateRange != null;
 
-  return (
-    <SearchContext.Provider
-      value={{
-        location,
-        dateRange,
-        setLocation,
-        setDateRange,
-        clearAll,
-        hasSelection,
-      }}
-    >
-      {children}
-    </SearchContext.Provider>
+  const value = useMemo(
+    () => ({ location, dateRange, setLocation, setDateRange, clearAll, hasSelection }),
+    [location, dateRange, setLocation, setDateRange, clearAll, hasSelection]
   );
+
+  return <SearchContext.Provider value={value}>{children}</SearchContext.Provider>;
 }
 
 export function useSearch() {

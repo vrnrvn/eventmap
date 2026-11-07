@@ -16,7 +16,7 @@ import {
   Building2,
   ChevronRight,
   LogIn,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 
 const Palette = {
   cardBg: Colors.surface,

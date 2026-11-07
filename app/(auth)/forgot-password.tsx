@@ -23,7 +23,7 @@ import {
   CheckCircle,
   LogIn,
   KeyRound,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 
 export default function ForgotPasswordScreen() {
   const insets = useSafeAreaInsets();

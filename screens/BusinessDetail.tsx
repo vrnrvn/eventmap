@@ -45,7 +45,7 @@ import {
   Heart,
   Calendar,
   Flag,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 import { FacebookIcon, InstagramIcon } from '@/components/icons/BrandIcons';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { ErrorState } from '@/components/ui/ErrorState';
@@ -528,6 +528,8 @@ export default function BusinessDetail() {
                 isOwner
                   ? async (reviewId, response) => {
                       await reviewsService.updateBusinessResponse(reviewId, response);
+                      // EventDetail caches this business's reviews for 5 min.
+                      void queryClient.invalidateQueries({ queryKey: ['business-reviews', id], refetchType: 'none' });
                       // Show the saved response now; the reload is best-effort
                       // so a failure can't report the saved response as failed.
                       setReviews((prev) =>

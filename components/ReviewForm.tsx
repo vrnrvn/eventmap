@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
-import { Star } from 'lucide-react-native';
+import { Star } from '@/components/icons.generated';
 import { Colors, Spacing, Typography } from '@/constants/theme';
 import { notify } from '@/utils/notify';
 

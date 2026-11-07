@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Lock, ShieldCheck, Timer, X } from 'lucide-react-native';
+import { Lock, ShieldCheck, Timer, X } from '@/components/icons.generated';
 import { Avatar } from '@/components/Avatar';
 import {
   eventChatService,

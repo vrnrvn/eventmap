@@ -1,10 +1,9 @@
 import { supabase, getSessionUser } from './supabase';
+import { signalEventWrites } from '@/utils/eventDataVersion';
+import { isMissingDbFunction } from '@/utils/rpcErrors';
 import { RsvpError, classifyRsvpError } from '@/utils/rsvpErrors';
 import {
   RsvpStatus,
-  Rsvp,
-  Save,
-  Follow,
   RankedEvent,
   PublicAttendee,
   AttendeesPage,
@@ -39,6 +38,9 @@ export type GoingEventsScope = 'upcoming' | 'past' | 'interested' | 'requested';
  * types yet. The screens only call these when get_event_details advertises
  * the feature, so a missing function is never reached in practice.
  */
+// Prepared RPC (20261106150000) found missing this session; skip retries.
+let followerCountsRpcUnavailable = false;
+
 const untypedRpc = (fn: string, args: Record<string, unknown>) =>
   (
     supabase.rpc as unknown as (
@@ -220,21 +222,6 @@ export const socialService = {
     };
   },
 
-  async getUserRsvps(): Promise<Rsvp[]> {
-    const user = await getSessionUser();
-    if (!user) throw new Error('Not authenticated');
-
-    const { data, error } = await supabase
-      .from('rsvps')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-    return (data || []).filter((rsvp): rsvp is typeof rsvp & { status: RsvpStatus } =>
-      rsvp.status === 'going' || rsvp.status === 'interested');
-  },
-
   async saveEvent(eventId: string): Promise<void> {
     const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
@@ -275,20 +262,6 @@ export const socialService = {
 
     if (error) throw error;
     return !!data;
-  },
-
-  async getUserSavedEvents(): Promise<Save[]> {
-    const user = await getSessionUser();
-    if (!user) throw new Error('Not authenticated');
-
-    const { data, error } = await supabase
-      .from('saves')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-    return data || [];
   },
 
   /** The caller's saved events in one round trip, upcoming first then past. */
@@ -352,32 +325,28 @@ export const socialService = {
     return !!data;
   },
 
-  async getUserFollows(): Promise<Follow[]> {
+  /**
+   * The viewer's followed businesses, newest follow first, in ONE request:
+   * follows with the business row embedded via the follows_business_id_fkey
+   * relationship (previously follows, then a second businesses request).
+   * Businesses that are no longer visible (deleted) are dropped.
+   */
+  async getFollowedBusinesses(): Promise<(Business & { followId: string })[]> {
     const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
     const { data, error } = await supabase
       .from('follows')
-      .select('*')
+      .select('id, business:businesses(*)')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
-    return data || [];
-  },
-
-  /** Batched lookup for follow lists — one query instead of one per business. */
-  async getBusinessesByIds(businessIds: string[]): Promise<Business[]> {
-    const unique = Array.from(new Set(businessIds));
-    if (unique.length === 0) return [];
-
-    const { data, error } = await supabase
-      .from('businesses')
-      .select('*')
-      .in('id', unique);
-
-    if (error) throw error;
-    return (data as Business[]) || [];
+    const out: (Business & { followId: string })[] = [];
+    for (const row of (data ?? []) as unknown as { id: string; business: Business | null }[]) {
+      if (row.business) out.push({ ...row.business, followId: row.id });
+    }
+    return out;
   },
 
   /**
@@ -392,6 +361,24 @@ export const socialService = {
     const counts: Record<string, number> = {};
     for (const id of unique) counts[id] = 0;
     if (unique.length === 0) return counts;
+
+    // Server-side aggregate (prepared RPC). Besides avoiding the row
+    // download, it is the only correct source: the follows SELECT policy
+    // exposes just the viewer's own rows, so the fallback below can never
+    // count other users' follows (it under-reports to 0/1).
+    if (!followerCountsRpcUnavailable) {
+      const { data, error } = await untypedRpc('get_business_follower_counts', {
+        p_business_ids: unique,
+      });
+      if (!error) {
+        for (const row of (data ?? []) as { business_id: string; follower_count: number | string }[]) {
+          counts[row.business_id] = Number(row.follower_count);
+        }
+        return counts;
+      }
+      if (!isMissingDbFunction(error)) throw error;
+      followerCountsRpcUnavailable = true;
+    }
 
     const { data, error } = await supabase
       .from('follows')
@@ -499,3 +486,7 @@ export const socialService = {
     return !!data;
   },
 };
+
+// Writes that can change an event page bump the shared version, so
+// EventDetail can safely skip a focus refetch when nothing changed.
+signalEventWrites(socialService, ['createOrUpdateRsvp', 'joinWaitlist', 'leaveWaitlist', 'deleteRsvp', 'saveEvent', 'unsaveEvent', 'followBusiness', 'unfollowBusiness', 'blockUser', 'unblockUser']);

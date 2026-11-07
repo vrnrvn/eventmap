@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Copy, Flag, Pin, RotateCcw, ShieldOff, Trash2, Undo2, UserMinus, UserRound, X } from 'lucide-react-native';
+import { Copy, Flag, Pin, RotateCcw, ShieldOff, Trash2, Undo2, UserMinus, UserRound, X } from '@/components/icons.generated';
 import {
   CHAT_BLOCK_DURATIONS,
   CHAT_REPORT_REASONS,

@@ -14,7 +14,6 @@
 
 import { supabase } from './supabase';
 import { businessesService } from './businesses';
-import { Business } from '@/types/database';
 
 /**
  * True when an RPC failed because the function does not exist yet (the
@@ -105,11 +104,6 @@ const PLANS: PremiumPlan[] = [
 const FREE_PLAN = PLANS[0];
 const PRO_PLAN = PLANS[1];
 
-function isExpired(business: Business): boolean {
-  if (!business.subscription_expires_at) return false;
-  return new Date(business.subscription_expires_at).getTime() <= Date.now();
-}
-
 export const premiumService = {
   getPlans(): PremiumPlan[] {
     return PLANS;
@@ -119,41 +113,12 @@ export const premiumService = {
     return PLANS.find((p) => p.slug === slug);
   },
 
-  async getSubscription(
-    businessId: string
-  ): Promise<BusinessSubscription | null> {
-    const business = await businessesService.getBusiness(businessId);
-    if (!business || business.subscription_tier !== 'premium') return null;
-
-    if (isExpired(business)) {
-      // Lapsed: downgrade the row so server-side gating agrees with the UI.
-      try {
-        await this.cancelSubscription(businessId);
-      } catch (err) {
-        console.error('Failed to downgrade lapsed subscription:', err);
-      }
-      return null;
-    }
-
-    return {
-      business_id: business.id,
-      plan_slug: 'pro',
-      status: 'active',
-      current_period_end: business.subscription_expires_at,
-    };
-  },
-
-  async getFeatureLimits(businessId: string): Promise<PremiumPlan> {
-    const sub = await this.getSubscription(businessId);
-    return sub ? PRO_PLAN : FREE_PLAN;
-  },
-
-  async getEventCount(businessId: string): Promise<number> {
-    const { currentCount } = await businessesService.checkEventLimit(
-      businessId
-    );
-    return currentCount;
-  },
+  // Live premium status, limits and event count are DERIVED from the
+  // businesses row via utils/premiumState.ts (PremiumContext) — not fetched.
+  // The old getSubscription/getFeatureLimits/getEventCount re-fetched that
+  // row once each (plus AppContext's copy: 4 identical requests at startup)
+  // and getSubscription hid a downgrade write; the derivation reports
+  // `lapsed` instead and PremiumContext sends that write exactly once.
 
   canUseFeature(
     plan: PremiumPlan,

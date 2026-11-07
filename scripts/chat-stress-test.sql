@@ -22,6 +22,14 @@ BEGIN
   PERFORM set_config('request.jwt.claims', '', true);
   PERFORM set_config('role', 'anon', true);
 END $$;
+-- Back to the privileged fixture role. Clears the JWT claims too: with a user's
+-- sub still set, auth.uid() stays non-null and protect_profile_privileged_columns
+-- (20261030100000) rejects fixture writes such as re-granting is_admin.
+CREATE OR REPLACE FUNCTION pg_temp.as_service() RETURNS void LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM set_config('request.jwt.claims', '', true);
+  PERFORM set_config('role', 'postgres', true);
+END $$;
 
 -- T1: rate limit burst (exactly 10 of 15 rapid inserts succeed)
 UPDATE event_chat_messages SET created_at = created_at - interval '1 hour' WHERE sender_id = :SAM;
@@ -84,7 +92,7 @@ DECLARE c int; mid uuid;
 BEGIN
   PERFORM pg_temp.as_user('10000000-0000-4000-8000-000000000002');
   PERFORM mark_event_chat_read('30000000-0000-4000-8000-000000000001');
-  PERFORM set_config('role', 'postgres', true);
+  PERFORM pg_temp.as_service();
   -- Everything in this block shares one now(); move the marker back so new rows count as unread.
   UPDATE event_chat_reads SET last_read_at = now() - interval '1 minute' WHERE user_id = '10000000-0000-4000-8000-000000000002';
   UPDATE event_chat_messages SET created_at = created_at - interval '1 hour' WHERE sender_id = '10000000-0000-4000-8000-000000000003';
@@ -133,7 +141,7 @@ DO $$
 DECLARE r record; failed boolean;
 BEGIN
   PERFORM pg_temp.as_user('10000000-0000-4000-8000-000000000002');
-  PERFORM set_config('role', 'postgres', true);
+  PERFORM pg_temp.as_service();
   UPDATE event_chat_messages SET created_at = created_at - interval '1 hour' WHERE sender_id = '10000000-0000-4000-8000-000000000002';
   PERFORM pg_temp.as_user('10000000-0000-4000-8000-000000000002');
   failed := false;
@@ -159,7 +167,7 @@ DECLARE failed boolean; last_id uuid;
 BEGIN
   PERFORM pg_temp.as_user('10000000-0000-4000-8000-000000000001');
   PERFORM set_event_chat_settings('30000000-0000-4000-8000-000000000001', true, 10);
-  PERFORM set_config('role', 'postgres', true);
+  PERFORM pg_temp.as_service();
   UPDATE event_chat_messages SET created_at = created_at - interval '1 hour' WHERE sender_id = '10000000-0000-4000-8000-000000000003';
   PERFORM pg_temp.as_user('10000000-0000-4000-8000-000000000003');
   failed := false;
@@ -172,7 +180,7 @@ BEGIN
   failed := false;
   BEGIN INSERT INTO event_chat_messages (event_id, sender_id, body) VALUES ('30000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000003', 'slow 2'); EXCEPTION WHEN OTHERS THEN failed := SQLERRM LIKE '%chat_slow_mode%'; END;
   ASSERT failed, 'second message inside the slow window must fail';
-  PERFORM set_config('role', 'postgres', true);
+  PERFORM pg_temp.as_service();
   UPDATE event_chat_messages SET created_at = now() - interval '11 seconds' WHERE id = last_id;
   PERFORM pg_temp.as_user('10000000-0000-4000-8000-000000000003');
   INSERT INTO event_chat_messages (event_id, sender_id, body) VALUES ('30000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000003', 'slow 3');
@@ -189,7 +197,7 @@ BEGIN
   SELECT count(*) INTO n FROM event_chat_messages;
   ASSERT n = 0, 'anon must read nothing';
   PERFORM pg_temp.as_user('10000000-0000-4000-8000-000000000001');
-  PERFORM set_config('role', 'postgres', true);
+  PERFORM pg_temp.as_service();
   UPDATE profiles SET is_admin = false WHERE id = '10000000-0000-4000-8000-000000000001';
   PERFORM pg_temp.as_user('10000000-0000-4000-8000-000000000001');
   SELECT count(*) INTO n FROM event_chat_messages WHERE event_id = '30000000-0000-4000-8000-000000000001';
@@ -198,17 +206,17 @@ BEGIN
   ASSERT n = 0 OR EXISTS (SELECT 1 FROM events e JOIN businesses b ON b.id = e.business_id WHERE e.id = '30000000-0000-4000-8000-000000000002' AND b.owner_id = '10000000-0000-4000-8000-000000000001'), 'host must not read chats of events they do not own';
   SELECT count(*) INTO n FROM event_chat_removed_bodies;
   ASSERT n = 0, 'non-admin must not read removed bodies';
-  PERFORM set_config('role', 'postgres', true);
+  PERFORM pg_temp.as_service();
   UPDATE profiles SET is_admin = true WHERE id = '10000000-0000-4000-8000-000000000001';
   PERFORM pg_temp.as_user('10000000-0000-4000-8000-000000000003');
-  PERFORM set_config('role', 'postgres', true);
+  PERFORM pg_temp.as_service();
   INSERT INTO event_chat_blocks (event_id, user_id, blocked_by) VALUES ('30000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000003', '10000000-0000-4000-8000-000000000001');
   PERFORM pg_temp.as_user('10000000-0000-4000-8000-000000000003');
   SELECT count(*) INTO n FROM event_chat_messages WHERE event_id = '30000000-0000-4000-8000-000000000001';
   ASSERT n > 0, 'blocked user can still read';
   SELECT count(*) INTO n FROM event_chat_blocks;
   ASSERT n = 0, 'blocked user must not see block rows';
-  PERFORM set_config('role', 'postgres', true);
+  PERFORM pg_temp.as_service();
   DELETE FROM event_chat_blocks WHERE user_id = '10000000-0000-4000-8000-000000000003';
   RAISE NOTICE 'PASS T8 RLS matrix';
 END $$;

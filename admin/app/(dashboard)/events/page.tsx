@@ -1,25 +1,48 @@
 import { createClient } from '@/lib/supabase/server';
-import Link from 'next/link';
 import { EventsTable } from './EventsTable';
+import { Pagination, pageFromParams, pageRange } from '../Pagination';
+import { SearchForm, escapeLike } from '../SearchForm';
 
-export default async function EventsPage() {
+export default async function EventsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const params = await searchParams;
+  const page = pageFromParams(params.page);
+  const q = typeof params.q === 'string' ? params.q.trim() : '';
+  const [from, to] = pageRange(page);
+
   const supabase = await createClient();
-  const { data: events } = await supabase
+  let query = supabase
     .from('events')
-    .select(`
+    .select(
+      `
       id,
       title,
       start_datetime,
       end_datetime,
       created_at,
       businesses (name)
-    `)
-    .order('start_datetime', { ascending: false });
+    `,
+      { count: 'exact' }
+    )
+    .order('start_datetime', { ascending: false })
+    .order('id')
+    .range(from, to);
+
+  if (q) {
+    query = query.ilike('title', `%${escapeLike(q)}%`);
+  }
+
+  const { data: events, count } = await query;
 
   return (
     <div>
       <h1 className="mb-6 text-2xl font-semibold text-zinc-900">Events</h1>
-      <EventsTable events={events ?? []} />
+      <SearchForm action="/events" placeholder="Search by title..." defaultValue={q} />
+      <EventsTable key={`${page}:${q}`} events={events ?? []} />
+      <Pagination page={page} count={count} basePath="/events" query={q ? { q } : undefined} />
     </div>
   );
 }

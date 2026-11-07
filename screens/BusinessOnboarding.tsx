@@ -24,7 +24,7 @@ import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/ui/Button';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
-import { Briefcase } from 'lucide-react-native';
+import { Briefcase } from '@/components/icons.generated';
 
 const BUSINESS_CATEGORIES = [
   'Restaurant',

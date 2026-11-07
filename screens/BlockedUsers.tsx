@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { UserRoundX } from 'lucide-react-native';
+import { UserRoundX } from '@/components/icons.generated';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { OfflineState } from '@/components/ui/QueryStates';

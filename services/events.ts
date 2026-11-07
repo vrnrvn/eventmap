@@ -1,10 +1,14 @@
 import { Platform } from 'react-native';
+import { signalEventWrites } from '@/utils/eventDataVersion';
 import { supabase, getSessionUser } from './supabase';
 import type { RankedEvent, EventDetails, Event, EventLink, EventVisibility, AgeRestriction } from '@/types/database';
 
 import { FilterOptions } from '@/types/app';
 import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
+import { imageCleanupMayRun, releaseEventImages } from './storageCleanup';
+import * as ImageManipulator from 'expo-image-manipulator';
+import { THUMBNAIL_WIDTH, markedUploadName, thumbnailOf } from '@/utils/imageThumbnails';
 
 /** Optional detail fields a host can set (20261103150000). Empty strings mean "clear". */
 export type EventExtras = {
@@ -34,6 +38,42 @@ export function extrasToUpdates(extras: EventExtras): Partial<Event> {
 
 export type EventInteractionKind = 'share' | 'ticket' | 'calendar' | 'directions';
 
+// expo-file-system/legacy has no web implementation (readAsStringAsync is
+// an unavailable stub there), so on web the picker's blob:/data: URI is
+// fetched straight into a Blob. Native keeps the base64 → ArrayBuffer path.
+async function readUploadBody(uri: string): Promise<Blob | ArrayBuffer> {
+  return Platform.OS === 'web'
+    ? await (await fetch(uri)).blob()
+    : decode(await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 }));
+}
+
+/** Cover + photo URLs of an event, for releasing its files after a delete. */
+async function eventImageUrls(eventId: string): Promise<string[]> {
+  try {
+    const [ev, photos] = await Promise.all([
+      supabase.from('events').select('cover_image_url').eq('id', eventId).maybeSingle(),
+      supabase.from('event_photos').select('image_url').eq('event_id', eventId),
+    ]);
+    const urls = ((photos.data ?? []) as { image_url: string }[]).map((p) => p.image_url);
+    const cover = (ev.data as { cover_image_url?: string | null } | null)?.cover_image_url;
+    return cover ? [cover, ...urls] : urls;
+  } catch {
+    return [];
+  }
+}
+
+async function currentCover(eventId: string): Promise<string | null> {
+  try {
+    const { data } = await supabase.from('events').select('cover_image_url').eq('id', eventId).maybeSingle();
+    return (data as { cover_image_url?: string | null } | null)?.cover_image_url ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** event_rsvp_counts missing on this backend (per session); skip the light poll. */
+let liveStatusUnavailable = false;
+
 export const eventsService = {
   /**
    * One page of ranked events around a point. `hasMore` is inferred from a
@@ -61,6 +101,46 @@ export const eventsService = {
     return { items, hasMore: items.length >= page.limit };
   },
 
+  /**
+   * Lightweight live status for an open event page: the public going-count
+   * row (event_rsvp_counts, trigger-maintained) plus the event's lifecycle
+   * status. Replaces polling the full get_event_details payload (event +
+   * business + photos + links + waitlist) every 20 s just to read two fields.
+   *
+   * `status: null` means the events row is no longer visible to this viewer —
+   * for a page that was open that means cancelled (or unpublished), which RLS
+   * hides from non-owners; the caller should fall back to the full details
+   * fetch to learn which. Returns null (and remembers it) when the counts
+   * table isn't in the shared DB yet, so callers can keep the old full poll.
+   */
+  async getEventLiveStatus(
+    eventId: string
+  ): Promise<{ goingCount: number | null; status: string | null } | null> {
+    if (liveStatusUnavailable) return null;
+    // The prepared event_rsvp_counts table isn't in the generated DB types yet.
+    // Bound: supabase.from reads `this` (an extracted method throws).
+    const fromUntyped = supabase.from.bind(supabase) as unknown as (
+      table: string
+    ) => ReturnType<typeof supabase.from>;
+    const [counts, ev] = await Promise.all([
+      fromUntyped('event_rsvp_counts').select('going_count').eq('event_id', eventId).maybeSingle(),
+      supabase.from('events').select('status').eq('id', eventId).maybeSingle(),
+    ]);
+    if (counts.error || ev.error) {
+      // Missing table (42P01 from Postgres, PGRST205 from current PostgREST):
+      // remember it for the session. Any error returns null so the caller
+      // falls back to the full details fetch instead of silently going stale.
+      const code = (counts.error as { code?: string } | null)?.code;
+      if (code === '42P01' || code === 'PGRST205') liveStatusUnavailable = true;
+      return null;
+    }
+    return {
+      // No row yet = no RSVPs yet.
+      goingCount: counts.data ? (counts.data as { going_count: number }).going_count : 0,
+      status: ev.data ? ((ev.data as { status: string | null }).status ?? 'active') : null,
+    };
+  },
+
   async getEventDetails(eventId: string): Promise<EventDetails | null> {
     const { data, error } = await supabase.rpc('get_event_details', {
       event_uuid: eventId,
@@ -77,7 +157,8 @@ export const eventsService = {
    * one tap per person, kind and day and ignores the host's own taps.
    */
   trackEventInteraction(eventId: string, kind: EventInteractionKind): void {
-    const rpc = supabase.rpc as unknown as (
+    // Bound: supabase.rpc reads `this` (an extracted method throws).
+    const rpc = supabase.rpc.bind(supabase) as unknown as (
       fn: string,
       args: Record<string, unknown>
     ) => PromiseLike<{ error: unknown }>;
@@ -143,7 +224,8 @@ export const eventsService = {
     // reported as a missing function (PGRST202 / 42883). Try the richest
     // shape first and drop the newest extras until one is accepted; whatever
     // could not be sent in the create call is written with a follow-up UPDATE.
-    const untyped = supabase.rpc as unknown as (
+    // Bound: supabase.rpc reads `this` (an extracted method throws).
+    const untyped = supabase.rpc.bind(supabase) as unknown as (
       f: string,
       a: Record<string, unknown>
     ) => ReturnType<typeof supabase.rpc>;
@@ -240,12 +322,16 @@ export const eventsService = {
   },
 
   async updateEvent(eventId: string, updates: Partial<Event>): Promise<void> {
+    // A replaced cover may leave its file unused.
+    const previousCover =
+      'cover_image_url' in updates && imageCleanupMayRun() ? await currentCover(eventId) : undefined;
     const { error } = await supabase
       .from('events')
       .update(updates)
       .eq('id', eventId);
 
     if (error) throw error;
+    if (previousCover && previousCover !== updates.cover_image_url) releaseEventImages([previousCover]);
   },
 
   /**
@@ -262,9 +348,12 @@ export const eventsService = {
   },
 
   async deleteEvent(eventId: string): Promise<void> {
+    // Files to release once the row (and its cascaded photos) is gone.
+    const images = imageCleanupMayRun() ? await eventImageUrls(eventId) : [];
     const { error } = await supabase.from('events').delete().eq('id', eventId);
 
     if (error) throw error;
+    releaseEventImages(images);
   },
 
   /**
@@ -461,12 +550,19 @@ export const eventsService = {
   },
 
   async deleteEventPhoto(photoId: string): Promise<void> {
+    // Read the URL first (a separate select: DELETE ... RETURNING would also
+    // apply the SELECT policy, which hides ended events' photos, and change
+    // what can be deleted). Null just means no cleanup.
+    const { data: row } = imageCleanupMayRun()
+      ? await supabase.from('event_photos').select('image_url').eq('id', photoId).maybeSingle()
+      : { data: null };
     const { error } = await supabase
       .from('event_photos')
       .delete()
       .eq('id', photoId);
 
     if (error) throw error;
+    releaseEventImages([(row as { image_url?: string } | null)?.image_url]);
   },
 
   async uploadEventImage(
@@ -476,26 +572,39 @@ export const eventsService = {
     const user = await getSessionUser();
     if (!user) throw new Error('Not authenticated');
 
-    const fileExt = file.name.split('.').pop() || 'jpg';
-    const fileName = `${Date.now()}-${Math.random()
-      .toString(36)
-      .substring(7)}.${fileExt}`;
+    const fileExt = (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const base = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    const contentType = file.type || 'image/jpeg';
+    const dir = `${user.id}/${folder}`;
     // Paths are prefixed with the uploader's user id: the storage policies
     // (20261030102000) scope INSERT/UPDATE/DELETE to the caller's own folder.
-    const filePath = `${user.id}/${folder}/${fileName}`;
-    const contentType = file.type || 'image/jpeg';
 
-    // expo-file-system/legacy has no web implementation (readAsStringAsync is
-    // an unavailable stub there), so on web the picker's blob:/data: URI is
-    // fetched straight into a Blob. Native keeps the base64 → ArrayBuffer path.
-    const body: Blob | ArrayBuffer =
-      Platform.OS === 'web'
-        ? await (await fetch(file.uri)).blob()
-        : decode(
-            await FileSystem.readAsStringAsync(file.uri, {
-              encoding: FileSystem.EncodingType.Base64,
-            })
-          );
+    // JPEGs (every picker path) also get a 512 px sibling for small renders
+    // (utils/imageThumbnails). It's uploaded FIRST and the original only
+    // carries the "has thumbnail" marker if that worked, so a marked URL
+    // always has its sibling. Best-effort: any failure just means no marker.
+    let fileName = `${base}.${fileExt}`;
+    if (fileExt === 'jpg' || fileExt === 'jpeg') {
+      try {
+        const small = await ImageManipulator.manipulateAsync(
+          file.uri,
+          [{ resize: { width: THUMBNAIL_WIDTH } }],
+          { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG }
+        );
+        const marked = markedUploadName(base);
+        const { error: thumbError } = await supabase.storage
+          .from('event-images')
+          .upload(`${dir}/${thumbnailOf(marked)}`, await readUploadBody(small.uri), {
+            contentType: 'image/jpeg',
+            upsert: false,
+          });
+        if (!thumbError) fileName = marked;
+      } catch {
+        // Keep the unmarked name: small renders use the original.
+      }
+    }
+    const filePath = `${dir}/${fileName}`;
+    const body = await readUploadBody(file.uri);
 
     const { data, error } = await supabase.storage
       .from('event-images')
@@ -513,3 +622,7 @@ export const eventsService = {
     return publicUrl;
   },
 };
+
+// Writes that can change an event page bump the shared version, so
+// EventDetail can safely skip a focus refetch when nothing changed.
+signalEventWrites(eventsService, ['createEvent', 'applyExtras', 'updateEvent', 'cancelEvent', 'deleteEvent', 'addEventLink', 'syncEventLinks', 'deleteEventLink', 'addEventPhoto', 'updateEventPhotoOrder', 'deleteEventPhoto']);

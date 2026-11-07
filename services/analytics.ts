@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { eventsService } from './events';
-import { hostToolsService, isMissingDbFunction } from './hostTools';
+import { hostToolsService } from './hostTools';
+import { isMissingDbFunction, isRpcKnownMissing, markRpcMissing, MISSING_RPC_ERROR, rpcSignatureKey } from '@/utils/rpcErrors';
 import { parseEventInsights, type EventInsights } from '@/utils/analytics';
 
 export type { EventInsights };
@@ -21,8 +22,16 @@ export class InsightsNotFoundError extends Error {
 }
 
 /** The prepared RPC isn't in the generated types yet. */
-const untypedRpc = (fn: string, args: Record<string, unknown>) =>
-  (supabase.rpc as unknown as (f: string, a: Record<string, unknown>) => ReturnType<typeof supabase.rpc>)(fn, args);
+// Memoizes "function missing" per session (see utils/rpcErrors).
+const untypedRpc = async (fn: string, args: Record<string, unknown>) => {
+  const signature = rpcSignatureKey(fn, args);
+  if (isRpcKnownMissing(signature)) return { data: null, error: MISSING_RPC_ERROR };
+  const result = await (
+    supabase.rpc as unknown as (f: string, a: Record<string, unknown>) => ReturnType<typeof supabase.rpc>
+  )(fn, args);
+  if (result.error && isMissingDbFunction(result.error)) markRpcMissing(signature);
+  return result;
+};
 
 export type AnalyticsTrendPoint = {
   date: string;

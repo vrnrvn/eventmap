@@ -16,7 +16,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/Button';
 import { TextField } from '@/components/ui/TextField';
 import { Colors, Typography, BorderRadius, Spacing, alpha } from '@/constants/theme';
-import { ArrowLeft, ArrowRight, Mail, Lock } from 'lucide-react-native';
+import { ArrowLeft, ArrowRight, Mail, Lock } from '@/components/icons.generated';
 import { GoogleIcon } from '@/components/icons/BrandIcons';
 import { oauthEnabled } from '@/services/runtime';
 import { notify } from '@/utils/notify';

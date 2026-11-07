@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -44,7 +44,7 @@ import {
   UserPlus,
   Users,
   X,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { eventsService } from '@/services/events';
@@ -119,6 +119,166 @@ function slowModeLabel(seconds: number): string {
   return `${seconds / 60}m`;
 }
 
+type AttendeeAction = 'approve' | 'decline' | 'promote' | 'unban' | 'remove';
+
+/**
+ * One attendee row, memoized: any screen state change (a form field, the
+ * busy id, a refetch) used to re-render every visible row. Props are plain
+ * values plus one stable `onAction` dispatcher.
+ */
+const AttendeeRow = memo(function AttendeeRow({
+  item,
+  index,
+  busy,
+  canManageAttendees,
+  showLinePosition,
+  onAction,
+}: {
+  item: HostAttendee;
+  index: number;
+  busy: boolean;
+  canManageAttendees: boolean;
+  showLinePosition: boolean;
+  onAction: (action: AttendeeAction, item: HostAttendee) => void;
+}) {
+    const manageable = item.can_manage && canManageAttendees;
+    const removable = manageable && (item.status === 'going' || item.status === 'interested');
+    const promotable = manageable && item.status === 'waitlist';
+    const restorable = manageable && item.status === 'removed';
+    const reviewable = manageable && item.status === 'requested';
+    const metaParts: string[] = [];
+    // Position only makes sense against the full, unfiltered line.
+    if (item.status === 'waitlist' && showLinePosition) metaParts.push(`#${index + 1} in line`);
+    if (item.status === 'requested') metaParts.push('Wants to join');
+    if (item.status === 'removed') {
+      metaParts.push(item.joined_at ? `Removed ${formatEventWhen(item.joined_at)}` : 'Removed');
+      if (item.reason) metaParts.push(item.reason);
+    } else if (item.joined_at) {
+      metaParts.push(`Joined ${formatEventWhen(item.joined_at)}`);
+    }
+    if (item.chat_blocked) metaParts.push('Blocked from chat');
+    // Private profiles: the server already reduced the name to "First L." and
+    // dropped avatar/bio; their public profile page is private too, so don't
+    // offer a tap that only leads to a "Private Profile" placeholder.
+    const canOpenProfile = item.can_manage && !item.is_private;
+    return (
+      <View style={styles.attendeeRow}>
+        <TouchableOpacity
+          style={styles.attendeeMain}
+          disabled={!canOpenProfile}
+          onPress={() => router.push(`/user/${item.user_id}` as never)}
+          activeOpacity={0.7}
+          accessibilityRole={canOpenProfile ? 'button' : 'text'}
+          accessibilityLabel={
+            canOpenProfile ? `View ${item.name}'s profile` : `${item.name}, private profile`
+          }
+        >
+          <Avatar imageUrl={item.avatar_url} name={item.name} size={40} />
+          <View style={styles.attendeeText}>
+            <View style={styles.attendeeNameRow}>
+              <Text style={styles.attendeeName} numberOfLines={1}>
+                {item.name}
+              </Text>
+              {item.is_private ? (
+                <View style={styles.privateTag}>
+                  <Text style={styles.privateTagText}>Private</Text>
+                </View>
+              ) : null}
+            </View>
+            {metaParts.length ? (
+              <Text style={styles.attendeeMeta} numberOfLines={1}>
+                {metaParts.join(' · ')}
+              </Text>
+            ) : null}
+          </View>
+        </TouchableOpacity>
+        {reviewable ? (
+          <>
+            <TouchableOpacity
+              style={[styles.rowActionBtn, styles.promoteBtn]}
+              onPress={() => onAction('approve', item)}
+              disabled={busy}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`Approve ${item.name}'s request`}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            >
+              {busy ? (
+                <ActivityIndicator size="small" color={Colors.successText} />
+              ) : (
+                <Check size={18} color={Colors.successText} />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.rowActionBtn, styles.removeBtn]}
+              onPress={() => onAction('decline', item)}
+              disabled={busy}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`Decline ${item.name}'s request`}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            >
+              <X size={18} color={Colors.error} />
+            </TouchableOpacity>
+          </>
+        ) : null}
+        {promotable ? (
+          <TouchableOpacity
+            style={[styles.rowActionBtn, styles.promoteBtn]}
+            onPress={() => onAction('promote', item)}
+            disabled={busy}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`Move ${item.name} to going`}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            {busy ? (
+              <ActivityIndicator size="small" color={Colors.successText} />
+            ) : (
+              <UserPlus size={18} color={Colors.successText} />
+            )}
+          </TouchableOpacity>
+        ) : null}
+        {restorable ? (
+          <TouchableOpacity
+            style={[styles.rowActionBtn, styles.restoreBtn]}
+            onPress={() => onAction('unban', item)}
+            disabled={busy}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`Allow ${item.name} back into the event`}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            {busy ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : (
+              <RotateCcw size={18} color={Colors.primary} />
+            )}
+          </TouchableOpacity>
+        ) : null}
+        {removable ? (
+          <TouchableOpacity
+            style={[styles.rowActionBtn, styles.removeBtn]}
+            onPress={() => onAction('remove', item)}
+            disabled={busy}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={`Remove ${item.name} from the event`}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            {busy ? (
+              <ActivityIndicator size="small" color={Colors.error} />
+            ) : (
+              <UserMinus size={18} color={Colors.error} />
+            )}
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  });
+
+const attendeeKey = (item: HostAttendee) => item.user_id;
+
 /**
  * Host-only hub for one event: counts and quick actions, the attendee list
  * with host actions, and chat controls. Replaces the actions scattered across
@@ -133,7 +293,9 @@ export default function ManageEvent() {
 
   // ── Event + counts ────────────────────────────────────────────────────────
   const detailsQuery = useQuery({
-    queryKey: ['host', 'event', id, 'details'],
+    // Same RPC and key as EventDetail: one fetch serves both screens, and the
+    // copy stays on the device for offline opening (persisted prefix).
+    queryKey: queryKeys.eventDetails(id ?? ''),
     queryFn: () => eventsService.getEventDetails(id!),
     enabled: !!id,
   });
@@ -158,11 +320,21 @@ export default function ManageEvent() {
   });
   const chatStatus = chatStatusQuery.data ?? null;
 
+  // Depend on the stable `refetch` functions, not the query result objects:
+  // `useQuery` returns a new object every render, which would give this
+  // callback a new identity each render (and previously re-triggered the
+  // focus refetch in a loop).
+  const refetchDetails = detailsQuery.refetch;
+  const refetchOverview = overviewQuery.refetch;
+  const refetchChatStatus = chatStatusQuery.refetch;
   const refetchAll = useCallback(() => {
-    void detailsQuery.refetch({ cancelRefetch: false });
-    void overviewQuery.refetch({ cancelRefetch: false });
-    void chatStatusQuery.refetch({ cancelRefetch: false });
-  }, [detailsQuery, overviewQuery, chatStatusQuery]);
+    void refetchDetails({ cancelRefetch: false });
+    // `refetch()` bypasses `enabled`, so keep the host-only queries gated here
+    // too (a non-owner on this screen must not hit the host RPCs).
+    if (!canManage) return;
+    void refetchOverview({ cancelRefetch: false });
+    void refetchChatStatus({ cancelRefetch: false });
+  }, [refetchDetails, refetchOverview, refetchChatStatus, canManage]);
   useRefetchOnFocus(refetchAll, !!id);
 
   const phase = event ? getHostEventPhase(event) : 'upcoming';
@@ -251,7 +423,7 @@ export default function ManageEvent() {
         notify.success(`${attendee.name} was removed.`);
         void overviewQuery.refetch();
         void detailsQuery.refetch();
-        void queryClient.invalidateQueries({ queryKey: queryKeys.attendanceLists() });
+        queryKeys.markAttendanceListsStale(queryClient);
       } catch (err) {
         notify.error(
           err instanceof HostToolsUnavailableError
@@ -349,7 +521,7 @@ export default function ManageEvent() {
         notify.success(`${attendee.name} is now going.`);
         void overviewQuery.refetch();
         void detailsQuery.refetch();
-        void queryClient.invalidateQueries({ queryKey: queryKeys.attendanceLists() });
+        queryKeys.markAttendanceListsStale(queryClient);
       } catch (err) {
         if (err instanceof HostToolsUnavailableError) {
           notify.error(err.message);
@@ -591,7 +763,7 @@ export default function ManageEvent() {
         result.notified > 0 ? `Published. ${result.notified} followers notified.` : 'Published.'
       );
       refetchAll();
-      void queryClient.invalidateQueries({ queryKey: queryKeys.attendanceLists() });
+      queryKeys.markAttendanceListsStale(queryClient);
     } catch (err) {
       const msg = String((err as { message?: string })?.message ?? '');
       notify.error(
@@ -929,143 +1101,40 @@ export default function ManageEvent() {
     );
   };
 
-  const renderAttendee = ({ item, index }: { item: HostAttendee; index: number }) => {
-    const busy = removingId === item.user_id;
-    const manageable = item.can_manage && actions.canManageAttendees;
-    const removable = manageable && (item.status === 'going' || item.status === 'interested');
-    const promotable = manageable && item.status === 'waitlist';
-    const restorable = manageable && item.status === 'removed';
-    const reviewable = manageable && item.status === 'requested';
-    const metaParts: string[] = [];
-    // Position only makes sense against the full, unfiltered line.
-    if (item.status === 'waitlist' && !debouncedSearch) metaParts.push(`#${index + 1} in line`);
-    if (item.status === 'requested') metaParts.push('Wants to join');
-    if (item.status === 'removed') {
-      metaParts.push(item.joined_at ? `Removed ${formatEventWhen(item.joined_at)}` : 'Removed');
-      if (item.reason) metaParts.push(item.reason);
-    } else if (item.joined_at) {
-      metaParts.push(`Joined ${formatEventWhen(item.joined_at)}`);
-    }
-    if (item.chat_blocked) metaParts.push('Blocked from chat');
-    // Private profiles: the server already reduced the name to "First L." and
-    // dropped avatar/bio; their public profile page is private too, so don't
-    // offer a tap that only leads to a "Private Profile" placeholder.
-    const canOpenProfile = item.can_manage && !item.is_private;
-    return (
-      <View style={styles.attendeeRow}>
-        <TouchableOpacity
-          style={styles.attendeeMain}
-          disabled={!canOpenProfile}
-          onPress={() => router.push(`/user/${item.user_id}` as never)}
-          activeOpacity={0.7}
-          accessibilityRole={canOpenProfile ? 'button' : 'text'}
-          accessibilityLabel={
-            canOpenProfile ? `View ${item.name}'s profile` : `${item.name}, private profile`
-          }
-        >
-          <Avatar imageUrl={item.avatar_url} name={item.name} size={40} />
-          <View style={styles.attendeeText}>
-            <View style={styles.attendeeNameRow}>
-              <Text style={styles.attendeeName} numberOfLines={1}>
-                {item.name}
-              </Text>
-              {item.is_private ? (
-                <View style={styles.privateTag}>
-                  <Text style={styles.privateTagText}>Private</Text>
-                </View>
-              ) : null}
-            </View>
-            {metaParts.length ? (
-              <Text style={styles.attendeeMeta} numberOfLines={1}>
-                {metaParts.join(' · ')}
-              </Text>
-            ) : null}
-          </View>
-        </TouchableOpacity>
-        {reviewable ? (
-          <>
-            <TouchableOpacity
-              style={[styles.rowActionBtn, styles.promoteBtn]}
-              onPress={() => void handleReviewRequest(item, 'approve')}
-              disabled={busy}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel={`Approve ${item.name}'s request`}
-              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-            >
-              {busy ? (
-                <ActivityIndicator size="small" color={Colors.successText} />
-              ) : (
-                <Check size={18} color={Colors.successText} />
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.rowActionBtn, styles.removeBtn]}
-              onPress={() => void handleReviewRequest(item, 'decline')}
-              disabled={busy}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel={`Decline ${item.name}'s request`}
-              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-            >
-              <X size={18} color={Colors.error} />
-            </TouchableOpacity>
-          </>
-        ) : null}
-        {promotable ? (
-          <TouchableOpacity
-            style={[styles.rowActionBtn, styles.promoteBtn]}
-            onPress={() => void handlePromoteAttendee(item)}
-            disabled={busy}
-            activeOpacity={0.7}
-            accessibilityRole="button"
-            accessibilityLabel={`Move ${item.name} to going`}
-            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-          >
-            {busy ? (
-              <ActivityIndicator size="small" color={Colors.successText} />
-            ) : (
-              <UserPlus size={18} color={Colors.successText} />
-            )}
-          </TouchableOpacity>
-        ) : null}
-        {restorable ? (
-          <TouchableOpacity
-            style={[styles.rowActionBtn, styles.restoreBtn]}
-            onPress={() => void handleUnbanAttendee(item)}
-            disabled={busy}
-            activeOpacity={0.7}
-            accessibilityRole="button"
-            accessibilityLabel={`Allow ${item.name} back into the event`}
-            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-          >
-            {busy ? (
-              <ActivityIndicator size="small" color={Colors.primary} />
-            ) : (
-              <RotateCcw size={18} color={Colors.primary} />
-            )}
-          </TouchableOpacity>
-        ) : null}
-        {removable ? (
-          <TouchableOpacity
-            style={[styles.rowActionBtn, styles.removeBtn]}
-            onPress={() => void handleRemoveAttendee(item)}
-            disabled={busy}
-            activeOpacity={0.7}
-            accessibilityRole="button"
-            accessibilityLabel={`Remove ${item.name} from the event`}
-            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-          >
-            {busy ? (
-              <ActivityIndicator size="small" color={Colors.error} />
-            ) : (
-              <UserMinus size={18} color={Colors.error} />
-            )}
-          </TouchableOpacity>
-        ) : null}
-      </View>
-    );
+  // Stable dispatcher: the handlers above close over query objects (new each
+  // render), so rows get one fixed callback that reads the latest via a ref.
+  const attendeeHandlersRef = useRef({
+    handleReviewRequest,
+    handlePromoteAttendee,
+    handleUnbanAttendee,
+    handleRemoveAttendee,
+  });
+  attendeeHandlersRef.current = {
+    handleReviewRequest,
+    handlePromoteAttendee,
+    handleUnbanAttendee,
+    handleRemoveAttendee,
   };
+  const onAttendeeAction = useCallback((action: AttendeeAction, item: HostAttendee) => {
+    const h = attendeeHandlersRef.current;
+    if (action === 'approve' || action === 'decline') void h.handleReviewRequest(item, action);
+    else if (action === 'promote') void h.handlePromoteAttendee(item);
+    else if (action === 'unban') void h.handleUnbanAttendee(item);
+    else void h.handleRemoveAttendee(item);
+  }, []);
+  const renderAttendee = useCallback(
+    ({ item, index }: { item: HostAttendee; index: number }) => (
+      <AttendeeRow
+        item={item}
+        index={index}
+        busy={removingId === item.user_id}
+        canManageAttendees={actions.canManageAttendees}
+        showLinePosition={!debouncedSearch}
+        onAction={onAttendeeAction}
+      />
+    ),
+    [removingId, actions.canManageAttendees, debouncedSearch, onAttendeeAction]
+  );
 
   const renderSettings = () => {
     if (!event) return null;
@@ -1456,7 +1525,7 @@ export default function ManageEvent() {
       <SegmentedControl<Tab> options={TABS} value={tab} onChange={setTab} style={styles.tabs} />
       <FlatList
         data={listData}
-        keyExtractor={(item) => item.user_id}
+        keyExtractor={attendeeKey}
         renderItem={renderAttendee}
         ListHeaderComponent={
           tab === 'overview'

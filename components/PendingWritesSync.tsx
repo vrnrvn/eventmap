@@ -36,7 +36,11 @@ export function PendingWritesSync() {
       if (done.length + dropped.length === 0) return;
       // Lists and pages built from these rows refetch with the synced state.
       const kinds = new Set([...done, ...dropped].map((w) => w.kind));
-      if (kinds.has('save')) void queryClient.invalidateQueries({ queryKey: queryKeys.attendanceLists() });
+      // A flush happens on reconnect, often while a list is on screen:
+      // refetch the visible ones now (others refresh on their next focus).
+      if (kinds.has('save')) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.attendanceLists(), refetchType: 'active' });
+      }
       if (kinds.has('save') || kinds.has('follow')) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.eventDetailsPrefix() });
       }

@@ -102,9 +102,15 @@ describe('discover last area', () => {
 });
 
 describe('per-item caps', () => {
-  it('cover event details, visited profiles, business pages and chat rooms', async () => {
+  it('cover event details, visited profiles, business pages, chat rooms and calendar ranges', async () => {
     const { PERSIST_LIMITS } = await import('../utils/queryPersistence');
-    expect(PERSIST_LIMITS.map((l) => l.prefix[0])).toEqual(['event', 'user-profile', 'business-page', 'chat']);
+    expect(PERSIST_LIMITS.map((l) => l.prefix.join('/'))).toEqual([
+      'event/details',
+      'user-profile',
+      'business-page',
+      'chat/room',
+      'events/calendar',
+    ]);
   });
 });
 

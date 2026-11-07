@@ -1,23 +1,45 @@
 import { createClient } from '@/lib/supabase/server';
 import Link from 'next/link';
+import { Pagination, pageFromParams, pageRange } from '../Pagination';
 
-export default async function SubscriptionsPage() {
+export default async function SubscriptionsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const params = await searchParams;
+  const page = pageFromParams(params.page);
+  const [from, to] = pageRange(page);
+
   const supabase = await createClient();
 
-  const { data: businesses } = await supabase
-    .from('businesses')
-    .select(`
+  const [{ data: businesses, count }, { count: premiumCount }, { count: freeCount }] =
+    await Promise.all([
+      supabase
+        .from('businesses')
+        .select(
+          `
       id,
       name,
       subscription_tier,
       subscription_expires_at,
       events_created_this_month,
       profiles:owner_id (name)
-    `)
-    .order('subscription_tier', { ascending: false });
-
-  const premium = (businesses ?? []).filter((b) => b.subscription_tier === 'premium');
-  const free = (businesses ?? []).filter((b) => b.subscription_tier === 'free');
+    `,
+          { count: 'exact' }
+        )
+        .order('subscription_tier', { ascending: false })
+    .order('id')
+        .range(from, to),
+      supabase
+        .from('businesses')
+        .select('*', { count: 'exact', head: true })
+        .eq('subscription_tier', 'premium'),
+      supabase
+        .from('businesses')
+        .select('*', { count: 'exact', head: true })
+        .eq('subscription_tier', 'free'),
+    ]);
 
   return (
     <div>
@@ -25,11 +47,11 @@ export default async function SubscriptionsPage() {
       <div className="mb-6 grid gap-4 sm:grid-cols-2">
         <div className="rounded-lg border border-zinc-200 bg-white p-4">
           <p className="text-sm text-zinc-600">Premium</p>
-          <p className="text-2xl font-semibold text-zinc-900">{premium.length}</p>
+          <p className="text-2xl font-semibold text-zinc-900">{premiumCount ?? 0}</p>
         </div>
         <div className="rounded-lg border border-zinc-200 bg-white p-4">
           <p className="text-sm text-zinc-600">Free</p>
-          <p className="text-2xl font-semibold text-zinc-900">{free.length}</p>
+          <p className="text-2xl font-semibold text-zinc-900">{freeCount ?? 0}</p>
         </div>
       </div>
       <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
@@ -80,6 +102,7 @@ export default async function SubscriptionsPage() {
           </tbody>
         </table>
       </div>
+      <Pagination page={page} count={count} basePath="/subscriptions" />
     </div>
   );
 }

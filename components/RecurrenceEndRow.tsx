@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
-import { CalendarCheck, X } from 'lucide-react-native';
+import { CalendarCheck, X } from '@/components/icons.generated';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { WebDateTimeInput } from '@/components/WebDateTimeInput';
 import {

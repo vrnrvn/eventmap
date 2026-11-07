@@ -8,6 +8,8 @@ import {
   ScrollView,
   Image,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
+import { preferredThumbnailUrl } from '@/utils/imageThumbnails';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -56,7 +58,7 @@ import {
   Users,
   Heart,
   Eye,
-} from 'lucide-react-native';
+} from '@/components/icons.generated';
 
 const CREATED_PREVIEW_LIMIT = 3;
 const JOINED_PREVIEW_LIMIT = 3;
@@ -135,7 +137,7 @@ export default function ProfileScreen() {
       };
     },
   });
-  useRefetchOnFocus(overviewQuery.refetch, !!userId);
+  useRefetchOnFocus(overviewQuery.refetch, !!userId, queryKeys.profileOverview(userId, businessId));
   const overview = overviewQuery.data;
   const { state: overviewState, freshness } = useScreenState(overviewQuery, {
     hasData: overview !== undefined,
@@ -504,7 +506,14 @@ export default function ProfileScreen() {
                 >
                   <View style={styles.eventImageWrap}>
                     {event.cover_image_url ? (
-                      <Image source={{ uri: event.cover_image_url }} style={styles.eventImage} />
+                      <ExpoImage
+                        source={{ uri: event.cover_image_url }}
+                        style={styles.eventImage}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                        recyclingKey={event.id}
+                        transition={150}
+                      />
                     ) : (
                       <View style={[styles.eventImage, styles.eventImagePlaceholder]}>
                         <CalendarDays size={32} color={Palette.primary} />
@@ -561,7 +570,14 @@ export default function ProfileScreen() {
                 accessibilityLabel={`${event.title}, ${formatEventDayLabel(event.next_start_datetime || event.start_datetime)} at ${formatEventTime(event.next_start_datetime || event.start_datetime)}`}
               >
                 {event.cover_image_url ? (
-                  <Image source={{ uri: event.cover_image_url }} style={styles.joinedImage} />
+                  <ExpoImage
+                    source={{ uri: preferredThumbnailUrl(event.cover_image_url) }}
+                    style={styles.joinedImage}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    recyclingKey={event.id}
+                    transition={150}
+                  />
                 ) : (
                   <View style={[styles.joinedImage, styles.joinedImagePlaceholder]}>
                     <CalendarDays size={22} color={Palette.primary} />

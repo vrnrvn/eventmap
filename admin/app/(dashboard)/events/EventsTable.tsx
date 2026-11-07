@@ -14,19 +14,10 @@ type Event = {
 };
 
 export function EventsTable({ events }: { events: Event[] }) {
-  const [filter, setFilter] = useState('');
   const [deleted, setDeleted] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState<string | null>(null);
 
-  const filtered = events.filter(
-    (e) =>
-      !deleted.has(e.id) &&
-      (!filter ||
-        e.title.toLowerCase().includes(filter.toLowerCase()) ||
-        (Array.isArray(e.businesses) ? e.businesses[0]?.name : (e.businesses as { name: string })?.name ?? '')
-          .toLowerCase()
-          .includes(filter.toLowerCase()))
-  );
+  const filtered = events.filter((e) => !deleted.has(e.id));
 
   const getBusinessName = (e: Event) => {
     const b = e.businesses;
@@ -50,13 +41,6 @@ export function EventsTable({ events }: { events: Event[] }) {
 
   return (
     <div>
-      <input
-        type="search"
-        placeholder="Search by title or business..."
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        className="mb-4 w-full max-w-md rounded-md border border-zinc-300 px-3 py-2 text-sm"
-      />
       <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
         <table className="w-full text-sm">
           <thead className="bg-zinc-50">

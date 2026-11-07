@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import Link from 'next/link';
 import { DeletePromotionButton } from './DeletePromotionButton';
+import { Pagination, pageFromParams, pageRange } from '../Pagination';
 
 function targetType(p: {
   target_cities: string[] | null;
@@ -17,12 +18,22 @@ function targetType(p: {
   return '—';
 }
 
-export default async function PromotionsPage() {
+export default async function PromotionsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const params = await searchParams;
+  const page = pageFromParams(params.page);
+  const [from, to] = pageRange(page);
+
   const supabase = await createClient();
-  const { data: promotions } = await supabase
+  const { data: promotions, count } = await supabase
     .from('promotional_notifications')
-    .select('*')
-    .order('created_at', { ascending: false });
+    .select('*', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .order('id')
+    .range(from, to);
 
   return (
     <div>
@@ -84,6 +95,7 @@ export default async function PromotionsPage() {
           </tbody>
         </table>
       </div>
+      <Pagination page={page} count={count} basePath="/promotions" />
     </div>
   );
 }
