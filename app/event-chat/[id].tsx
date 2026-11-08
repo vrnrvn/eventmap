@@ -129,7 +129,7 @@ function haptic(kind: 'send' | 'press' | 'error') {
 export default function EventChatScreen() {
   const { id, messageId: targetMessageId } = useLocalSearchParams<{ id: string; messageId?: string }>();
   const insets = useSafeAreaInsets();
-  const { user, profile, sessionStale } = useAuth();
+  const { user, profile, sessionStale, sessionLoading } = useAuth();
   const sessionStaleRef = useRef(sessionStale);
   sessionStaleRef.current = sessionStale;
   const listRef = useRef<FlatList<ListRow>>(null);
@@ -1096,9 +1096,18 @@ export default function EventChatScreen() {
 
   // Messages waiting for a connection are re-sent once it's back (and right
   // after the room loads online). Their ids make a repeat harmless.
+  // Ids being auto-retried right now. The room-loaded effect and the
+  // connectivity subscription can both fire in one tick (reconnect → reload →
+  // loaded); without this a message was sent twice, which is safe on the
+  // server (client id) but flickers and can trip slow mode.
+  const autoRetryingRef = useRef<Set<string>>(new Set());
   const retryWaiting = useCallback(() => {
     if (getConnectivity() === 'offline' || offlineRoom || sessionStaleRef.current) return;
-    for (const message of messagesToAutoRetry(messagesRef.current)) void sendNow(message);
+    for (const message of messagesToAutoRetry(messagesRef.current)) {
+      if (autoRetryingRef.current.has(message.id)) continue;
+      autoRetryingRef.current.add(message.id);
+      void sendNow(message).finally(() => autoRetryingRef.current.delete(message.id));
+    }
   }, [offlineRoom, sendNow]);
   useEffect(() => {
     if (!loading && !offlineRoom && outboxRestored && !sessionStale) retryWaiting();
@@ -1176,7 +1185,12 @@ export default function EventChatScreen() {
           .slice(0, MAX_MENTION_SUGGESTIONS);
 
   const handleSend = () => {
-    if (!id || !user) return;
+    if (!id) return;
+    if (!user) {
+      // A slow start: the stored session is applied within a few seconds.
+      if (sessionLoading) showNotice('Still signing you in — try again in a moment.');
+      return;
+    }
     const body = draftRef.current.trim();
     if (!body || body.length > MAX_MESSAGE_LENGTH) return;
     if (slowRemaining > 0) {

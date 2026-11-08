@@ -75,7 +75,7 @@ export function TimeZonePicker({ visible, value, referenceDate, onSelect, onClos
         style={styles.wrap}
         pointerEvents="box-none"
       >
-        <View style={styles.sheet}>
+        <View style={styles.sheet} accessibilityViewIsModal onAccessibilityEscape={onClose}>
           <View style={styles.header}>
             <Text style={styles.title}>Time zone</Text>
             <TouchableOpacity

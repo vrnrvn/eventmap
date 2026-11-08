@@ -12,6 +12,7 @@ import {
   ChatSlowModeSeconds,
 } from '@/services/eventChat';
 import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 
 type Props = {
   eventId: string;
@@ -155,10 +156,12 @@ export function ChatModerationSheet({
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close moderation tools">
-        <Pressable
+      <View style={styles.backdrop}>
+        <ModalBackdrop onPress={onClose} label="Close moderation tools" />
+        <View
           style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, Spacing.md) }]}
-          onPress={() => {}}
+          accessibilityViewIsModal
+          onAccessibilityEscape={onClose}
         >
           <View style={styles.grabber} />
           <View style={styles.header}>
@@ -355,8 +358,8 @@ export function ChatModerationSheet({
               ))
             )}
           </ScrollView>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }

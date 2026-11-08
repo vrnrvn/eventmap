@@ -52,6 +52,7 @@ import {
   matchDatePreset,
   type DatePresetKey,
 } from '@/utils/datePresets';
+import { focusElement } from '@/utils/accessibility';
 
 /** Collapsed sheet peek, as a share of window height. */
 const SHEET_PEEK_RATIO = 0.13;
@@ -687,6 +688,15 @@ export default function DiscoverScreen() {
     [beginProgrammaticMove]
   );
 
+  // Move screen-reader focus to the preview when a pin opens it (or another
+  // pin replaces it), so VoiceOver / TalkBack users hear what was selected.
+  const floatingCardRef = useRef<View>(null);
+  const previewEventId = showFloatingCard ? activeEvent?.id ?? null : null;
+  useEffect(() => {
+    if (!previewEventId) return;
+    return focusElement(floatingCardRef.current);
+  }, [previewEventId]);
+
   const dismissFloatingCard = useCallback(() => {
     setActiveMarkerId(null);
     setShowFloatingCard(false);
@@ -878,9 +888,20 @@ export default function DiscoverScreen() {
             pointerEvents="box-none"
           >
             <TouchableOpacity
+              ref={floatingCardRef}
               style={styles.floatingCard}
               onPress={() => router.push(`/event/${activeEvent.id}` as never)}
               activeOpacity={0.9}
+              accessibilityRole="button"
+              accessibilityLabel={`${activeEvent.title}, ${activeEvent.rsvp_count} going`}
+              accessibilityHint="Opens event details"
+              // The close button is nested in this card (one VoiceOver
+              // element), so closing is also offered as an action / escape.
+              accessibilityActions={[{ name: 'dismiss', label: 'Close event preview' }]}
+              onAccessibilityAction={(e) => {
+                if (e.nativeEvent.actionName === 'dismiss') dismissFloatingCard();
+              }}
+              onAccessibilityEscape={dismissFloatingCard}
             >
               <View style={styles.floatingCardImageSection}>
                 {activeEvent.cover_image_url ? (
@@ -1071,7 +1092,10 @@ export default function DiscoverScreen() {
         presentationStyle="fullScreen"
         onRequestClose={() => setShowFilters(false)}
       >
-        <View style={[styles.filtersPage, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        <View
+          style={[styles.filtersPage, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
+          onAccessibilityEscape={() => setShowFilters(false)}
+        >
           <View style={styles.filtersPageHeader}>
             <TouchableOpacity
               onPress={() => setShowFilters(false)}

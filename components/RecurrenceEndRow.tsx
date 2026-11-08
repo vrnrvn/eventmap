@@ -75,6 +75,14 @@ export function RecurrenceEndRow({ pattern, seriesStart, onChange, variant = 'ca
         activeOpacity={0.6}
         accessibilityRole="button"
         accessibilityLabel={endDate ? `Repeats until ${label}. Change end date` : 'Set an end date for this series'}
+        // The clear button is nested in this row (one VoiceOver element).
+        accessibilityActions={endDate ? [{ name: 'clear', label: 'Remove end date' }] : undefined}
+        onAccessibilityAction={(e) => {
+          if (e.nativeEvent.actionName === 'clear') {
+            setShowPicker(false);
+            setEnd(null);
+          }
+        }}
       >
         <CalendarCheck size={18} color={Colors.primary} />
         <View style={styles.textBlock}>

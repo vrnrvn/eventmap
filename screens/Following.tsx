@@ -190,6 +190,13 @@ export default function Following() {
                 activeOpacity={0.8}
                 accessibilityRole="button"
                 accessibilityLabel={`View ${business.name}`}
+                // The Unfollow button is nested in this card (one VoiceOver element).
+                accessibilityActions={[{ name: 'unfollow', label: `Unfollow ${business.name}` }]}
+                onAccessibilityAction={(e) => {
+                  if (e.nativeEvent.actionName === 'unfollow' && unfollowingId !== business.id) {
+                    handleUnfollow(business);
+                  }
+                }}
               >
                 <View style={styles.cardBody}>
                   <View style={styles.cardTop}>

@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/Button';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { Briefcase } from '@/components/icons.generated';
+import { choiceA11y } from '@/utils/accessibility';
 
 const BUSINESS_CATEGORIES = [
   'Restaurant',
@@ -232,6 +233,7 @@ export default function BusinessOnboarding() {
                   size={80}
                   editable
                   onPress={handleLogoPick}
+                  accessibilityLabel="Add business logo"
                 />
                 <Text style={styles.logoHint}>Add a logo (optional)</Text>
               </View>
@@ -247,7 +249,7 @@ export default function BusinessOnboarding() {
               />
 
               <Text style={styles.label}>Category</Text>
-              <View style={styles.categoriesGrid}>
+              <View style={styles.categoriesGrid} accessibilityRole="radiogroup" accessibilityLabel="Category">
                 {BUSINESS_CATEGORIES.map((category) => (
                   <TouchableOpacity
                     key={category}
@@ -259,6 +261,7 @@ export default function BusinessOnboarding() {
                     onPress={() =>
                       setFormData({ ...formData, category })
                     }
+                    {...choiceA11y(formData.category === category, category)}
                   >
                     <CategoryIcon category={category} size="sm" variant="pill" />
                     <Text

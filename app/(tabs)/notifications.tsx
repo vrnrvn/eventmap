@@ -131,7 +131,12 @@ const NotificationCard = memo(function NotificationCard({
       activeOpacity={0.86}
       onPress={() => onPress(notification)}
       accessibilityRole="button"
-      accessibilityLabel={unread ? `Unread: ${notification.title}` : notification.title}
+      accessibilityLabel={`${unread ? 'Unread: ' : ''}${notification.title}. ${notification.body}`}
+      // The dismiss button is nested in this card (one VoiceOver element).
+      accessibilityActions={[{ name: 'dismiss', label: 'Dismiss notification' }]}
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === 'dismiss') onDismiss(notification.id);
+      }}
     >
       <View style={styles.cardTopRow}>
         <View style={styles.cardLeft}>

@@ -21,6 +21,7 @@ import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { useApp } from '@/contexts/AppContext';
 import { premiumService, PremiumPlan } from '@/services/premium';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { choiceA11y } from '@/utils/accessibility';
 
 const Palette = {
   gradientStart: Colors.primary,
@@ -147,13 +148,19 @@ export default function PremiumPlansScreen() {
 
         {/* ── Billing toggle ── */}
         <View style={styles.toggleRow}>
-          <View style={styles.toggle}>
+          <View style={styles.toggle} accessibilityRole="radiogroup" accessibilityLabel="Billing period">
             {(['monthly', 'yearly'] as const).map((c) => (
               <TouchableOpacity
                 key={c}
                 style={[styles.toggleBtn, billingCycle === c && styles.toggleBtnOn]}
                 onPress={() => setBillingCycle(c)}
                 activeOpacity={0.7}
+                {...choiceA11y(
+                  billingCycle === c,
+                  c === 'monthly'
+                    ? 'Monthly'
+                    : `Yearly${savingsPercent > 0 ? `, save ${savingsPercent}%` : ''}`
+                )}
               >
                 <Text
                   style={[

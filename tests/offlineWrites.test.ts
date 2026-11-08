@@ -8,6 +8,7 @@ import {
   parseQueue,
   queuedMessage,
   removeWrite,
+  shouldFlushOnTransition,
   type PendingEntry,
 } from '../utils/pendingWrites';
 import { DRAFT_MAX_AGE_MS, parseDraft, serializeDraft } from '../utils/formDraft';
@@ -41,6 +42,19 @@ describe('enqueueWrite', () => {
   it('removeWrite clears the entry for a target done directly', () => {
     const q = enqueueWrite([], save('e1', true), 1);
     expect(removeWrite(q, save('e1', false))).toEqual([]);
+  });
+});
+
+describe('shouldFlushOnTransition', () => {
+  it('replays on every step towards a working connection, and only then', () => {
+    expect(shouldFlushOnTransition('offline', 'online')).toBe(true);
+    expect(shouldFlushOnTransition('offline', 'degraded')).toBe(true);
+    expect(shouldFlushOnTransition('degraded', 'online')).toBe(true); // was missed before
+    expect(shouldFlushOnTransition('online', 'degraded')).toBe(false);
+    expect(shouldFlushOnTransition('online', 'offline')).toBe(false);
+    expect(shouldFlushOnTransition('degraded', 'offline')).toBe(false);
+    expect(shouldFlushOnTransition('online', 'online')).toBe(false);
+    expect(shouldFlushOnTransition('offline', 'offline')).toBe(false);
   });
 });
 
@@ -122,10 +136,17 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
     removeItem: async (k: string) => void store.delete(k),
   },
 }));
+let slowOnce: Promise<void> | null = null;
 const fake = (name: string) => async (id?: string) => {
   calls.push(`${name}:${id ?? ''}`);
+  if (slowOnce) {
+    const wait = slowOnce;
+    slowOnce = null;
+    await wait;
+  }
   if (failWith) throw failWith;
 };
+
 vi.mock('@/services/social', () => ({
   socialService: {
     saveEvent: fake('save'),
@@ -151,7 +172,42 @@ describe('runOrQueue', () => {
     conn.resetConnectivityForTests();
     pw.setPendingWritesUser(null);
     pw.setPendingWritesUser('u1');
+    pw.setPendingWritesSessionVerified(true);
     await pw.flushPendingWrites();
+  });
+
+  it('a direct write waits for an in-flight replay of the same target (latest intent wins)', async () => {
+    conn.setDeviceConnectivity('offline');
+    await pw.runOrQueue(save('e1', true));
+    await pw.runOrQueue(save('e2', true));
+    conn.setDeviceConnectivity('online');
+    // Make the replayed save slow so the user's tap lands while it is in flight.
+    let release: () => void = () => {};
+    slowOnce = new Promise<void>((r) => (release = r));
+    const flush = pw.flushPendingWrites();
+    await new Promise((r) => setTimeout(r, 5));
+    const direct = pw.runOrQueue(save('e1', false));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(calls).toEqual(['save:e1']); // the direct unsave has not been sent yet
+    release();
+    await flush;
+    expect(await direct).toBe('done');
+    expect(calls).toEqual(['save:e1', 'save:e2', 'unsave:e1']);
+    expect(pw.getPendingWriteCount()).toBe(0);
+  });
+
+  it('a direct write for another target does not wait for the replay', async () => {
+    conn.setDeviceConnectivity('offline');
+    await pw.runOrQueue(save('e1', true));
+    conn.setDeviceConnectivity('online');
+    let release: () => void = () => {};
+    slowOnce = new Promise<void>((r) => (release = r));
+    const flush = pw.flushPendingWrites();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(await pw.runOrQueue(save('e9', true))).toBe('done');
+    expect(calls).toEqual(['save:e1', 'save:e9']);
+    release();
+    await flush;
   });
 
   it('sends directly when online', async () => {

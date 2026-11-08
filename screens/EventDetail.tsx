@@ -40,6 +40,7 @@ import { Button } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { connectionErrorMessage } from '@/utils/networkErrors';
 import { runOrQueueWithNotice } from '@/services/pendingWrites';
+import { usePendingWrite } from '@/hooks/usePendingWrite';
 import { getConnectivity } from '@/utils/connectivity';
 import { Avatar } from '@/components/Avatar';
 import {
@@ -71,6 +72,7 @@ import {
   MessageCircle,
   Bookmark,
   BookmarkCheck,
+  CloudOff,
   Ban,
 } from '@/components/icons.generated';
 import {
@@ -131,7 +133,9 @@ export default function EventDetail() {
   // Times render in the viewer's own zone; say which one.
   const viewerTz = useMemo(() => getDeviceTimeZone(), []);
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { user, isBanned } = useAuth();
+  const { user, isBanned, sessionLoading } = useAuth();
+  // A save / unsave queued offline for this event: shown on the bookmark.
+  const pendingSave = usePendingWrite('save', id);
   const { userBusiness } = useApp();
   const queryClient = useQueryClient();
   // Joined / Saved lists are React Query caches; tell them this event changed
@@ -1027,14 +1031,20 @@ export default function EventDetail() {
                 disabled={togglingSave}
                 accessibilityRole="button"
                 accessibilityLabel={details.user_saved ? 'Remove from saved events' : 'Save event'}
-                accessibilityState={{ selected: details.user_saved }}
+                accessibilityHint={pendingSave ? "Waiting for a connection; it will sync when you're back online." : undefined}
+                accessibilityState={{ selected: details.user_saved, busy: !!pendingSave }}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 {details.user_saved ? (
-                  <BookmarkCheck size={20} color={Colors.primary} />
+                  <BookmarkCheck size={20} color={pendingSave ? Colors.text.secondary : Colors.primary} />
                 ) : (
-                  <Bookmark size={20} color={Colors.text.primary} />
+                  <Bookmark size={20} color={pendingSave ? Colors.text.secondary : Colors.text.primary} />
                 )}
+                {pendingSave ? (
+                  <View style={styles.pendingDot} importantForAccessibility="no" accessibilityElementsHidden>
+                    <CloudOff size={9} color={Colors.white} />
+                  </View>
+                ) : null}
               </TouchableOpacity>
             ) : null}
             <TouchableOpacity
@@ -1439,7 +1449,25 @@ export default function EventDetail() {
             onPress={() => router.push(`/business/${business.id}` as never)}
             activeOpacity={0.85}
             accessibilityRole="button"
-            accessibilityLabel={`View business ${business.name}`}
+            accessibilityLabel={`View business ${business.name}${
+              user && !isOwner && details.user_following_business ? ', following' : ''
+            }`}
+            // The Follow chip is nested in this row (one VoiceOver element).
+            accessibilityActions={
+              user && !isOwner
+                ? [
+                    {
+                      name: 'toggleFollow',
+                      label: details.user_following_business
+                        ? `Unfollow ${business.name}`
+                        : `Follow ${business.name}`,
+                    },
+                  ]
+                : undefined
+            }
+            onAccessibilityAction={(e) => {
+              if (e.nativeEvent.actionName === 'toggleFollow' && !togglingFollow) void handleToggleFollow();
+            }}
           >
             <Avatar imageUrl={business.logo_url} name={business.name} size={48} />
             <View style={styles.hostBusinessMeta}>
@@ -1733,6 +1761,12 @@ export default function EventDetail() {
               onPress={() => {
                 if (!user) {
                   if (eventClosed || eventFull) return;
+                  // A slow start (degraded connection): the stored session
+                  // is applied within a few seconds; don't bounce to login.
+                  if (sessionLoading) {
+                    notify.success('Still signing you in — try again in a moment.');
+                    return;
+                  }
                   // Send signed-out users to login with a return path to this event.
                   router.push({
                     pathname: '/(auth)/login',
@@ -1977,6 +2011,19 @@ const styles = StyleSheet.create({
   },
   skeletonLineShort: {
     width: '62%',
+  },
+  pendingDot: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: Colors.text.secondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: Colors.surface,
   },
   backButton: {
     padding: Spacing.sm,

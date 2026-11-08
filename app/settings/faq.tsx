@@ -180,6 +180,9 @@ export default function FAQScreen() {
                       activeOpacity={0.8}
                       onPress={() => toggle(item.id)}
                       style={styles.itemHeader}
+                      accessibilityRole="button"
+                      accessibilityLabel={item.question}
+                      accessibilityState={{ expanded: isOpen }}
                     >
                       <Text style={styles.question} numberOfLines={2}>
                         {item.question}

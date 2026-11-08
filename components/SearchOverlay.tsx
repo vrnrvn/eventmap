@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   Modal,
-  Pressable,
   Platform,
   LayoutAnimation,
   UIManager,
@@ -30,6 +29,7 @@ import {
 import { GooglePlacesAutocomplete, parseDescription } from './GooglePlacesAutocomplete';
 import type { AutocompletePrediction } from '@/services/places';
 import { RegionGrid, type RegionItem } from './RegionGrid';
+import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -170,14 +170,15 @@ export function SearchOverlay({
       transparent
       onRequestClose={handleClose}
     >
-      <Pressable style={styles.modalContainer} onPress={handleClose}>
-        <View style={styles.backdrop}>
+      <View style={styles.modalContainer}>
+        <ModalBackdrop onPress={handleClose} label="Close search">
           <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
-        </View>
+        </ModalBackdrop>
 
-        <Pressable
+        <View
           style={[styles.overlay, { paddingTop: insets.top + Spacing.md }]}
-          onPress={() => {}}
+          accessibilityViewIsModal
+          onAccessibilityEscape={handleClose}
         >
         <View style={styles.header}>
           <TouchableOpacity
@@ -354,8 +355,8 @@ export function SearchOverlay({
             <Text style={styles.searchButtonText}>Search</Text>
           </TouchableOpacity>
         </View>
-      </Pressable>
-    </Pressable>
+      </View>
+    </View>
     </Modal>
   );
 }
@@ -383,9 +384,6 @@ export function SearchBarCollapsed({ locationLabel, onPress }: SearchBarCollapse
 const styles = StyleSheet.create({
   modalContainer: {
     flex: 1,
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
   },
   overlay: {
     flex: 1,

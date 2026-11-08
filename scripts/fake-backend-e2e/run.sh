@@ -25,5 +25,5 @@ if grep -qE '127\.0\.0\.1:54321|localhost:54321|https://[a-z0-9-]+\.supabase\.co
   echo "bundle references a real backend; aborting" >&2; exit 1
 fi
 
-suites=${1:-"suiteA suiteB suiteC suiteD"}
+suites=${1:-"suiteA suiteB suiteC suiteD suiteF"}
 for s in $suites; do node "$HERE/$s.mjs" "$PWD" "$OUT/dist" ${2:-}; done

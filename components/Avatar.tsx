@@ -38,6 +38,8 @@ function getInitials(name: string): string {
 type AvatarProps = {
   imageUrl: string | null | undefined;
   name: string;
+  /** Overrides the default screen-reader label ("Change photo" / name). */
+  accessibilityLabel?: string;
   size: number;
   /** Show camera overlay — make avatar editable */
   editable?: boolean;
@@ -45,7 +47,7 @@ type AvatarProps = {
   onPress?: () => void;
 };
 
-export function Avatar({ imageUrl, name, size, editable, onPress }: AvatarProps) {
+export function Avatar({ imageUrl, name, size, editable, onPress, accessibilityLabel }: AvatarProps) {
   // Per-URL failure tracking (a newly uploaded avatar isn't blocked by a
   // previous URL's error), plus the small variant for marked uploads
   // (business logos): avatars render at 24-96 pt.
@@ -90,7 +92,13 @@ export function Avatar({ imageUrl, name, size, editable, onPress }: AvatarProps)
 
   if (editable && onPress) {
     return (
-      <TouchableOpacity activeOpacity={0.75} onPress={onPress} style={{ position: 'relative' }}>
+      <TouchableOpacity
+        activeOpacity={0.75}
+        onPress={onPress}
+        style={{ position: 'relative' }}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel ?? 'Change photo'}
+      >
         <View style={{ width: size, height: size, borderRadius, overflow: 'hidden' }}>
           {content}
         </View>
@@ -114,7 +122,12 @@ export function Avatar({ imageUrl, name, size, editable, onPress }: AvatarProps)
 
   if (onPress) {
     return (
-      <TouchableOpacity activeOpacity={0.75} onPress={onPress}>
+      <TouchableOpacity
+        activeOpacity={0.75}
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel ?? name}
+      >
         <View style={{ width: size, height: size, borderRadius, overflow: 'hidden' }}>
           {content}
         </View>

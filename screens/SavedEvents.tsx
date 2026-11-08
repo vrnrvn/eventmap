@@ -84,7 +84,7 @@ const SavedEventRow = memo(function SavedEventRow({
           event.is_recurring ? <Repeat size={12} color={Colors.text.tertiary} /> : undefined
         }
         metaLines={metaLines}
-        rightAccessory={
+        rightAction={
           <TouchableOpacity
             style={styles.bookmarkBadge}
             onPress={() => onUnsave(event)}

@@ -13,6 +13,7 @@ import {
   enqueueWrite,
   outcomeForFailure,
   parseQueue,
+  pendingKey,
   queuedMessage,
   removeWrite,
   type PendingEntry,
@@ -42,8 +43,10 @@ async function perform(w: PendingWrite): Promise<void> {
 let userId: string | null = null;
 // False while the session is unverified (stored session, refresh pending):
 // requests would wait on the refresh and then go out with the anon key, so
-// writes are queued straight away instead. Set by PendingWritesSync.
-let sessionVerified = true;
+// writes are queued straight away instead. Set by PendingWritesSync, which
+// mounts with the app; starting false means a write in the first frames of
+// a stale-session start is queued rather than sent with the anon key.
+let sessionVerified = false;
 
 export function setPendingWritesSessionVerified(verified: boolean) {
   sessionVerified = verified;
@@ -100,6 +103,13 @@ export function getPendingWrites(): readonly PendingWrite[] {
  */
 export async function runOrQueue(write: PendingWrite): Promise<'done' | 'queued'> {
   await loaded;
+  // A replay may be sending an older intent for this same target right now.
+  // Sending the new one concurrently would let whichever lands last win on
+  // the server; wait for the replay so the user's latest intent is applied
+  // after it. (Other targets are unaffected.)
+  if (flushing && queue.some((e) => pendingKey(e) === pendingKey(write))) {
+    await flushing.catch(() => {});
+  }
   const queueIt = () => {
     if (!userId) return false;
     queue = enqueueWrite(queue, write, Date.now());

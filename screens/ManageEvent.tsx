@@ -1598,7 +1598,11 @@ export default function ManageEvent() {
           style={styles.sheetWrap}
           pointerEvents="box-none"
         >
-          <View style={styles.sheet}>
+          <View
+            style={styles.sheet}
+            accessibilityViewIsModal
+            onAccessibilityEscape={() => (sendingAnnouncement ? null : setAnnounceOpen(false))}
+          >
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>Announce to attendees</Text>
               <TouchableOpacity

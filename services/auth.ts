@@ -273,6 +273,27 @@ export const authService = {
     return parseStoredSession(await storedSessionAtLaunch)?.user.id ?? null;
   },
 
+  /** The session stored when the app launched (tokens included), if any. */
+  async storedSessionAtLaunch(): Promise<Session | null> {
+    return (parseStoredSession(await storedSessionAtLaunch) as unknown as Session | null) ?? null;
+  },
+
+  /**
+   * Re-tries a refresh with a stored token pair and reports the server's
+   * answer. supabase-js's startup refresh swallows its error and removes the
+   * session for anything it does not call retryable (a 500, a 429, a proxy
+   * 4xx); this is how the app learns whether the token was actually
+   * rejected before it treats the launch as a sign-out. On success
+   * supabase-js adopts the session and fires SIGNED_IN.
+   */
+  async refreshStoredSession(stored: Session): Promise<{ session: Session | null; error: unknown }> {
+    const { data, error } = await supabase.auth.setSession({
+      access_token: stored.access_token,
+      refresh_token: stored.refresh_token,
+    });
+    return { session: data.session ?? null, error: error ?? null };
+  },
+
   onAuthStateChange(callback: (session: Session | null, event: AuthChangeEvent) => void) {
     return supabase.auth.onAuthStateChange((event, session) => {
       callback(session, event);

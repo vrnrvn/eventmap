@@ -8,6 +8,7 @@ import {
   ChatReportReason,
 } from '@/services/eventChat';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 
 export type ChatMessageActionsTarget = {
   id: string;
@@ -293,10 +294,12 @@ export function ChatMessageActionsSheet({
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close message actions">
-        <Pressable
+      <View style={styles.backdrop}>
+        <ModalBackdrop onPress={onClose} label="Close message actions" />
+        <View
           style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, Spacing.md) }]}
-          onPress={() => {}}
+          accessibilityViewIsModal
+          onAccessibilityEscape={onClose}
         >
           <View style={styles.grabber} />
           <View style={styles.previewHeader}>
@@ -320,8 +323,8 @@ export function ChatMessageActionsSheet({
           </View>
           <View style={styles.divider} />
           {confirm ? renderConfirm() : renderActions()}
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }

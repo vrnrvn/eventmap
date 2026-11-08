@@ -35,6 +35,18 @@ type Props = {
   onViewProfile: (userId: string) => void;
 };
 
+// Caps the action list so a message pasted full of URLs stays navigable.
+const MAX_LINK_ACTIONS = 5;
+
+function messageLinks(body: string, mentionNames: string[]) {
+  const out: { text: string; href: string }[] = [];
+  for (const segment of segmentBody(body, mentionNames)) {
+    if (segment.kind === 'link') out.push({ text: segment.text, href: segment.href });
+    if (out.length >= MAX_LINK_ACTIONS) break;
+  }
+  return out;
+}
+
 /** Message body with tappable URLs and highlighted @mentions. */
 const LinkifiedText = memo(function LinkifiedText({
   body,
@@ -140,6 +152,13 @@ export const ChatListRow = memo(function ChatListRow({
   }
 
   const mentionNames = Object.values(message.mention_names);
+  // Links inside the bubble are part of one VoiceOver element, so each is
+  // offered as a custom action, alongside the long-press options menu.
+  const links = messageLinks(message.body, mentionNames);
+  const a11yActions = [
+    { name: 'options', label: 'Message options' },
+    ...links.map((link, i) => ({ name: `link:${i}`, label: `Open link ${link.text}` })),
+  ];
 
   return (
     <View
@@ -187,6 +206,15 @@ export const ChatListRow = memo(function ChatListRow({
             : `${mine ? 'You' : senderName}: ${message.body}`
         }
         accessibilityHint="Long press for options"
+        accessibilityActions={a11yActions}
+        onAccessibilityAction={(e) => {
+          const name = e.nativeEvent.actionName;
+          if (name === 'options') onOpenActions(message, mine);
+          else if (name.startsWith('link:')) {
+            const link = links[Number(name.slice(5))];
+            if (link) void Linking.openURL(link.href);
+          }
+        }}
       >
         {!mine && firstOfGroup ? (
           <Text style={styles.senderName} numberOfLines={1}>

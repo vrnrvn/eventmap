@@ -6,6 +6,11 @@ import { Database } from '@/types/database';
 import { isLocalBackend } from './runtime';
 import { createTimeoutFetch } from '@/utils/timeoutFetch';
 import { reportRequestFailed, reportRequestSucceeded } from '@/utils/connectivity';
+import { SessionNotReadyError, isSignedInExpected, shouldBlockAnonRequest } from '@/utils/sessionGate';
+import { navigatorLock } from '@supabase/auth-js';
+
+/** Longer than auth-js's 30 s refresh backoff window (AUTO_REFRESH_TICK_DURATION_MS). */
+const AUTH_LOCK_WAIT_MS = 35_000;
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
@@ -44,8 +49,21 @@ export const storedSessionAtLaunch: Promise<string | null> = AsyncStorage.getIte
   () => null
 );
 
+/**
+ * While a signed-in user's session is unavailable to supabase-js (dropped or
+ * mid-refresh), data requests would go out with the anon key and come back
+ * empty under RLS. Fail them as a connection error instead (utils/sessionGate).
+ */
+const gatedFetch: typeof fetch = (input, init) => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  if (shouldBlockAnonRequest(url, init?.headers ?? (input instanceof Request ? input.headers : undefined), supabaseAnonKey)) {
+    return Promise.reject(new SessionNotReadyError());
+  }
+  return timeoutFetch(input, init);
+};
+
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
-  global: { fetch: timeoutFetch },
+  global: { fetch: gatedFetch },
   auth: {
     // Native has no localStorage; without an explicit adapter, sessions fall
     // back to memory and are lost on every app restart. AsyncStorage is
@@ -59,6 +77,20 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
     // verifier instead of raw tokens, closing the deep-link session-fixation
     // hole. AuthRedirectHandler exchanges the code explicitly.
     flowType: 'pkce',
+    // Web only (navigator.locks; native runs without a lock): a failed
+    // refresh backs off for up to 30 s while holding the auth lock. With the
+    // 5 s default wait, any other auth call (a screen reading the session)
+    // steals the lock and the refresh throws an uncaught "Lock broken by
+    // another request" AbortError. Wait out the backoff instead; a genuinely
+    // orphaned lock (dev-only Strict Mode case) recovers after this wait.
+    // supabase-js does not forward `lockAcquireTimeout`, hence the wrapper.
+    // A zero timeout (the auto-refresh tick's "skip if busy") is kept.
+    ...(Platform.OS === 'web'
+      ? {
+          lock: <R,>(name: string, acquireTimeout: number, fn: () => Promise<R>) =>
+            navigatorLock(name, acquireTimeout > 0 ? AUTH_LOCK_WAIT_MS : acquireTimeout, fn),
+        }
+      : {}),
   },
 });
 
@@ -89,5 +121,8 @@ if (Platform.OS !== 'web') {
 export async function getSessionUser(): Promise<User | null> {
   const { data, error } = await supabase.auth.getSession();
   if (error) throw error;
+  // A signed-in user whose session supabase-js dropped after an inconclusive
+  // refresh (AuthContext keeps them signed in): not "signed out", not ready.
+  if (!data.session && isSignedInExpected()) throw new SessionNotReadyError();
   return data.session?.user ?? null;
 }

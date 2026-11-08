@@ -6,7 +6,7 @@ import { flushPendingWrites, setPendingWritesSessionVerified, setPendingWritesUs
 import { queryKeys } from '@/hooks/queryKeys';
 import { getConnectivity, subscribeConnectivity } from '@/utils/connectivity';
 import { notify } from '@/utils/notify';
-import { describeWrite } from '@/utils/pendingWrites';
+import { describeWrite, shouldFlushOnTransition } from '@/utils/pendingWrites';
 
 /**
  * Replays writes queued offline (services/pendingWrites.ts) once they can
@@ -57,9 +57,9 @@ export function PendingWritesSync() {
     void flush();
     let previous = getConnectivity();
     const unsubscribe = subscribeConnectivity((status) => {
-      const wasOffline = previous === 'offline';
+      const replay = shouldFlushOnTransition(previous, status);
       previous = status;
-      if (wasOffline && status !== 'offline') void flush();
+      if (replay) void flush();
     });
     const appState = AppState.addEventListener('change', (state) => {
       if (state === 'active') void flush();

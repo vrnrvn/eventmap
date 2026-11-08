@@ -59,6 +59,7 @@ import {
   validateExtras,
   type EventExtrasDraft,
 } from '@/components/EventExtrasFields';
+import { choiceA11y } from '@/utils/accessibility';
 
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
 const MAX_EVENT_DATE = new Date();
@@ -691,6 +692,8 @@ export default function CreateScreen() {
               showsHorizontalScrollIndicator={false}
               style={styles.catScroll}
               contentContainerStyle={styles.catScrollContent}
+              accessibilityRole="radiogroup"
+              accessibilityLabel="Category"
             >
               {categories.map((c) => {
                 const selected = formData.categoryId === c.id;
@@ -702,6 +705,7 @@ export default function CreateScreen() {
                       setFormData((f) => ({ ...f, categoryId: c.id }))
                     }
                     activeOpacity={0.7}
+                    {...choiceA11y(selected, c.label)}
                   >
                     <CategoryIcon category={c.slug} size="sm" variant="pill" />
                     <Text

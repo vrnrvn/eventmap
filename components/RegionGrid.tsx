@@ -54,6 +54,8 @@ export function RegionGrid({ regions = DEFAULT_REGIONS, onSelect }: RegionGridPr
             style={styles.regionCard}
             onPress={() => onSelect(region)}
             activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel={`Search events in ${region.label}`}
           >
             <View style={styles.iconCircle}>
               <RegionIcon icon={region.icon} />

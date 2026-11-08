@@ -28,6 +28,9 @@ export function AppBannerCarousel({ banners }: AppBannerCarouselProps) {
           onPress={() => handlePress(banner)}
           activeOpacity={banner.link_url ? 0.8 : 1}
           disabled={!banner.link_url}
+          accessibilityRole={banner.link_url ? 'link' : 'text'}
+          accessibilityLabel={`${banner.title}${banner.content ? `. ${banner.content}` : ''}`}
+          accessibilityHint={banner.link_url ? 'Opens in your browser' : undefined}
         >
           {banner.image_url && !failed.has(banner.image_url) ? (
             <Image

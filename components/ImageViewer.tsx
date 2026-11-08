@@ -62,7 +62,7 @@ export function ImageViewer({ visible, images, initialIndex = 0, onClose }: Imag
       onRequestClose={onClose}
     >
       <StatusBar barStyle="light-content" />
-      <View style={styles.backdrop}>
+      <View style={styles.backdrop} onAccessibilityEscape={onClose}>
         {/* Close button */}
         <TouchableOpacity
           style={[styles.closeButton, { top: insets.top + 12 }]}

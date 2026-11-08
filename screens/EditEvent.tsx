@@ -63,6 +63,7 @@ import {
   zoneDisplayLabel,
 } from '@/utils/timezone';
 import { TimeZonePicker } from '@/components/TimeZonePicker';
+import { choiceA11y } from '@/utils/accessibility';
 
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
 const MAX_EVENT_DATE = new Date();
@@ -773,6 +774,8 @@ export default function EditEvent() {
           showsHorizontalScrollIndicator={false}
           style={styles.categoriesScroll}
           contentContainerStyle={styles.categoriesRow}
+          accessibilityRole="radiogroup"
+          accessibilityLabel="Category"
         >
           {categories.map((c) => (
             <TouchableOpacity
@@ -782,6 +785,7 @@ export default function EditEvent() {
                 formData.categoryId === c.id && styles.categoryChipSelected,
               ]}
               onPress={() => setFormData((f) => ({ ...f, categoryId: c.id }))}
+              {...choiceA11y(formData.categoryId === c.id, c.label)}
             >
               <CategoryIcon category={c.slug} size="sm" variant="pill" />
               <Text

@@ -22,9 +22,20 @@ type EventListItemProps = {
   badge?: EventListItemBadge | null;
   /** Extra inline element after the badge (e.g. unread chat pill). */
   titleAccessory?: ReactNode;
-  /** Right-side accessory: chevron, bookmark button, etc. */
+  /**
+   * Right-side decoration inside the tappable row (chevron, source tag).
+   * Must not be interactive — use `rightAction` for buttons.
+   */
   rightAccessory?: ReactNode;
-  /** Optional action row rendered under the content (e.g. Edit / Cancel). */
+  /**
+   * Right-side button (e.g. remove from saved). Rendered outside the row's
+   * tappable area so screen readers can reach it on its own.
+   */
+  rightAction?: ReactNode;
+  /**
+   * Optional action row rendered under the content (e.g. Edit / Cancel).
+   * Rendered outside the tappable area so each button stays reachable.
+   */
   actions?: ReactNode;
   /** Icon shown next to the date line; defaults to a calendar. */
   dateIcon?: ReactNode;
@@ -50,6 +61,10 @@ export { formatEventDate } from '@/utils/formatEventWhen';
  * Unified event row used by MyEvents, SavedEvents and JoinedEvents.
  * Thumbnail + title + date line, with per-screen badges, right accessory
  * (chevron / action icon) and an optional footer actions row.
+ *
+ * Accessibility: the card is a plain View. Only the content area is one
+ * button; `rightAction` and `actions` sit beside it, because on iOS a
+ * Touchable becomes a single VoiceOver element and hides nested buttons.
  */
 export function EventListItem({
   title,
@@ -59,6 +74,7 @@ export function EventListItem({
   badge,
   titleAccessory,
   rightAccessory,
+  rightAction,
   actions,
   dateIcon,
   metaLines,
@@ -70,64 +86,69 @@ export function EventListItem({
   const thumb = useImageFallback(thumbnailUrl, { thumbnail: true });
   const tone = badgeTones[badge?.tone ?? 'neutral'];
   return (
-    <TouchableOpacity
-      style={[styles.card, dimmed && styles.cardDimmed]}
-      activeOpacity={0.85}
-      onPress={onPress}
-      disabled={!onPress}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel ?? `${title}, ${dateLine}`}
-      testID={testID}
-    >
-      <View style={styles.mainRow}>
-        {thumbnailUrl && !thumb.failed ? (
-          <Image
-            source={{ uri: thumb.src ?? undefined }}
-            style={styles.thumb}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            recyclingKey={thumb.src ?? undefined}
-            transition={150}
-            onError={thumb.onError}
-          />
-        ) : (
-          <View style={[styles.thumb, styles.thumbPlaceholder]}>
-            <CalendarDays size={22} color={Colors.primary} />
-          </View>
-        )}
-        <View style={styles.body}>
-          <View style={styles.titleRow}>
-            <Text style={styles.title} numberOfLines={2}>
-              {title}
-            </Text>
-            {badge ? (
-              <View style={[styles.badge, { backgroundColor: tone.bg }]}>
-                <Text style={[styles.badgeText, { color: tone.fg }]}>{badge.label}</Text>
+    <View style={[styles.card, dimmed && styles.cardDimmed]}>
+      <View style={styles.topRow}>
+        <TouchableOpacity
+          style={[styles.pressArea, rightAction != null && styles.pressAreaWithAction]}
+          activeOpacity={0.85}
+          onPress={onPress}
+          disabled={!onPress}
+          accessibilityRole="button"
+          accessibilityLabel={accessibilityLabel ?? `${title}, ${dateLine}`}
+          testID={testID}
+        >
+          <View style={styles.mainRow}>
+            {thumbnailUrl && !thumb.failed ? (
+              <Image
+                source={{ uri: thumb.src ?? undefined }}
+                style={styles.thumb}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                recyclingKey={thumb.src ?? undefined}
+                transition={150}
+                onError={thumb.onError}
+              />
+            ) : (
+              <View style={[styles.thumb, styles.thumbPlaceholder]}>
+                <CalendarDays size={22} color={Colors.primary} />
               </View>
-            ) : null}
-            {titleAccessory}
+            )}
+            <View style={styles.body}>
+              <View style={styles.titleRow}>
+                <Text style={styles.title} numberOfLines={2}>
+                  {title}
+                </Text>
+                {badge ? (
+                  <View style={[styles.badge, { backgroundColor: tone.bg }]}>
+                    <Text style={[styles.badgeText, { color: tone.fg }]}>{badge.label}</Text>
+                  </View>
+                ) : null}
+                {titleAccessory}
+              </View>
+              {subtitle ? (
+                <Text style={styles.subtitle} numberOfLines={1}>
+                  {subtitle}
+                </Text>
+              ) : null}
+              <View style={styles.metaRow}>
+                {dateIcon ?? <CalendarDays size={12} color={Colors.text.tertiary} />}
+                <Text style={styles.metaText} numberOfLines={1}>
+                  {dateLine}
+                </Text>
+              </View>
+              {metaLines?.map((line, index) => (
+                <Text key={`${index}-${line}`} style={[styles.metaText, styles.extraMeta]} numberOfLines={1}>
+                  {line}
+                </Text>
+              ))}
+            </View>
+            {rightAccessory ? <View style={styles.right}>{rightAccessory}</View> : null}
           </View>
-          {subtitle ? (
-            <Text style={styles.subtitle} numberOfLines={1}>
-              {subtitle}
-            </Text>
-          ) : null}
-          <View style={styles.metaRow}>
-            {dateIcon ?? <CalendarDays size={12} color={Colors.text.tertiary} />}
-            <Text style={styles.metaText} numberOfLines={1}>
-              {dateLine}
-            </Text>
-          </View>
-          {metaLines?.map((line, index) => (
-            <Text key={`${index}-${line}`} style={[styles.metaText, styles.extraMeta]} numberOfLines={1}>
-              {line}
-            </Text>
-          ))}
-        </View>
-        {rightAccessory ? <View style={styles.right}>{rightAccessory}</View> : null}
+        </TouchableOpacity>
+        {rightAction ? <View style={styles.rightAction}>{rightAction}</View> : null}
       </View>
       {actions ? <View style={styles.actionsRow}>{actions}</View> : null}
-    </TouchableOpacity>
+    </View>
   );
 }
 
@@ -137,8 +158,24 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.lg,
     borderWidth: 1,
     borderColor: Colors.border.light,
+  },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pressArea: {
+    flex: 1,
     padding: Spacing.md,
     minHeight: 44,
+  },
+  pressAreaWithAction: {
+    paddingRight: 0,
+  },
+  rightAction: {
+    paddingLeft: Spacing.sm,
+    paddingRight: Spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cardDimmed: {
     opacity: 0.72,
@@ -214,8 +251,8 @@ const styles = StyleSheet.create({
   actionsRow: {
     flexDirection: 'row',
     gap: Spacing.sm + 2,
-    marginTop: Spacing.md,
-    paddingTop: Spacing.md,
+    marginHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.border.light,
   },

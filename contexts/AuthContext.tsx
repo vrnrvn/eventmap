@@ -12,6 +12,8 @@ import {
   writeProfileSnapshot,
 } from '@/services/offlineSnapshots';
 import { isRetryableError } from '@/utils/networkErrors';
+import { classifyRefreshFailure } from '@/utils/authStartup';
+import { setExpectedSignedIn } from '@/utils/sessionGate';
 import { flushPendingWrites } from '@/services/pendingWrites';
 import { getConnectivity, subscribeConnectivity } from '@/utils/connectivity';
 import { createRetryGate } from '@/utils/retryBackoff';
@@ -72,6 +74,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profileLoadedFor, setProfileLoadedFor] = useState<string | null>(null);
   const [profileError, setProfileError] = useState(false);
   const [sessionStale, setSessionStale] = useState(false);
+  // supabase-js removes its session and emits SIGNED_OUT for ANY failed
+  // refresh it does not call retryable: a 500, a 429, a proxy error — not
+  // only a rejected token (utils/authStartup.ts). Treating each of those as
+  // a sign-out deleted the user's queued writes, drafts and cache. So an
+  // unexpected SIGNED_OUT is first re-checked with the tokens we still hold
+  // (`verifyDroppedSession`); only a definitive rejection, or the user's own
+  // sign-out, clears the session and the device data.
+  //
+  // The session kept after supabase-js dropped it. supabase-js then has
+  // nothing to refresh on its own, so the stale-refresh effect re-tries
+  // with these tokens.
+  const droppedSessionRef = useRef<Session | null>(null);
+  // True while a probe is in flight: its result decides, and the SIGNED_OUT
+  // supabase-js emits for the probe's own failure is ignored.
+  const probingRef = useRef(false);
+  // True while the user's own signOut() runs: that SIGNED_OUT is real.
+  const signingOutRef = useRef(false);
   const [profileStale, setProfileStale] = useState(false);
   const [isBanned, setIsBanned] = useState(false);
   // Latest values for async callbacks (snapshot writes, reconnect retries).
@@ -79,6 +98,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   isBannedRef.current = isBanned;
   const sessionStaleRef = useRef(false);
   sessionStaleRef.current = sessionStale;
+  const sessionRef = useRef<Session | null>(null);
+  sessionRef.current = session;
+  // Data requests must not fall back to the anon key while this user is
+  // signed in (utils/sessionGate). Set synchronously with the user.
+  setExpectedSignedIn(!!user);
+
+  /** Keep `prior` as the signed-in session, unverified, after supabase-js dropped it. */
+  const keepDroppedSession = useCallback((prior: Session) => {
+    droppedSessionRef.current = prior;
+    setSession(prior);
+    setUser(prior.user);
+    setSessionStale(true);
+  }, []);
+
+  /**
+   * Re-tries the refresh with `prior`'s tokens and applies the verdict:
+   * 'verified' (supabase-js adopted the session; SIGNED_IN follows),
+   * 'rejected' (signed out, device data for that user cleared) or 'kept'
+   * (inconclusive: stay signed in on `prior`, retry later). Concurrent calls
+   * leave the running probe to decide.
+   */
+  const verifyDroppedSession = useCallback(
+    async (prior: Session): Promise<'verified' | 'rejected' | 'kept'> => {
+      if (probingRef.current) return 'kept';
+      probingRef.current = true;
+      try {
+        const { session: next, error } = await authService
+          .refreshStoredSession(prior)
+          .catch((err: unknown) => ({ session: null, error: err }));
+        if (next) {
+          droppedSessionRef.current = null;
+          setSession(next);
+          setUser(next.user);
+          setSessionStale(false);
+          return 'verified';
+        }
+        if (classifyRefreshFailure(error) === 'rejected') {
+          console.error('Stored session rejected by the server:', error);
+          droppedSessionRef.current = null;
+          setSession(null);
+          setUser(null);
+          setSessionStale(false);
+          void clearOfflineSnapshots(prior.user.id);
+          return 'rejected';
+        }
+        console.warn('Session refresh inconclusive, staying signed in on the stored session:', error);
+        keepDroppedSession(prior);
+        return 'kept';
+      } finally {
+        probingRef.current = false;
+      }
+    },
+    [keepDroppedSession]
+  );
+  // Stable handles for the mount-once effects below.
+  const verifyRef = useRef(verifyDroppedSession);
+  verifyRef.current = verifyDroppedSession;
+  const keepDroppedRef = useRef(keepDroppedSession);
+  keepDroppedRef.current = keepDroppedSession;
   // A load skipped its fetch because the session was unverified; it runs
   // once the session is verified.
   const skippedForStaleRef = useRef(false);
@@ -171,6 +249,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let settled = false;
 
     const applySession = (next: Session | null) => {
+      if (next) droppedSessionRef.current = null;
       setSession(next);
       // TOKEN_REFRESHED delivers a fresh user object for the same account
       // (~hourly). Keeping the previous object when nothing user-visible
@@ -217,13 +296,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .then(async (currentSession) => {
         settled = true;
         if (cancelled) return;
-        applySession(currentSession);
-        if (currentSession) return;
+        if (currentSession) {
+          applySession(currentSession);
+          return;
+        }
         // A session was stored but supabase-js no longer has one: its own
-        // startup refresh was rejected and it removed the session (retryable
-        // failures keep it). Treat it as a sign-out for the snapshots too.
-        const priorUserId = await authService.storedUserIdAtLaunch();
-        if (priorUserId) void clearOfflineSnapshots(priorUserId);
+        // startup refresh failed with something it does not call retryable
+        // and it removed the session. That covers a real rejection, but also
+        // a 500, a 429 or a proxy error. Re-try with the launch tokens to
+        // learn which, and only treat a definitive rejection as a sign-out.
+        const prior = await authService.storedSessionAtLaunch();
+        if (cancelled) return;
+        if (!prior) {
+          applySession(null);
+          return;
+        }
+        await verifyRef.current(prior);
       })
       .catch(async (error) => {
         settled = true;
@@ -233,6 +321,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // keeps the stored session in this case, so keep the user too.
           // If nothing is stored, state stays signed out.
           await applyStoredSession();
+          return;
+        }
+        if (classifyRefreshFailure(error) !== 'rejected') {
+          // The server answered but did not decide (a 500, a 429, an
+          // unreadable body). supabase-js may have dropped the session;
+          // fall back to the launch copy so the user stays signed in.
+          console.warn('Unable to verify session, staying signed in on the stored session:', error);
+          if (await applyStoredSession()) return;
+          const prior = await authService.storedSessionAtLaunch();
+          if (cancelled || !prior) return;
+          keepDroppedRef.current(prior);
           return;
         }
         // The server rejected the session (e.g. revoked refresh token);
@@ -257,10 +356,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // or loading flash.
     const { data: authListener } = authService.onAuthStateChange((newSession, event) => {
       if (!newSession) {
-        // Only a real sign-out clears the user. INITIAL_SESSION also
-        // arrives with null when the session couldn't be refreshed offline;
-        // the startup code above decides that case.
-        if (event === 'SIGNED_OUT') applySession(null);
+        // INITIAL_SESSION also arrives with null when the session couldn't
+        // be refreshed offline; the startup code above decides that case.
+        if (event !== 'SIGNED_OUT') return;
+        // A probe's own failure: its verdict decides.
+        if (probingRef.current) return;
+        // The user signed out, or nothing was held: a real sign-out.
+        const held = droppedSessionRef.current ?? sessionRef.current;
+        if (signingOutRef.current || !held) {
+          applySession(null);
+          return;
+        }
+        // supabase-js dropped the session after a failed refresh (its own
+        // startup refresh, the hourly one, or a second startup attempt). Find
+        // out whether the server actually rejected it before signing out.
+        void verifyRef.current(held);
         return;
       }
       applySession(newSession);
@@ -279,9 +389,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // there within 30 s). Success fires TOKEN_REFRESHED, which clears the flag.
   useEffect(() => {
     if (!sessionStale) return;
+    let busy = false;
     const tryRefresh = () => {
-      if (getConnectivity() === 'offline') return;
-      void authService.getSession().catch(() => {});
+      if (getConnectivity() === 'offline' || busy) return;
+      const dropped = droppedSessionRef.current;
+      if (!dropped) {
+        // supabase-js still holds the session: nudge its refresh.
+        void authService.getSession().catch(() => {});
+        return;
+      }
+      // supabase-js dropped it after an inconclusive error: re-try with the
+      // kept tokens. Success fires SIGNED_IN (applySession clears the ref);
+      // a definitive rejection is the real sign-out.
+      busy = true;
+      void verifyRef.current(dropped).finally(() => {
+        busy = false;
+      });
     };
     const unsubscribe = subscribeConnectivity((status) => {
       if (status !== 'offline') tryRefresh();
@@ -445,10 +568,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.error('Failed to deactivate push token:', err);
       }
     }
+    signingOutRef.current = true;
+    droppedSessionRef.current = null;
     try {
       await authService.signOut(); // never throws (handles revoke failure itself)
     } catch (err) {
       console.error('Sign-out failed:', err);
+    } finally {
+      signingOutRef.current = false;
     }
     setSession(null);
     setUser(null);

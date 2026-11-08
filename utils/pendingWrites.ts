@@ -1,4 +1,5 @@
 import type { ErrorClass } from './networkErrors';
+import type { ConnectivityStatus } from './connectivity';
 
 /**
  * Writes that can wait for a connection (docs/OFFLINE_PLAN.md §3.7): saves,
@@ -30,6 +31,20 @@ export const MAX_ATTEMPTS = 5;
 export const MAX_PENDING_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const pendingKey = (w: PendingWrite) => `${w.kind}:${w.targetId}`;
+
+/**
+ * Whether a connectivity change should replay the queue. Any step towards a
+ * working connection counts: leaving `offline` (even into `degraded`, the
+ * request layer will tell us if it fails) and `degraded` → `online`. The
+ * second case matters because writes that hit a connection error while the
+ * device looked connected are queued too; without it they waited for the
+ * next app foreground or the next offline cycle.
+ */
+export function shouldFlushOnTransition(previous: ConnectivityStatus, next: ConnectivityStatus): boolean {
+  if (previous === next) return false;
+  if (previous === 'offline') return next !== 'offline';
+  return next === 'online';
+}
 
 /** Adds `write`, replacing any earlier intent it supersedes. */
 export function enqueueWrite(queue: readonly PendingEntry[], write: PendingWrite, now: number): PendingEntry[] {

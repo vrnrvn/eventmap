@@ -61,7 +61,11 @@ export function ReportReasonSheet({
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Dismiss report" />
-      <View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, Spacing.md) }]}>
+      <View
+        style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, Spacing.md) }]}
+        accessibilityViewIsModal
+        onAccessibilityEscape={onClose}
+      >
         <View style={styles.header}>
           <Text style={styles.title}>{title}</Text>
           <Pressable

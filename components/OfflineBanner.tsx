@@ -37,7 +37,9 @@ export function OfflineBanner() {
   useEffect(() => {
     if (kind) {
       setShown(kind);
-      AccessibilityInfo.announceForAccessibility(COPY[kind]);
+      // Android's live region (below) and web's role="alert" already speak
+      // the change; announcing there too would read the banner twice.
+      if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibility(COPY[kind]);
     }
     const anim = Animated.timing(opacity, {
       toValue: kind ? 1 : 0,

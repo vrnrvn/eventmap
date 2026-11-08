@@ -15,6 +15,8 @@ import { CheckCircle, AlertCircle } from '@/components/icons.generated';
 import { alpha, Colors, Typography, Spacing, BorderRadius, Shadows } from '@/constants/theme';
 import { OFFLINE_BANNER_OFFSET, useBannerKind } from '@/components/OfflineBanner';
 import { useConnectivity } from '@/services/connectivity';
+import { useScreenReaderEnabled } from '@/hooks/useScreenReaderEnabled';
+import { announce } from '@/utils/accessibility';
 import {
   registerNotifyHost,
   type ToastPayload,
@@ -25,8 +27,25 @@ const TOAST_DURATION_MS = 3000;
 // Actionable toasts stay longer: the user has to read, decide and reach the
 // button before it disappears.
 const TOAST_ACTION_DURATION_MS = 7000;
+// With VoiceOver / TalkBack on, the message is read aloud first and the
+// action button has to be found by swiping: allow much longer (WCAG 2.2.1).
+const SCREEN_READER_DURATION_MS = 10000;
+const SCREEN_READER_ACTION_DURATION_MS = 20000;
 
-function ToastItem({ toast, onDone }: { toast: ToastPayload; onDone: (id: number) => void }) {
+function toastDuration(hasAction: boolean, screenReader: boolean) {
+  if (screenReader) return hasAction ? SCREEN_READER_ACTION_DURATION_MS : SCREEN_READER_DURATION_MS;
+  return hasAction ? TOAST_ACTION_DURATION_MS : TOAST_DURATION_MS;
+}
+
+function ToastItem({
+  toast,
+  onDone,
+  screenReader,
+}: {
+  toast: ToastPayload;
+  onDone: (id: number) => void;
+  screenReader: boolean;
+}) {
   const opacity = useRef(new Animated.Value(0)).current;
   // Guards against the auto-timeout and a tap both firing the exit animation.
   const dismissedRef = useRef(false);
@@ -41,33 +60,45 @@ function ToastItem({ toast, onDone }: { toast: ToastPayload; onDone: (id: number
 
   useEffect(() => {
     Animated.timing(opacity, { toValue: 1, duration: 180, useNativeDriver: true }).start();
-    const timer = setTimeout(
-      dismiss,
-      toast.action ? TOAST_ACTION_DURATION_MS : TOAST_DURATION_MS
-    );
+    const timer = setTimeout(dismiss, toastDuration(!!toast.action, screenReader));
     return () => clearTimeout(timer);
-  }, [opacity, dismiss, toast.action]);
+  }, [opacity, dismiss, toast.action, screenReader]);
 
   const isError = toast.kind === 'error';
+  const spoken = `${isError ? 'Error: ' : ''}${toast.message}`;
+
+  // accessibilityLiveRegion only exists on Android (and role="alert" is
+  // spoken on web), so iOS needs an explicit announcement. Announce once,
+  // on mount: re-announcing on re-renders would repeat the message.
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    announce(toast.action ? `${spoken}. ${toast.action.label} button available.` : spoken);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toast.id]);
+
   return (
     <Animated.View style={{ opacity }}>
-      <Pressable
-        style={styles.toast}
-        onPress={dismiss}
-        accessibilityRole="alert"
-        accessibilityLiveRegion="polite"
-        accessibilityHint="Tap to dismiss"
-      >
-        <View style={[styles.toastIcon, { backgroundColor: isError ? Colors.errorSoft : Colors.successSoft }]}>
-          {isError ? (
-            <AlertCircle size={18} color={Colors.error} />
-          ) : (
-            <CheckCircle size={18} color={Colors.success} />
-          )}
-        </View>
-        <Text style={styles.toastText} numberOfLines={3}>
-          {toast.message}
-        </Text>
+      {/* The action button is a sibling of the dismiss area, not a child:
+          on iOS a Pressable is a single VoiceOver element and would hide it. */}
+      <View style={styles.toast} accessibilityRole="alert" accessibilityLiveRegion="polite">
+        <Pressable
+          style={styles.toastBody}
+          onPress={dismiss}
+          accessibilityRole="button"
+          accessibilityLabel={spoken}
+          accessibilityHint="Dismisses this message"
+        >
+          <View style={[styles.toastIcon, { backgroundColor: isError ? Colors.errorSoft : Colors.successSoft }]}>
+            {isError ? (
+              <AlertCircle size={18} color={Colors.error} />
+            ) : (
+              <CheckCircle size={18} color={Colors.success} />
+            )}
+          </View>
+          <Text style={styles.toastText} numberOfLines={3}>
+            {toast.message}
+          </Text>
+        </Pressable>
         {toast.action ? (
           <TouchableOpacity
             style={styles.toastAction}
@@ -82,7 +113,7 @@ function ToastItem({ toast, onDone }: { toast: ToastPayload; onDone: (id: number
             <Text style={styles.toastActionText}>{toast.action.label}</Text>
           </TouchableOpacity>
         ) : null}
-      </Pressable>
+      </View>
     </Animated.View>
   );
 }
@@ -93,6 +124,7 @@ function ToastItem({ toast, onDone }: { toast: ToastPayload; onDone: (id: number
  */
 export function AppToast() {
   const insets = useSafeAreaInsets();
+  const screenReader = useScreenReaderEnabled();
   // Stack toasts below the connection banner rather than on top of it.
   const bannerUp = useBannerKind(useConnectivity()) !== null;
   const [toasts, setToasts] = useState<ToastPayload[]>([]);
@@ -139,14 +171,19 @@ export function AppToast() {
         ]}
       >
         {toasts.map((toast) => (
-          <ToastItem key={toast.id} toast={toast} onDone={removeToast} />
+          <ToastItem key={toast.id} toast={toast} onDone={removeToast} screenReader={screenReader} />
         ))}
       </View>
 
       {confirm ? (
         <Modal transparent animationType="fade" visible onRequestClose={() => closeConfirm(false)}>
           <View style={styles.confirmBackdrop}>
-            <View style={styles.confirmCard} accessibilityRole="alert" accessibilityViewIsModal>
+            <View
+              style={styles.confirmCard}
+              accessibilityRole="alert"
+              accessibilityViewIsModal
+              onAccessibilityEscape={() => closeConfirm(false)}
+            >
               <Text style={styles.confirmTitle}>{confirm.title}</Text>
               {confirm.message ? (
                 // Capped height so a very long message can never push the
@@ -220,6 +257,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border.light,
     ...Shadows.lg,
+  },
+  toastBody: {
+    flexShrink: 1,
+    flexGrow: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm + 2,
   },
   toastIcon: {
     width: 30,

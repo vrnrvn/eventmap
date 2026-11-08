@@ -58,7 +58,14 @@ export const DiscoverEventCard = memo(function DiscoverEventCard({
         accessibilityRole="button"
         accessibilityLabel={`${item.title}, ${dateLine}${distance ? `, ${distance}` : ''}${
           item.user_rsvp === 'going' ? ', you are going' : ''
-        }`}
+        }${item.user_saved ? ', saved' : ''}, by ${item.business_name}`}
+        // The business button below is nested in this card, which VoiceOver
+        // reads as one element; expose it as a custom action instead.
+        accessibilityHint="Opens event details"
+        accessibilityActions={[{ name: 'viewBusiness', label: `View ${item.business_name}` }]}
+        onAccessibilityAction={(e) => {
+          if (e.nativeEvent.actionName === 'viewBusiness') onBusinessPress(item.business_id);
+        }}
       >
         <EventCardCarousel
           imageUrls={item.cover_image_url ? [item.cover_image_url] : []}

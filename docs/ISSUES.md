@@ -1192,3 +1192,432 @@ No database access throughout. Methods:
 - [ ] Event creation end to end (fixed above; never exercised on web here
   because location search needs live geocoding).
 - [ ] Relative-time labels ticking after a minute (timer-based; not waited out).
+
+---
+
+# Accessibility + offline regression review — Phase 1 baseline (2026-11-07)
+
+Roadmap for this effort (6 phases): 1 offline regression baseline,
+2 offline automated coverage, 3 on-device offline pass, 4 a11y blockers,
+5 a11y major fixes + device verification, 6 a11y guardrails + minor cleanup.
+
+**Roadmap revision (2026-11-07, second review):** a Phase 0 ("land the
+existing work") was added in front, and the Phase 4 code is to be
+**re-checked, not trusted**: it was written in one session with no device
+or visual verification, so Phase 5 starts with a full re-review of every
+Phase 4 change (code review of the 25 touched files against the a11y
+guards, VoiceOver + TalkBack pass, web keyboard pass) before any new a11y
+work. Phase 5 also absorbs the color/contrast findings in the Phase 0 log
+below. Database rule unchanged: no shared-DB access, isolated scratch only.
+
+**Rule from 2026-11-07: no access to the shared database at all** (another
+dev session is working on it). Anything needing a DB goes to an isolated
+scratch environment only (`scripts/e2e-isolated-env.sh`, own `SCRATCH_DB`),
+never `supabase db reset` / migrations against the shared instance.
+
+## Phase 1 baseline results (HEAD `a5ba608`)
+- Unit / property / integration (vitest): **682 / 682 passed**, 52 files.
+- Typecheck (`tsc --noEmit`): clean.
+- Lint (`expo lint`): 0 errors, 42 warnings (style only, pre-existing).
+- Fake-backend browser E2E (`scripts/fake-backend-e2e/run.sh`, no DB):
+  **incomplete** — the run was stopped twice by session interruptions.
+  Every check reached passed (suite A1–A3: signed-in startup, persisted
+  cache within the 1 MB cap, opted-in keys only, offline restart from cache,
+  freshness note, profile offline). Suites A4+ and B–D still need a full
+  uninterrupted run (~12 min) — **open Phase 1 item**.
+
+## New findings (offline) — verified in code, not fixed
+- [ ] **Queue flush skips degraded→online recovery.**
+  `components/PendingWritesSync.tsx:59-62` flushes only when the previous
+  status was `offline`. A save/follow that hit a connection error while
+  `online`/`degraded` is queued (`services/pendingWrites.ts:119`) and then
+  waits for the next app foreground or next offline cycle. Chat
+  (`app/event-chat/[id].tsx:1106-1116`) and Auth/App retry gates
+  (`AuthContext.tsx:357`, `AppContext.tsx:143`) use "any impaired → online".
+  Fix: flush on `previous !== 'online' && status === 'online'` (or on any
+  transition into a non-offline state). → Phase 2 (test + small fix).
+- [ ] **Direct write can race an in-flight flush for the same target.**
+  `flushPendingWrites` may already be sending a queued `save on` when the
+  user's new `runOrQueue` sends `save off` directly
+  (`services/pendingWrites.ts:101-121` vs `131-159`). `removeWrite` clears
+  the queued entry but not the request in flight; the server keeps whichever
+  lands last, and the UI shows the user's latest intent. Options: await an
+  active flush in `runOrQueue`, or serialize per `kind:targetId`. → Phase 2.
+- [x] **Startup sign-out trusts supabase-js's refresh classification.** (Fixed in Phase 2, see below. Correction: a captive-portal HTML body is already treated as retryable by auth-js; the real triggers were a 500 other than 502-504, a 429, a proxy 4xx with a JSON body — and *any* such failure of the hourly refresh mid-session, not only at startup.)
+  After the stored-session fallback, a `getSession()` that resolves `null`
+  (or rejects as non-retryable) calls `applySession(null)` and
+  `clearOfflineSnapshots` (`contexts/AuthContext.tsx:217-245`), which
+  deletes the write queue, drafts, chat outboxes and cache. A captive-portal
+  200 with HTML or an unusual 5xx misread as "rejected" would sign the user
+  out and destroy unsent data. → Phase 2: fuzz `/auth/v1/token` responses in
+  the fake backend (suite D) and in a unit test of the startup path.
+- [ ] **`sessionVerified` defaults to `true`** (`services/pendingWrites.ts:46`)
+  until `PendingWritesSync`'s effect runs; a write in the first frames of a
+  stale-session start goes straight to the network instead of queueing.
+  Low impact (it then queues on the connection error). → Phase 2.
+- [ ] **Chat `retryWaiting` can fire twice for one message** (load effect +
+  connectivity subscription, `app/event-chat/[id].tsx:1099-1116`). Safe on
+  the server (client UUID + lookup after failure) but can flicker / trip
+  slow mode. → Phase 2 test; Phase 3 watch on device.
+- Correction to the review notes: profile/business retry gates *do* fire on
+  degraded→online; only the write-queue flush has the gap.
+
+## Open items from this file that feed the phases
+- Phase 2 (automated coverage): auth-js ~25 s refresh stall on a
+  connected-but-failing network (Offline/Open); anon-key requests during a
+  flaky moment; degraded cold start ignores deep-link taps for up to 6 s;
+  partial offline gate coverage (ManageEvent, Settings, review responses,
+  chat moderation); no per-item "pending" marker for queued writes.
+- Phase 3 (device): NetInfo offline detection on iOS/Android (needs a
+  dev-client / EAS rebuild); expo-image disk cache across cold starts;
+  Android embedded fonts; **event creation end to end** (was broken before
+  the 2026-11-06 pass); relative-time labels ticking; Maestro airplane-mode
+  flows (plan §7, never written).
+- **Release hazard (blocks Phase 3 builds being shipped as updates):**
+  `expo-image` + NetInfo are native; `runtimeVersion` policy `appVersion`
+  at 1.0.0 means an EAS Update to existing binaries would crash. Bump
+  `version` or move to the `fingerprint` policy before any OTA.
+- **[DB], blocked by the no-shared-DB rule:** event-create idempotency key;
+  `event_photos` unique constraint; `event_rsvp_counts` ±1 trigger. Can only
+  be prepared and validated in an isolated scratch DB, then handed to
+  whoever owns the shared DB.
+- Phase 4–6 (a11y): `docs/ISSUES.md` P3 accessibility item (line ~157) is
+  still open; the connection banner covers screen headers (also a screen-
+  reader focus-order concern — re-check in Phase 5); OfflineBanner both
+  announces and uses a live region (possible double read on Android).
+
+## Phase 4 — accessibility blockers (foundations done 2026-11-07)
+
+Client-only, no DB. Typecheck clean, 685/685 unit tests (3 new guards).
+Not yet verified with VoiceOver / TalkBack on a device (→ Phase 5 pass).
+
+**Shared foundations (new)**
+- `components/ui/ModalBackdrop.tsx` — tap-outside layer rendered as a
+  *sibling* of a sheet, never its parent.
+- `utils/accessibility.ts` — `announce()` (works on iOS, where live regions
+  don't exist), `focusElement()` (move VoiceOver/TalkBack focus to a view),
+  `choiceA11y()` (role + selected/checked state for chips and toggles).
+- `hooks/useScreenReaderEnabled.ts` — adapt timing when a screen reader runs.
+- `tests/a11yGuards.test.ts` — AST guards: (1) no touchable nested in an
+  accessible touchable unless the outer exposes `accessibilityActions` or is
+  `accessible={false}`; (2) touchables styled `*Selected/*Active/*On` must
+  expose `accessibilityState` (or `choiceA11y`). Both allowlists are empty.
+
+**Fixed — nested buttons unreachable with VoiceOver (13 places)**
+- [x] Sheets restructured (backdrop beside the sheet, sheet is
+  `accessibilityViewIsModal`): `ChatMessageActionsSheet`,
+  `ChatModerationSheet`, `SearchOverlay`.
+- [x] `EventListItem`: card is a View; content area is the button;
+  `actions` (MyEvents Edit / Notify / Insights) render outside it. New
+  `rightAction` slot for interactive right-side buttons (SavedEvents remove);
+  `rightAccessory` stays decorative.
+- [x] `AppToast`: Undo/action button is now a sibling of the dismiss area.
+- [x] Exposed as custom actions on the outer button (layout unchanged):
+  DiscoverEventCard "View business"; Discover map preview "Close" (+ iOS
+  escape gesture, focus moved to the preview when a pin opens it); chat
+  bubble "Message options" + one "Open link …" per link (max 5); notification
+  "Dismiss"; EventDetail organizer "Follow/Unfollow"; Following "Unfollow";
+  RecurrenceEndRow "Remove end date". The last four were found by the new
+  guard, not the audit.
+- [x] Notification cards now read title **and body** (the label previously
+  overrode the children, so the body was never spoken).
+
+**Fixed — toasts**
+- [x] Announced explicitly on iOS (`announce`), with "Error:" prefix and the
+  action named; Android keeps its live region (no double read).
+- [x] With a screen reader on: 10 s (plain) / 20 s (with action) instead of
+  3 s / 7 s.
+
+**Fixed — selection shown only by color**
+- [x] Category chips (Create, Edit, Business onboarding) and the
+  Monthly/Yearly toggle: `radio` role + selected state, grouped in a
+  labelled `radiogroup`. FAQ rows: button role + `expanded` state.
+- Audit correction: chat report-reason / block-duration chips already had
+  radio role + selected state.
+
+**Second pass (2026-11-07, later the same day) — Phase 4 complete in code**
+- [x] Remaining sheets brought to the same standard: `accessibilityViewIsModal`
+  on ReportReasonSheet, TimeZonePicker and the ManageEvent announce sheet
+  (they already used the sibling-backdrop pattern, so VoiceOver could still
+  land on the backdrop behind them).
+- [x] VoiceOver escape gesture (`onAccessibilityEscape`, two-finger scrub)
+  closes every modal: all five sheets, SearchOverlay, ImageViewer, the
+  Discover filters page and the confirm dialog (escape = cancel; announce
+  sheet ignores escape while sending, matching its backdrop).
+- [x] OfflineBanner double-read fixed: the explicit announcement is now
+  iOS-only; Android keeps the live region, web keeps role="alert". (Same
+  split AppToast already used.)
+- [x] Unlabeled icon-only controls labelled: Avatar's two pressable variants
+  (default "Change photo" / the person's name, overridable via a new
+  `accessibilityLabel` prop; BusinessOnboarding passes "Add business logo"),
+  RegionGrid tiles ("Search events in {region}"), AppBannerCarousel banners
+  (link role + title/content label + "Opens in your browser" hint; plain
+  text role when the banner has no link).
+- [x] Third source guard: every `<Modal>` must contain an
+  `onAccessibilityEscape` handler (empty allowlist). 686/686 tests,
+  typecheck clean, 0 lint errors.
+
+**Open / follow-ups found during Phase 4**
+- [ ] Device verification (VoiceOver + TalkBack) of every item above — the
+  sheet restructure and custom actions are code-reviewed and type-checked
+  only. Specifically check: toast announce timing vs. the OfflineBanner
+  announcement; map-preview focus delay (150 ms) on slower Android devices.
+- [~] Visual check of the layout-touching changes on web/native:
+  `EventListItem` (padding moved from card to content area/actions row),
+  toast body/action row, the three sheets and SearchOverlay. **Web done in
+  Phase 0** (see log below): all render as before. Native still open.
+- [ ] Guard limitation: it can't see touchables rendered by child components
+  (e.g. a custom component wrapping a Pressable inside a card). Extend if a
+  shared component starts doing this.
+- [ ] Phase 5 can reuse `announce` / `focusElement` for submit-time form
+  errors; `useScreenReaderEnabled` for the chat composer live-region throttle.
+
+## Phase 0 — land the existing work (2026-11-07, worktree `elm`, not committed)
+
+Everything below ran in an isolated worktree with a fresh `npm ci`. **No
+database was touched**: the only runtime check used the fake-backend
+harness (web export pointed at `127.0.0.1:9`, bundle verified to reference
+no real backend).
+
+**Baseline on the working tree (HEAD `a5ba608` + uncommitted Phase 4 work)**
+- vitest: **686 / 686 passed**, 53 files (3 new a11y guard tests included).
+- `tsc --noEmit`: clean (exit 0).
+- `expo lint`: 0 errors, 9 warnings (pre-existing `import/no-duplicates`
+  style warnings; down from 42 because the worktree has no stale lint cache).
+
+**Web visual check of the Phase 4 layout changes** (headless Chrome via
+`scripts/fake-backend-e2e/lib.mjs`, 430×932 and 320×700, zero runtime
+errors in every run):
+- [x] SavedEvents list: `EventListItem` card with the new `rightAction`
+  slot (bookmark remove) — spacing identical to the old card; 320 px fine.
+- [x] Remove → `AppToast` "Removed … from saved." with the Undo button as a
+  sibling of the dismiss area: single line, icon + text + action aligned.
+- [x] MyEvents (business user): `actions` row (Edit / Notify / Insights /
+  Cancel) renders below the content area inside the card with the divider.
+- [x] SearchOverlay: sibling backdrop + modal sheet; header, keyword field,
+  region grid and Search button unchanged.
+- [x] ChatMessageActionsSheet (long-press a bubble): opens over the sibling
+  backdrop; header, Close, Copy text, Delete message rows intact.
+- [x] ChatModerationSheet (host, "Manage chat"): full sheet renders with
+  lock toggle, slow-mode radio chips and the three sections.
+- Harness note for Phase 2/5: RN-web long press needs `mouseMoved` →
+  `mousePressed` (buttons:1) → ≥1.5 s → `mouseReleased`; a 900 ms press
+  without the move does nothing. Realtime shows "Connecting to chat…"
+  under the fake backend (no WebSocket) — expected.
+
+**Color / contrast audit of `constants/theme.ts`** (WCAG 2.x ratios,
+computed; feeds Phase 5):
+
+| Token | on canvas #F6F6F6 | on white | Verdict |
+|---|---|---|---|
+| text.primary / secondary | 12.5 / 6.2 | 13.5 / 6.7 | AA |
+| text.tertiary | 4.9 | 5.3 | AA, but 4.3 on bg.tertiary |
+| primary, secondary, error, premium, accentDark | 6.3 | 6.8 | AA; white on these fills also AA |
+| successText / warningText | 5.5 / 4.7 | 6.0 / 5.1 | AA (the safe variants) |
+| success as text/icon | 3.9 | 4.2 | fails 4.5 — used in DiscoverEventCard:217, EventInsights:61/265/379, AppToast:95 |
+| warning as icon | 2.2 | 2.4 | fails even 3:1 — StarRatingDisplay stars |
+| text.disabled | 2.5 | 2.7 | fails — placeholder color in ManageEvent (×3), TimeZonePicker; chevrons in SettingsRow, JoinedEvents |
+| border.light | 1.3 | 1.4 | fails 3:1 as the only input boundary |
+| primaryLight / accent / secondaryLight | 2.4 / 2.0 / 1.4 | — | decorative only; must never carry text |
+| white on success / warning fills | 4.2 / 2.4 | — | success large-text only; warning never |
+
+Other measured facts: 335 `accessibilityLabel` vs 277 touchables (was
+57 / 232 at the P3 audit); 112 `hitSlop`; **0** `allowFontScaling={false}`
+/ `maxFontSizeMultiplier` (scaling fully allowed, never tested at large
+sizes); reduce-motion respected in 2 of 9 animated files
+(`BrandedSplashScreen`, notifications); 38 hard-coded hex literals in 16
+files outside the theme; `userInterfaceStyle: light` (no dark mode).
+
+**Phase 0 open**
+- [ ] Commit this work (user asked to hold the commit for now).
+- [ ] `.env.local` was copied into the worktree for the export (gitignored).
+
+## Phase 1 — offline regression baseline: complete (2026-11-07)
+
+Run as one detached job (the session monitor was stopped mid-run but the
+job itself finished): suites D 8/8, A 21/21, B 46/46, C 13/13 — **88/88**,
+no database. **Gap carried to the roadmap:** `docs/OFFLINE_PLAN.md` §8
+describes 8 suites / 145 checks including an "offline day" suite (F0-F8:
+expired token + nothing reachable, restart offline, reconnect with
+exactly-once replay, sign-out removing every key, second user isolation,
+corrupted device data). Only suites A-D exist in the repo; the F suite was
+never committed. Rebuilding it is now a Phase 2/3 item (partly covered by
+the new D3-D5 below and by A3-A6).
+
+## Phase 2 — offline automated coverage + fixes (2026-11-07, worktree `oak`, not committed)
+
+No database access: unit tests (vitest) and the fake-backend browser
+harness only. Final state: **695/695 unit tests** (3 new files), typecheck
+clean, lint 0 errors, fake-backend **107/107** (A 21, B 46, C 13, D 27).
+
+**1. Unexpected sign-out wiped queued data — fixed (highest risk).**
+- Verified in auth-js 2.98 source: `_recoverAndRefresh` and
+  `_callRefreshToken` call `_removeSession()` for any error that is not a
+  network failure or 502/503/504, and `_removeSession()` emits
+  `SIGNED_OUT`. A 500, a 429 or a proxy 4xx therefore looked exactly like a
+  revoked token. Our listener applied the sign-out and the user-id effect
+  called `clearOfflineSnapshots` → pending writes, drafts, chat outboxes and
+  the query cache gone. At startup auth-js can even fire two refreshes (both
+  seen in the harness, 0.5 s apart), so guarding one probe was not enough.
+- `utils/authStartup.ts` (new, pure): `classifyRefreshFailure(error)` →
+  `rejected` (GoTrue 4xx / known codes such as `invalid_grant`,
+  `refresh_token_not_found`, `user_banned`) or `inconclusive` (network,
+  5xx, 429, 408, unparsable body, unknown shapes). Fuzz-tested in
+  `tests/authStartup.test.ts`.
+- `services/auth.ts`: `storedSessionAtLaunch()` (tokens included) and
+  `refreshStoredSession(session)` (= `supabase.auth.setSession`, which
+  re-runs the refresh and *returns* the error instead of swallowing it).
+- `contexts/AuthContext.tsx`: `verifyDroppedSession(prior)` probes with the
+  held tokens and applies the verdict; `keepDroppedSession` keeps the user
+  signed in as `sessionStale` on a kept copy; **every** `SIGNED_OUT` that
+  is not the user's own `signOut()` (new `signingOutRef`) and not a probe's
+  own failure (`probingRef`) is routed through the probe while we hold a
+  session. Startup null-session and non-retryable paths use the same
+  helper. The stale-refresh effect re-probes on reconnect / foreground with
+  the kept tokens (supabase-js has none to refresh by then).
+- Harness: **D3** expired token + 500 on refresh → tabs shown, queue key
+  intact, 4 token calls, no runtime errors; **D4** `refresh_token_not_found`
+  → welcome, queue and query cache for that user cleared.
+
+**2. Queue flush skipped degraded → online — fixed.**
+- `shouldFlushOnTransition(prev, next)` in `utils/pendingWrites.ts`: leaving
+  `offline` to anything, or `degraded → online`. Used by
+  `PendingWritesSync`. Unit-tested (8 transitions).
+- Harness **D5**: two removes fail on a connected-but-refusing backend →
+  queued, "Weak connection" banner (degraded) → the next successful request
+  (opening an event) flips to online → both unsaves replayed with no
+  foreground event and no `online` event. 4 DELETE attempts total.
+
+**3. Direct write racing an in-flight replay — fixed.** `runOrQueue` awaits
+the running flush only when the queue holds an entry for the same
+`kind:targetId`; other targets are unaffected. Two unit tests (same target
+waits, latest intent lands last; other target proceeds).
+
+**4. `sessionVerified` defaulted to true — fixed.** Starts `false`;
+`PendingWritesSync` sets it on mount. `tests/pendingWritesDefault.test.ts`
+loads the module fresh and asserts a write before that is queued, not sent.
+
+**5. Chat `retryWaiting` double fire — fixed (code only).** `autoRetryingRef`
+set in `app/event-chat/[id].tsx` dedupes auto-retries per message id while
+a send is in flight. Component code, no unit test; → Phase 3 device watch.
+
+**Harness notes for later phases**
+- RN-web long press: `mouseMoved` → `mousePressed` (buttons: 1) → ≥ 1.5 s →
+  `mouseReleased`.
+- `h.requests` counts refused attempts too (recorded before routing).
+- Profile and notification tabs serve from the persisted cache; to force a
+  network request use an event page (`get_event_details`).
+- Scenarios that need a "used device" start from a captured
+  `h.storage()` minus `sb-127-auth-token` (see D3/D4).
+
+**Phase 2 — leftovers (all addressed in the second pass below, except where noted)**
+
+## Phase 2 — second pass: leftovers closed (2026-11-07, worktree `oak`, not committed)
+
+No database access. Final state after this pass: **700/700 unit tests**
+(58 files), typecheck clean, lint 0 errors, fake-backend **135/135**
+(A 21, B 46, C 13, D 30, F 25). Runner default now includes suite F.
+
+**Addressed**
+- [x] **Anon-key requests during a flaky moment.** `utils/sessionGate.ts`
+  (new, pure): while a user is signed in (`AuthContext` sets
+  `setExpectedSignedIn`), any `/rest/v1` request whose bearer is the anon
+  key is rejected before it leaves the device with `SessionNotReadyError`
+  (classified as a connection failure → cached data stays, normal retry /
+  reconnect applies). Auth, storage and realtime requests are never
+  blocked. `getSessionUser()` throws the same error instead of returning
+  null (29 services treated null as "signed out"; `notifications.ts`
+  returned an empty list, which would have overwritten the cache). Unit
+  tests in `tests/sessionGate.test.ts`; harness **D6** (expired token, auth
+  503 for 25 s): zero REST requests carried the anon key, cached screens
+  stayed up.
+- [x] **auth-js ~25 s refresh backoff** — root-caused, mitigated, decision
+  recorded. The backoff is inside auth-js (`_refreshAccessToken`: retries
+  with 200 ms · 2ⁿ while under its 30 s tick; attempts at 0 / 0.2 / 0.6 /
+  1.4 / 3 / 6.2 / 12.6 / 25.4 s). It cannot be shortened without bypassing
+  auth-js, and every data request waits on it. **Decision: accept the
+  bounded wait.** What is fixed around it: (a) the stale-session fallback
+  already applies at 6 s (0 s when known offline); (b) requests that fire
+  after the backoff no longer go out anon (gate above); (c) **web only:**
+  the lock auth-js holds during the backoff was being stolen by other auth
+  calls after 5 s, which made the refresh throw an uncaught *"Lock broken by
+  another request"* AbortError (seen in D6). `services/supabase.ts` now
+  passes a `lock` wrapper (`navigatorLock` with a 35 s wait; supabase-js does
+  not forward `lockAcquireTimeout`). Native has no lock, unaffected.
+- [x] **Degraded cold start: taps silently ignored.** EventDetail's Join
+  button sent a user whose session was still restoring to *login*; the chat
+  composer dropped the send. Both now show "Still signing you in — try again
+  in a moment." while `sessionLoading`. Push taps were already queued
+  (`PushNavigationGate`), no change there.
+- [x] **F suite rebuilt** (`scripts/fake-backend-e2e/suiteF.mjs`): F1 the
+  offline day (expired token + nothing reachable: Discover / Profile / Saved
+  from cache, a remove queued, restart offline keeps session and queue,
+  reconnect sends it exactly once and clears the queue, token refreshed);
+  F2 sign-out from Settings removes every device key for the user and the
+  supabase session; F3 a second user on the same device never sends the
+  first user's token and gets their own cache key.
+- [x] **Pending marker for queued writes** (plan §3.9, first instance):
+  `hooks/usePendingWrite.ts` + EventDetail's bookmark shows a small
+  cloud-off badge, muted colour, `accessibilityState.busy` and a hint
+  "Waiting for a connection; it will sync when you're back online." Other
+  controls (follow button, notification rows, chat bubbles already have
+  their clock) → Phase 5 visual pass.
+
+**Still open after this pass**
+- [ ] Throttled-network scenarios (CDP `Network.emulateNetworkConditions`)
+  and the screen-state-contract screenshots — not written; the D5/D6/F1
+  degraded paths use refused requests, not slow ones. → Phase 3 (device
+  with Network Link Conditioner gives the same answer more cheaply).
+- [ ] axe-core / Lighthouse pass in the harness → Phase 5.
+- [ ] Pending marker on the follow button and saved-list rows → Phase 5.
+- [ ] "Couldn't refresh …" background toasts can appear during a kept
+  (dropped) session while the gate rejects requests, because the
+  connection banner is not up (the gate does not count as a connection
+  failure). Low impact; consider a "Verifying your session…" state. → Phase 5.
+- [ ] Chat double-retry dedupe and the two new notices are component code
+  with no unit test → Phase 3 device watch.
+- [ ] Native (iOS/Android) never exercised for any of Phase 2: NetInfo
+  offline detection, the stale-session UI, the F1 flow. → Phase 3.
+
+## Phase 4 re-check (code review, 2026-11-07)
+
+Reviewed the Phase 4 diff for `AppToast`, `OfflineBanner`, `EventListItem`,
+the five sheets, `SearchOverlay`, `ImageViewer`, `DiscoverEventCard`, chat
+bubbles, notification cards, `Avatar`, `RegionGrid`, `AppBannerCarousel`,
+`discover.tsx` preview focus, FAQ rows and the `choiceA11y` chips, against
+the three AST guards (all passing, allowlists empty) and the web visual
+check from Phase 0.
+
+**Holds up**
+- Sheets: `accessibilityViewIsModal` + `onAccessibilityEscape` on all five
+  sheets, SearchOverlay and the ManageEvent announce sheet; ImageViewer uses
+  RN `<Modal>` (natively modal) with escape only — correct.
+- Toast: alert live region on the wrapper (Android/web), explicit
+  `announce()` on iOS only, action button a sibling of the dismiss area;
+  longer durations with a screen reader. OfflineBanner mirrors the split.
+- EventListItem: card is a View, only the content area is a button,
+  `rightAction` / `actions` outside it; padding moved without visual change
+  (Phase 0 screenshots).
+- Custom actions present where claimed (`DiscoverEventCard`, chat bubbles,
+  notification dismiss, discover preview close + focus move); notification
+  label reads title and body; Avatar / RegionGrid / banners labelled;
+  radiogroups on category chips and billing toggle; FAQ `expanded` state.
+
+**Findings to verify on device (Phase 5 opens with these)**
+- [ ] Toast: Android live region + `accessibilityLabel` on the inner
+  button — confirm the message is spoken once, not label + children.
+- [ ] Toast "Error:" prefix is in the label, so VoiceOver reads it on focus
+  too; check it is not doubled with the announcement.
+- [ ] ImageViewer has no `accessibilityViewIsModal`; fine inside `<Modal>`
+  on iOS, but confirm TalkBack focus does not escape to the page behind.
+- [ ] Map preview `focusElement` 150 ms delay on slower Android devices.
+- [ ] `choiceA11y` radio chips: TalkBack reads "selected" vs "checked"
+  wording per role — confirm the radio variant is announced sensibly in a
+  group of ~10 category chips.
+- [ ] New this turn: EventDetail bookmark `busy` state + hint; confirm
+  VoiceOver reads hint after the label and the badge is hidden
+  (`accessibilityElementsHidden` / `importantForAccessibility="no"`).
+- [ ] Web keyboard pass (focus order through sheets, Escape on every modal)
+  not done; the harness clicks, it does not tab.
+- Guard limitation unchanged: touchables rendered by child components are
+  invisible to the nesting guard.
