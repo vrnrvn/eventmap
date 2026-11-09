@@ -33,7 +33,7 @@ export function ReviewCard({ review, isOwner, onRespond, onReport, canReport }: 
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
+    return new Date(dateString).toLocaleDateString(undefined, {
       month: 'short',
       day: 'numeric',
       year: 'numeric',

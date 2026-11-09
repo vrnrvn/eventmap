@@ -13,6 +13,7 @@ import {
 } from '@/services/eventChat';
 import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
+import { a11yState } from '@/utils/accessibility';
 
 type Props = {
   eventId: string;
@@ -20,7 +21,8 @@ type Props = {
   locked: boolean;
   slowModeSeconds: number;
   onClose: () => void;
-  onNotice: (text: string) => void;
+  /** Short status under the composer; 'error' for failures. */
+  onNotice: (text: string, tone?: 'info' | 'error') => void;
   /** Persist lock / slow-mode changes; resolves after the server accepted them. */
   onUpdateSettings: (settings: { locked?: boolean; slowModeSeconds?: ChatSlowModeSeconds }) => Promise<void>;
 };
@@ -76,7 +78,7 @@ export function ChatModerationSheet({
       await onUpdateSettings(settings);
       void load();
     } catch {
-      onNotice("Couldn't update chat settings. Please try again.");
+      onNotice("Couldn't update chat settings. Please try again.", 'error');
     } finally {
       setSavingSettings(false);
     }
@@ -99,7 +101,7 @@ export function ChatModerationSheet({
       setLog(nextLog);
       setReported(nextReported);
     } catch {
-      onNotice("Couldn't load moderation details.");
+      onNotice("Couldn't load moderation details.", 'error');
     } finally {
       setLoading(false);
     }
@@ -117,7 +119,7 @@ export function ChatModerationSheet({
       onNotice(`${user.name} can post again.`);
       void load();
     } catch {
-      onNotice("Couldn't undo the block. Please try again.");
+      onNotice("Couldn't undo the block. Please try again.", 'error');
     } finally {
       setBusyUser(null);
     }
@@ -132,7 +134,7 @@ export function ChatModerationSheet({
       onNotice('Message removed.');
       void load();
     } catch {
-      onNotice("Couldn't remove the message. Please try again.");
+      onNotice("Couldn't remove the message. Please try again.", 'error');
     } finally {
       setBusyMessage(null);
     }
@@ -146,7 +148,7 @@ export function ChatModerationSheet({
       onNotice('Reports dismissed.');
       void load();
     } catch {
-      onNotice("Couldn't dismiss the reports. Please try again.");
+      onNotice("Couldn't dismiss the reports. Please try again.", 'error');
     } finally {
       setBusyMessage(null);
     }
@@ -229,7 +231,7 @@ export function ChatModerationSheet({
                           pressed && styles.pressed,
                         ]}
                         accessibilityRole="radio"
-                        accessibilityState={{ selected }}
+                        {...a11yState({ selected })}
                         accessibilityLabel={`Slow mode ${slowModeLabel(option)}`}
                       >
                         <Text style={[styles.chipText, selected && styles.chipTextSelected]}>

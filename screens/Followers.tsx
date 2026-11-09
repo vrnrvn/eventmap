@@ -74,7 +74,7 @@ export default function Followers() {
     const diffDays = Math.floor(diffMs / 86400000);
     if (diffDays < 1) return 'Today';
     if (diffDays < 7) return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
   };
 
   if (!userBusiness) {

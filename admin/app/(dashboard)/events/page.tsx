@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { EventsTable } from './EventsTable';
 import { Pagination, pageFromParams, pageRange } from '../Pagination';
-import { SearchForm, escapeLike } from '../SearchForm';
+import { SearchForm, orIlike } from '../SearchForm';
 
 export default async function EventsPage({
   searchParams,
@@ -32,7 +32,7 @@ export default async function EventsPage({
     .range(from, to);
 
   if (q) {
-    query = query.ilike('title', `%${escapeLike(q)}%`);
+    query = query.or(orIlike(['title', 'description', 'address'], q));
   }
 
   const { data: events, count } = await query;
@@ -40,7 +40,7 @@ export default async function EventsPage({
   return (
     <div>
       <h1 className="mb-6 text-2xl font-semibold text-zinc-900">Events</h1>
-      <SearchForm action="/events" placeholder="Search by title..." defaultValue={q} />
+      <SearchForm action="/events" placeholder="Search title, description or address..." defaultValue={q} />
       <EventsTable key={`${page}:${q}`} events={events ?? []} />
       <Pagination page={page} count={count} basePath="/events" query={q ? { q } : undefined} />
     </div>

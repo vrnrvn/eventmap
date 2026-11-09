@@ -1,5 +1,6 @@
 import { Alert, Platform } from 'react-native';
 import { isConnectionImpaired } from './connectivity';
+import { isConnectionError } from './networkErrors';
 
 export type ToastKind = 'success' | 'error';
 
@@ -55,6 +56,7 @@ function emitToast(kind: ToastKind, message: string, action?: ToastAction) {
   else pendingToasts.push(toast);
 }
 
+
 export const notify = {
   success(message: string) {
     emitToast('success', message);
@@ -70,8 +72,12 @@ export const notify = {
    * switch or map pan would just be noise. Use `error` for failures of
    * something the user explicitly did.
    */
-  backgroundError(message: string) {
+  backgroundError(message: string, err?: unknown) {
     if (isConnectionImpaired()) return;
+    // A request the session gate refused (signed in, session not yet
+    // verified) or a dropped connection the banner hasn't caught up with:
+    // nothing the user can act on, and the data on screen is kept.
+    if (err !== undefined && isConnectionError(err)) return;
     emitToast('error', message);
   },
   /**

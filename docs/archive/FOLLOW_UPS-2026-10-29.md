@@ -1,3 +1,8 @@
+> Archived 2026-11-08. Written 2026-10-29, before `docs/ISSUES.md` existed. Its
+> "must do before merge" items are all done (migration applied, types
+> regenerated, routes generated). The per-area notes below were NOT re-checked
+> individually — see the Low item in `docs/ISSUES.md`.
+
 # Follow-ups
 
 Concerns noticed while working on profile and attendance that were deliberately

@@ -22,6 +22,7 @@ import { useApp } from '@/contexts/AppContext';
 import { premiumService } from '@/services/premium';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import * as WebBrowser from 'expo-web-browser';
+import { a11yState } from '@/utils/accessibility';
 
 const STRIPE_PORTAL_URL = process.env.EXPO_PUBLIC_STRIPE_CUSTOMER_PORTAL_URL?.trim();
 
@@ -51,7 +52,7 @@ export default function ManageSubscriptionScreen() {
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'N/A';
-    return new Date(dateString).toLocaleDateString('en-US', {
+    return new Date(dateString).toLocaleDateString(undefined, {
       month: 'long',
       day: 'numeric',
       year: 'numeric',
@@ -155,7 +156,8 @@ export default function ManageSubscriptionScreen() {
                 { backgroundColor: statusColor + '20' },
               ]}
             >
-              <Text style={[styles.statusText, { color: statusColor }]}>
+              {/* successText (not the lighter success) keeps 12 px text ≥ 4.5:1 on the tint. */}
+              <Text style={[styles.statusText, { color: Colors.successText }]}>
                 Active
               </Text>
             </View>
@@ -217,7 +219,7 @@ export default function ManageSubscriptionScreen() {
             activeOpacity={0.7}
             accessibilityRole="button"
             accessibilityLabel="Cancel Subscription"
-            accessibilityState={{ disabled: canceling, busy: canceling }}
+            {...a11yState({ disabled: canceling, busy: canceling })}
           >
             {canceling ? (
               <ActivityIndicator color={Palette.error} />

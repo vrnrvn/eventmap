@@ -9,6 +9,64 @@ import { decode } from 'base64-arraybuffer';
 import { imageCleanupMayRun, releaseEventImages } from './storageCleanup';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { THUMBNAIL_WIDTH, markedUploadName, thumbnailOf } from '@/utils/imageThumbnails';
+import { isConnectionError } from '@/utils/networkErrors';
+import { rpcArgs } from './rpcArgs';
+
+/**
+ * Create keys whose last attempt ended without an answer (connection lost
+ * mid-request): the event may exist even though the call failed.
+ */
+const uncertainCreates = new Set<string>();
+/** Set once the server shows it doesn't know p_client_request_id (pending migration). */
+let createKeyParamUnsupported = false;
+/** How far back a retry looks for the event an uncertain attempt created. */
+const RECOVERY_WINDOW_MS = 30 * 60 * 1000;
+
+const isMissingFunction = (err: { code?: string } | null | undefined) =>
+  err?.code === '42883' || err?.code === 'PGRST202';
+
+export type CreateEventResult = {
+  id: string;
+  capacityApplied: boolean;
+  timezoneApplied: boolean;
+  extrasApplied: boolean;
+  /** True when a retry found the event an earlier, unanswered attempt created. */
+  recovered?: boolean;
+};
+
+export type CreateEventInput = {
+  businessId: string;
+  title: string;
+  description: string;
+  categoryId: string;
+  startDatetime: string;
+  endDatetime: string;
+  lat: number;
+  lng: number;
+  address: string;
+  coverImageUrl?: string | null;
+  isRecurring?: boolean;
+  recurrencePattern?: {
+    frequency: 'daily' | 'weekly' | 'monthly';
+    interval: number;
+    endDate?: string;
+  } | null;
+  /** Going-capacity cap; null/undefined = unlimited. */
+  maxAttendees?: number | null;
+  /** IANA zone the times were entered in (20261103140000). */
+  timezone?: string | null;
+  /** 'draft' keeps the event private and free until publish_event (20261103150000). */
+  publishState?: 'draft' | 'published';
+  /** Optional detail fields (20261103150000); written with a follow-up UPDATE. */
+  extras?: EventExtras;
+  /**
+   * One uuid per form session. Retrying with the same key never creates a
+   * second event: the server dedupes on it (pending
+   * 20261108100000_event_create_idempotency) and, until that is applied, a
+   * retry after a lost response first looks for the event it created.
+   */
+  requestKey?: string;
+};
 
 /** Optional detail fields a host can set (20261103150000). Empty strings mean "clear". */
 export type EventExtras = {
@@ -73,6 +131,7 @@ async function currentCover(eventId: string): Promise<string | null> {
 
 /** event_rsvp_counts missing on this backend (per session); skip the light poll. */
 let liveStatusUnavailable = false;
+let liveChannelSeq = 0;
 
 export const eventsService = {
   /**
@@ -117,13 +176,8 @@ export const eventsService = {
     eventId: string
   ): Promise<{ goingCount: number | null; status: string | null } | null> {
     if (liveStatusUnavailable) return null;
-    // The prepared event_rsvp_counts table isn't in the generated DB types yet.
-    // Bound: supabase.from reads `this` (an extracted method throws).
-    const fromUntyped = supabase.from.bind(supabase) as unknown as (
-      table: string
-    ) => ReturnType<typeof supabase.from>;
     const [counts, ev] = await Promise.all([
-      fromUntyped('event_rsvp_counts').select('going_count').eq('event_id', eventId).maybeSingle(),
+      supabase.from('event_rsvp_counts').select('going_count').eq('event_id', eventId).maybeSingle(),
       supabase.from('events').select('status').eq('id', eventId).maybeSingle(),
     ]);
     if (counts.error || ev.error) {
@@ -138,6 +192,32 @@ export const eventsService = {
       // No row yet = no RSVPs yet.
       goingCount: counts.data ? (counts.data as { going_count: number }).going_count : 0,
       status: ev.data ? ((ev.data as { status: string | null }).status ?? 'active') : null,
+    };
+  },
+
+  /**
+   * Realtime: fires whenever this event's row in event_rsvp_counts changes
+   * (20261102130000 puts the table in the publication; it is public-read, so
+   * the subscription works for any viewer). The caller refetches on each
+   * change and keeps its poll as the fallback — a subscription can silently
+   * miss changes across reconnects. Returns the unsubscribe.
+   */
+  subscribeEventLiveStatus(eventId: string, onChange: () => void): () => void {
+    if (liveStatusUnavailable) return () => {};
+    // Unique per subscriber: supabase.channel(topic) hands back an existing
+    // instance for the same topic, so two open copies of one event page would
+    // share a channel and closing either would unsubscribe both.
+    liveChannelSeq += 1;
+    const channel = supabase
+      .channel(`event-live:${eventId}:${liveChannelSeq}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'event_rsvp_counts', filter: `event_id=eq.${eventId}` },
+        () => onChange()
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel).catch(() => undefined);
     };
   },
 
@@ -174,33 +254,62 @@ export const eventsService = {
     }
   },
 
-  async createEvent(eventData: {
+  /** True when the last create with this key ended without an answer. */
+  hasUncertainCreate(requestKey: string): boolean {
+    return uncertainCreates.has(requestKey);
+  },
+
+  async createEvent(eventData: CreateEventInput): Promise<CreateEventResult> {
+    const key = eventData.requestKey;
+    if (key && uncertainCreates.has(key)) {
+      // Throws when still offline, which is the right message for the user.
+      const existingId = await this.findRecentlyCreated(eventData);
+      if (existingId) {
+        uncertainCreates.delete(key);
+        const extrasApplied = await this.applyExtras(existingId, eventData.extras);
+        return { id: existingId, capacityApplied: true, timezoneApplied: true, extrasApplied, recovered: true };
+      }
+    }
+    try {
+      const result = await this.createEventOnce(eventData);
+      if (key) uncertainCreates.delete(key);
+      return result;
+    } catch (err) {
+      if (key && isConnectionError(err)) uncertainCreates.add(key);
+      throw err;
+    }
+  },
+
+  /**
+   * The event this business created moments ago with the same title and
+   * start, if any. Used only after an attempt whose outcome is unknown.
+   */
+  async findRecentlyCreated(eventData: {
     businessId: string;
     title: string;
-    description: string;
-    categoryId: string;
     startDatetime: string;
-    endDatetime: string;
-    lat: number;
-    lng: number;
-    address: string;
-    coverImageUrl?: string | null;
-    isRecurring?: boolean;
-    recurrencePattern?: {
-      frequency: 'daily' | 'weekly' | 'monthly';
-      interval: number;
-      endDate?: string;
-    } | null;
-    /** Going-capacity cap; null/undefined = unlimited. */
-    maxAttendees?: number | null;
-    /** IANA zone the times were entered in (20261103140000). */
-    timezone?: string | null;
-    /** 'draft' keeps the event private and free until publish_event (20261103150000). */
     publishState?: 'draft' | 'published';
-    /** Optional detail fields (20261103150000); written with a follow-up UPDATE. */
-    extras?: EventExtras;
-  }): Promise<{ id: string; capacityApplied: boolean; timezoneApplied: boolean; extrasApplied: boolean }> {
-    const args = {
+  }): Promise<string | null> {
+    const { data, error } = await supabase
+      .from('events')
+      .select('id')
+      .eq('business_id', eventData.businessId)
+      .eq('title', eventData.title.trim())
+      .eq('start_datetime', eventData.startDatetime)
+      // A lost "Save as draft" must not be returned for a Publish.
+      .eq('publish_state', eventData.publishState ?? 'published')
+      .gte('created_at', new Date(Date.now() - RECOVERY_WINDOW_MS).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    return data?.[0]?.id ?? null;
+  },
+
+  async createEventOnce(eventData: CreateEventInput): Promise<CreateEventResult> {
+    // Every migration up to 20261106170000 is applied, so the RPC takes
+    // capacity, time zone and publish state in one call (the old
+    // drop-the-newest-params ladder and follow-up UPDATE are gone).
+    const args = rpcArgs('create_event_with_limit_check', {
       p_business_id: eventData.businessId,
       p_title: eventData.title,
       p_description: eventData.description,
@@ -213,96 +322,38 @@ export const eventsService = {
       p_cover_image_url: eventData.coverImageUrl || undefined,
       p_is_recurring: eventData.isRecurring ?? false,
       p_recurrence_pattern: eventData.recurrencePattern ?? null,
-    };
-    const wantsCapacity = eventData.maxAttendees != null;
-    const wantsTimezone = !!eventData.timezone;
-    const wantsDraft = eventData.publishState === 'draft';
+      p_max_attendees: eventData.maxAttendees ?? null,
+      p_timezone: eventData.timezone ?? null,
+      p_publish_state: eventData.publishState ?? 'published',
+    });
 
-    // The RPC has grown optional trailing parameters in unapplied migrations:
-    // p_max_attendees (20261103120000) and p_timezone (20261103140000).
-    // PostgREST resolves overloads by argument names, so an unknown name is
-    // reported as a missing function (PGRST202 / 42883). Try the richest
-    // shape first and drop the newest extras until one is accepted; whatever
-    // could not be sent in the create call is written with a follow-up UPDATE.
-    // Bound: supabase.rpc reads `this` (an extracted method throws).
-    const untyped = supabase.rpc.bind(supabase) as unknown as (
-      f: string,
-      a: Record<string, unknown>
-    ) => ReturnType<typeof supabase.rpc>;
-    const attempts: { args: Record<string, unknown>; capacity: boolean; timezone: boolean }[] = [];
-    if (wantsDraft) {
-      // Drafts exist only with 20261103150000; there is no older shape that
-      // can express one, so this attempt is not allowed to fall back.
-      const res = await untyped('create_event_with_limit_check', {
+    // p_client_request_id exists only once the pending idempotency migration
+    // is applied (it isn't in the generated types yet). PostgREST resolves by
+    // argument names, so an unknown name is PGRST202 and nothing ran; retry
+    // without it and remember for the session.
+    let res;
+    if (eventData.requestKey && !createKeyParamUnsupported) {
+      const withKey = supabase.rpc.bind(supabase) as unknown as (
+        f: 'create_event_with_limit_check',
+        a: typeof args & { p_client_request_id: string }
+      ) => ReturnType<typeof supabase.rpc<'create_event_with_limit_check'>>;
+      res = await withKey('create_event_with_limit_check', {
         ...args,
-        p_max_attendees: eventData.maxAttendees ?? null,
-        p_timezone: eventData.timezone ?? null,
-        p_publish_state: 'draft',
+        p_client_request_id: eventData.requestKey,
       });
-      if (res.error) {
-        if (res.error.code === '42883' || res.error.code === 'PGRST202') {
-          throw new Error('Drafts need a database update that has not been applied yet.');
-        }
-        throw res.error;
+      if (isMissingFunction(res.error)) {
+        res = await supabase.rpc('create_event_with_limit_check', args);
+        if (!isMissingFunction(res.error)) createKeyParamUnsupported = true;
       }
-      const draftId = typeof res.data === 'string' ? res.data : (res.data as { id?: string })?.id;
-      if (!draftId) throw new Error('Event was created but no ID was returned');
-      const extrasApplied = await this.applyExtras(draftId, eventData.extras);
-      return { id: draftId, capacityApplied: true, timezoneApplied: true, extrasApplied };
+    } else {
+      res = await supabase.rpc('create_event_with_limit_check', args);
     }
-    if (wantsTimezone) {
-      attempts.push({
-        args: { ...args, p_max_attendees: eventData.maxAttendees ?? null, p_timezone: eventData.timezone },
-        capacity: true,
-        timezone: true,
-      });
-    }
-    if (wantsCapacity) {
-      attempts.push({ args: { ...args, p_max_attendees: eventData.maxAttendees }, capacity: true, timezone: false });
-    }
-    attempts.push({ args, capacity: false, timezone: false });
+    if (res.error) throw res.error;
 
-    let data: unknown;
-    let capacityApplied = !wantsCapacity;
-    let timezoneApplied = !wantsTimezone;
-    for (const attempt of attempts) {
-      const res = await untyped('create_event_with_limit_check', attempt.args);
-      if (!res.error) {
-        data = res.data;
-        if (attempt.capacity) capacityApplied = true;
-        if (attempt.timezone) timezoneApplied = true;
-        break;
-      }
-      const missing = res.error.code === '42883' || res.error.code === 'PGRST202';
-      if (!missing || attempt === attempts[attempts.length - 1]) throw res.error;
-    }
-
-    const eventId = typeof data === 'string' ? data : (data as { id?: string })?.id;
+    const eventId = res.data;
     if (!eventId) throw new Error('Event was created but no ID was returned');
-
-    const followUp: Partial<Event> = {};
-    if (!capacityApplied) followUp.max_attendees = eventData.maxAttendees ?? null;
-    if (!timezoneApplied) followUp.timezone = eventData.timezone ?? null;
-    if (Object.keys(followUp).length > 0) {
-      try {
-        await this.updateEvent(eventId, followUp);
-        capacityApplied = true;
-        timezoneApplied = true;
-      } catch {
-        // The timezone column may not exist yet (unapplied migration); retry
-        // the capacity alone so at least that lands. Reported to the caller.
-        if (!capacityApplied && 'timezone' in followUp) {
-          try {
-            await this.updateEvent(eventId, { max_attendees: eventData.maxAttendees ?? null });
-            capacityApplied = true;
-          } catch {
-            // reported below
-          }
-        }
-      }
-    }
     const extrasApplied = await this.applyExtras(eventId, eventData.extras);
-    return { id: eventId, capacityApplied, timezoneApplied, extrasApplied };
+    return { id: eventId, capacityApplied: true, timezoneApplied: true, extrasApplied };
   },
 
   /**
@@ -380,15 +431,12 @@ export const eventsService = {
     const scope = opts?.scope ?? 'all';
     const nowIso = new Date().toISOString();
 
-    // `publish_state` arrives with 20261103150000. Until then the column is
-    // unknown to PostgREST (42703); the filters below are retried without it,
-    // which is harmless because no drafts can exist before the migration.
-    const build = (withPublishState: boolean) => {
+    const build = () => {
       let query = supabase.from('events').select('*').eq('business_id', businessId);
       if (scope === 'drafts') {
         return query.eq('publish_state', 'draft').order('updated_at', { ascending: false });
       }
-      if (withPublishState) query = query.eq('publish_state', 'published');
+      query = query.eq('publish_state', 'published');
       if (scope === 'upcoming') {
         query = query
           .in('status', ['active', 'postponed'])
@@ -407,11 +455,7 @@ export const eventsService = {
       return query;
     };
 
-    let res = await build(true).range(offset, offset + limit - 1);
-    if (res.error && res.error.code === '42703') {
-      if (scope === 'drafts') return [];
-      res = await build(false).range(offset, offset + limit - 1);
-    }
+    const res = await build().range(offset, offset + limit - 1);
     if (res.error) throw res.error;
     return (res.data || []) as Event[];
   },
@@ -536,8 +580,29 @@ export const eventsService = {
       image_url: imageUrl,
       sort_order: sortOrder,
     });
+    if (!error) return;
 
-    if (error) throw error;
+    // A lost response may hide a committed insert. Every upload has a unique
+    // URL, so "a row with this URL exists" means this very insert landed;
+    // reporting it as failed would make the host add the photo again and
+    // show it twice.
+    if (isConnectionError(error)) {
+      try {
+        const { data } = await supabase
+          .from('event_photos')
+          .select('id')
+          .eq('event_id', eventId)
+          .eq('image_url', imageUrl)
+          .limit(1);
+        if (data && data.length > 0) return;
+      } catch {
+        // Still offline: fall through and report the failure.
+      }
+    }
+    // The file was uploaded but never attached; free it (the server only
+    // removes files nothing references, so this is safe if the row exists).
+    releaseEventImages([imageUrl]);
+    throw error;
   },
 
   async updateEventPhotoOrder(photoId: string, sortOrder: number): Promise<void> {

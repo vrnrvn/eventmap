@@ -26,6 +26,16 @@ export function SearchForm({
   );
 }
 
+/**
+ * One ilike pattern for a PostgREST `.or()` list. Commas, parentheses and
+ * quotes are syntax there, so they become single-character wildcards
+ * (same trade-off as `*` in escapeLike).
+ */
+export function orIlike(columns: string[], value: string): string {
+  const pattern = `%${escapeLike(value).replace(/[,()"]/g, '_')}%`;
+  return columns.map((c) => `${c}.ilike.${pattern}`).join(',');
+}
+
 export function escapeLike(value: string): string {
   // PostgREST also treats `*` as a `%` wildcard in like/ilike filters and has
   // no escape for it; turn it into a single-character wildcard so a typed

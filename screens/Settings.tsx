@@ -69,6 +69,7 @@ import {
   Sparkles,
   Clock,
 } from '@/components/icons.generated';
+import { a11yState } from '@/utils/accessibility';
 
 const Palette = {
   gradientStart: Colors.primary,
@@ -797,7 +798,7 @@ export default function SettingsScreen() {
                             activeOpacity={0.7}
                             accessibilityRole="button"
                             accessibilityLabel={cat}
-                            accessibilityState={{ selected }}
+                            {...a11yState({ selected }, 'button')}
                             hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                           >
                             <CategoryIcon category={cat} size="sm" variant="pill" />
@@ -1542,7 +1543,7 @@ export default function SettingsScreen() {
                                 activeOpacity={0.7}
                                 accessibilityRole="button"
                                 accessibilityLabel={opt.label}
-                                accessibilityState={{ selected }}
+                                {...a11yState({ selected }, 'button')}
                                 hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                               >
                                 <Text

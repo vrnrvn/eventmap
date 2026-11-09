@@ -3,6 +3,7 @@ import { StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Input } from '@/components/Input';
 import { alpha, BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
 import type { AgeRestriction, EventVisibility } from '@/types/database';
+import { a11yState } from '@/utils/accessibility';
 
 export type EventExtrasDraft = {
   visibility: EventVisibility;
@@ -109,7 +110,7 @@ export function EventExtrasFields({ value, onChange, errors, disabled }: Props) 
               onPress={() => set('ageRestriction', opt.value)}
               disabled={disabled}
               accessibilityRole="radio"
-              accessibilityState={{ selected }}
+              {...a11yState({ selected })}
               accessibilityLabel={`Age: ${opt.label}`}
             >
               <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{opt.label}</Text>

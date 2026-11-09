@@ -17,7 +17,6 @@ type Business = {
 };
 
 export function BusinessesTable({ businesses }: { businesses: Business[] }) {
-  const [filter, setFilter] = useState('');
   const [tiers, setTiers] = useState<Record<string, string>>(
     Object.fromEntries(businesses.map((b) => [b.id, b.subscription_tier]))
   );
@@ -30,12 +29,6 @@ export function BusinessesTable({ businesses }: { businesses: Business[] }) {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const filtered = businesses.filter(
-    (b) =>
-      !filter ||
-      b.name.toLowerCase().includes(filter.toLowerCase()) ||
-      b.category.toLowerCase().includes(filter.toLowerCase())
-  );
 
   const handleTogglePremium = async (businessId: string) => {
     setLoading(businessId);
@@ -100,13 +93,6 @@ export function BusinessesTable({ businesses }: { businesses: Business[] }) {
 
   return (
     <div>
-      <input
-        type="search"
-        placeholder="Search by name or category..."
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        className="mb-4 w-full max-w-md rounded-md border border-zinc-300 px-3 py-2 text-sm"
-      />
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
       <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
         <table className="w-full text-sm">
@@ -121,7 +107,7 @@ export function BusinessesTable({ businesses }: { businesses: Business[] }) {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((b) => (
+            {businesses.map((b) => (
               <tr key={b.id} className="border-t border-zinc-200">
                 <td className="px-4 py-3">
                   <Link href={`/businesses/${b.id}`} className="font-medium text-zinc-900 hover:underline">

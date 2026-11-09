@@ -55,7 +55,7 @@ export function ScreenHeader({
       ) : (
         <View style={styles.backBtn} />
       )}
-      <Text style={styles.title} numberOfLines={1}>
+      <Text style={styles.title} numberOfLines={1} accessibilityRole="header">
         {title}
       </Text>
       <View style={styles.right}>{right ?? null}</View>

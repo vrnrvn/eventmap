@@ -21,6 +21,7 @@ import { notify } from '@/utils/notify';
 import { authErrorMessage } from '@/utils/authErrors';
 import { Colors, Typography, BorderRadius, Spacing, alpha } from '@/constants/theme';
 import { ArrowLeft, Mail, Lock } from '@/components/icons.generated';
+import { a11yState } from '@/utils/accessibility';
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
@@ -119,7 +120,7 @@ export default function LoginScreen() {
             <View style={styles.logoTile}>
               <Image source={require('@/assets/images/EMlogo.png')} style={[styles.logo, styles.logoTint]} resizeMode="contain" />
             </View>
-            <Text style={styles.heroTitle}>Welcome Back</Text>
+            <Text style={styles.heroTitle} accessibilityRole="header">Welcome Back</Text>
             <Text style={styles.heroSub}>Sign in to explore your city&apos;s pulse</Text>
           </View>
 
@@ -147,7 +148,7 @@ export default function LoginScreen() {
               labelAccessory={
                 <TouchableOpacity
                   onPress={() => router.push('/(auth)/forgot-password')}
-                  hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+                  style={styles.inlineLinkButton}
                   accessibilityRole="button"
                   accessibilityLabel="Forgot password"
                 >
@@ -193,7 +194,7 @@ export default function LoginScreen() {
               disabled={oauthLoading || loading}
               accessibilityRole="button"
               accessibilityLabel="Continue with Google"
-              accessibilityState={{ disabled: oauthLoading || loading, busy: oauthLoading }}
+              {...a11yState({ disabled: oauthLoading || loading, busy: oauthLoading })}
             >
               <GoogleIcon size={20} />
               <Text style={styles.googleText}>{oauthLoading ? 'Signing in...' : 'Continue with Google'}</Text>
@@ -204,8 +205,8 @@ export default function LoginScreen() {
           <View style={styles.footer}>
             <Text style={styles.footerText}>Don&apos;t have an account?</Text>
             <TouchableOpacity
-              onPress={() => router.push('/(auth)/signup')}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              onPress={() => router.replace('/(auth)/signup')}
+              style={styles.inlineLinkButton}
               accessibilityRole="button"
               accessibilityLabel="Go to sign up"
             >
@@ -264,6 +265,15 @@ const styles = StyleSheet.create({
     borderColor: alpha('#000000', 0.04),
   },
   fieldSpacing: { marginTop: Spacing.md },
+  // 44 px target on web too (hitSlop is native-only); negative margins keep
+  // the text where it was.
+  inlineLinkButton: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    marginVertical: -12,
+    marginHorizontal: -12,
+  },
   forgotText: {
     color: Colors.primary,
     fontSize: Typography.sizes.xs,

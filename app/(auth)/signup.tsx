@@ -21,6 +21,7 @@ import { GoogleIcon } from '@/components/icons/BrandIcons';
 import { oauthEnabled } from '@/services/runtime';
 import { notify } from '@/utils/notify';
 import { authErrorMessage } from '@/utils/authErrors';
+import { a11yState } from '@/utils/accessibility';
 
 export default function SignupScreen() {
   const insets = useSafeAreaInsets();
@@ -110,7 +111,7 @@ export default function SignupScreen() {
             <View style={styles.logoTile}>
               <Image source={require('@/assets/images/EMlogo.png')} style={[styles.logo, styles.logoTint]} resizeMode="contain" />
             </View>
-            <Text style={styles.heroTitle}>Create an Account</Text>
+            <Text style={styles.heroTitle} accessibilityRole="header">Create an Account</Text>
             <Text style={styles.heroSub}>Join our community and explore your city.</Text>
           </View>
 
@@ -215,7 +216,7 @@ export default function SignupScreen() {
               disabled={oauthLoading || loading}
               accessibilityRole="button"
               accessibilityLabel="Sign up with Google"
-              accessibilityState={{ disabled: oauthLoading || loading, busy: oauthLoading }}
+              {...a11yState({ disabled: oauthLoading || loading, busy: oauthLoading })}
             >
               <GoogleIcon size={20} />
               <Text style={styles.googleText}>{oauthLoading ? 'Signing up...' : 'Sign up with Google'}</Text>
@@ -226,7 +227,7 @@ export default function SignupScreen() {
           <View style={styles.footer}>
             <Text style={styles.footerText}>Already have an account?</Text>
             <TouchableOpacity
-              onPress={() => router.push('/(auth)/login')}
+              onPress={() => router.replace('/(auth)/login')}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
               accessibilityRole="button"
               accessibilityLabel="Go to log in"

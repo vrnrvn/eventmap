@@ -465,7 +465,7 @@ export default function NotificationsScreen() {
 
   const listHeader = (
     <View style={styles.editorialHeader}>
-          <Text style={styles.editorialTitle}>Notifications</Text>
+          <Text style={styles.editorialTitle} accessibilityRole="header">Notifications</Text>
           <Text style={styles.editorialSubtitle}>
             Stay in the loop with your latest event activity.
           </Text>
@@ -475,7 +475,7 @@ export default function NotificationsScreen() {
               onPress={markAllRead}
               activeOpacity={0.8}
               accessibilityRole="button"
-              accessibilityLabel={`${unreadCount} unread, mark all as read`}
+              accessibilityLabel={`Mark all read, ${unreadCount} unread`}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               <Text style={styles.readAllChipText}>
@@ -739,9 +739,9 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.xs,
     fontFamily: Typography.labelFontFamilies.semibold,
   },
-  timeRead: {
-    opacity: 0.65,
-  },
+  // Read rows used opacity 0.65 here, which took the 12 px label to 2.5:1
+  // against the card; the colour already distinguishes read rows.
+  timeRead: {},
   unreadDot: {
     width: 9,
     height: 9,
@@ -761,8 +761,13 @@ const styles = StyleSheet.create({
   },
   dismissButton: {
     alignSelf: 'flex-end',
-    marginTop: 8,
-    marginRight: 4,
+    // 16 px glyph in a 44 px target; the negative margins cancel the padding
+    // so the row layout is unchanged (hitSlop does nothing on web).
+    padding: 14,
+    marginTop: 8 - 14,
+    marginRight: 4 - 14,
+    marginBottom: -14,
+    marginLeft: -14,
   },
   emptyCard: {
     backgroundColor: Palette.card,

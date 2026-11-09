@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, LayoutAnimation, 
 import { ChevronDown, Mail } from '@/components/icons.generated';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Colors, Typography } from '@/constants/theme';
+import { a11yState } from '@/utils/accessibility';
 const subtleBorderColor = Colors.border.light;
 
 // Enable LayoutAnimation on Android
@@ -182,7 +183,7 @@ export default function FAQScreen() {
                       style={styles.itemHeader}
                       accessibilityRole="button"
                       accessibilityLabel={item.question}
-                      accessibilityState={{ expanded: isOpen }}
+                      {...a11yState({ expanded: isOpen })}
                     >
                       <Text style={styles.question} numberOfLines={2}>
                         {item.question}

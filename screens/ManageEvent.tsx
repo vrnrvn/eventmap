@@ -86,6 +86,7 @@ import {
   summarizeCapacity,
 } from '@/utils/hostEvent';
 import { alpha, BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
+import { a11yState } from '@/utils/accessibility';
 
 type Tab = 'overview' | 'attendees' | 'settings' | 'chat';
 const TABS = [
@@ -846,7 +847,7 @@ export default function ManageEvent() {
         {/* Hero */}
         <View style={styles.hero}>
           <View style={styles.heroTitleRow}>
-            <Text style={styles.heroTitle} numberOfLines={2}>
+            <Text style={styles.heroTitle} numberOfLines={2} accessibilityRole="header">
               {event.title}
             </Text>
             <View style={[styles.badge, { backgroundColor: tone.bg }]}>
@@ -891,7 +892,12 @@ export default function ManageEvent() {
               )}
             </View>
             {capacity.ratio !== null ? (
-              <View style={styles.progressTrack} accessibilityRole="progressbar">
+              <View
+                style={styles.progressTrack}
+                accessibilityRole="progressbar"
+                accessibilityLabel="Capacity used"
+                accessibilityValue={{ min: 0, max: 100, now: Math.round(capacity.ratio * 100) }}
+              >
                 <View
                   style={[
                     styles.progressFill,
@@ -1323,7 +1329,7 @@ export default function ManageEvent() {
                       }
                       disabled={disabled || !settingsAvailable || !hasCap}
                       accessibilityRole="radio"
-                      accessibilityState={{ selected, disabled: disabled || !hasCap }}
+                      {...a11yState({ selected, disabled: disabled || !hasCap })}
                       accessibilityLabel={`Waitlist ${mode.label}: ${mode.hint}`}
                     >
                       <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{mode.label}</Text>
@@ -1380,7 +1386,7 @@ export default function ManageEvent() {
                           onPress={() => void updateChatMode({ mode: mode.value })}
                           disabled={savingChat || !actions.canModerateChat}
                           accessibilityRole="radio"
-                          accessibilityState={{ selected, disabled: savingChat }}
+                          {...a11yState({ selected, disabled: savingChat })}
                           accessibilityLabel={`Chat ${mode.label}: ${mode.hint}`}
                         >
                           <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
@@ -1434,7 +1440,7 @@ export default function ManageEvent() {
                       }
                       disabled={savingChat || !actions.canModerateChat}
                       accessibilityRole="radio"
-                      accessibilityState={{ selected, disabled: savingChat }}
+                      {...a11yState({ selected, disabled: savingChat })}
                       accessibilityLabel={`Slow mode ${slowModeLabel(option)}`}
                     >
                       <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
@@ -1649,7 +1655,7 @@ export default function ManageEvent() {
                     onPress={() => setAnnounceAudience(opt.value)}
                     disabled={sendingAnnouncement}
                     accessibilityRole="radio"
-                    accessibilityState={{ selected }}
+                    {...a11yState({ selected })}
                     accessibilityLabel={`Audience: ${opt.label}`}
                   >
                     <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{opt.label}</Text>

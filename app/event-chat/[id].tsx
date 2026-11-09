@@ -89,6 +89,7 @@ import {
   type ChatListRowData,
   type ChatMessage,
 } from '@/components/chat/ChatMessageRow';
+import { a11yState } from '@/utils/accessibility';
 
 /** A room as kept on the device for offline reading (queryKeys.chatRoom). */
 type CachedChatRoom = {
@@ -150,6 +151,7 @@ export default function EventChatScreen() {
   const [hereCount, setHereCount] = useState(0);
   const [typingUsers, setTypingUsers] = useState<Record<string, { name: string; expiresAt: number }>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeTone, setNoticeTone] = useState<'info' | 'error'>('info');
   const [actionTarget, setActionTarget] = useState<ChatMessageActionsTarget | null>(null);
   const [postStatus, setPostStatus] = useState<ChatPostStatus | null>(null);
   const [pinnedMessage, setPinnedMessage] = useState<EventChatMessageWithSender | null>(null);
@@ -237,8 +239,9 @@ export default function EventChatScreen() {
     messagesRef.current = messages;
   }, [messages]);
 
-  const showNotice = useCallback((text: string) => {
+  const showNotice = useCallback((text: string, tone: 'info' | 'error' = 'info') => {
     setNotice(text);
+    setNoticeTone(tone);
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
     noticeTimer.current = setTimeout(() => setNotice(null), NOTICE_MS);
   }, []);
@@ -532,7 +535,7 @@ export default function EventChatScreen() {
         const status = await eventChatService.getPostStatus(id).catch(() => null);
         if (status) setPostStatus(status);
       } catch (err) {
-        showNotice(err instanceof Error ? err.message : 'Could not pin the message.');
+        showNotice(err instanceof Error ? err.message : 'Could not pin the message.', 'error');
       }
     },
     [id, pinnedId, showNotice]
@@ -726,7 +729,7 @@ export default function EventChatScreen() {
               nearBottomRef.current = false;
               flashMessage(targetMessageId);
             } else if (!found) {
-              showNotice("Couldn't find that message — it may have been removed.");
+              showNotice("Couldn't find that message — it may have been removed.", 'error');
             }
           }, 350);
         } else {
@@ -1087,7 +1090,7 @@ export default function EventChatScreen() {
           );
           void refreshDetails();
         } else {
-          showNotice("Message not sent — tap it to retry.");
+          showNotice("Message not sent — tap it to retry.", 'error');
         }
       }
     },
@@ -1245,7 +1248,7 @@ export default function EventChatScreen() {
       showNotice(nextMuted ? 'Notifications muted for this chat' : 'Notifications on for this chat');
     } catch {
       setPostStatus(postStatus);
-      showNotice("Couldn't update notifications. Please try again.");
+      showNotice("Couldn't update notifications. Please try again.", 'error');
     }
   }, [id, postStatus, showNotice]);
 
@@ -1505,7 +1508,7 @@ export default function EventChatScreen() {
     if (loading) {
       return (
         <View style={styles.centerState}>
-          <ActivityIndicator size="large" color={Colors.primary} />
+          <ActivityIndicator size="large" color={Colors.primary} accessibilityLabel="Loading chat" />
           <Text style={styles.centerText}>Loading chat…</Text>
         </View>
       );
@@ -1596,7 +1599,7 @@ export default function EventChatScreen() {
     if (loadingOlder) {
       return (
         <View style={styles.historyFooter}>
-          <ActivityIndicator size="small" color={Colors.text.tertiary} />
+          <ActivityIndicator size="small" color={Colors.text.tertiary} accessibilityLabel="Loading older messages" />
         </View>
       );
     }
@@ -1636,7 +1639,7 @@ export default function EventChatScreen() {
           <ArrowLeft size={24} color={Colors.text.primary} />
         </TouchableOpacity>
         <View style={styles.headerTextWrap}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
+          <Text style={styles.headerTitle} numberOfLines={1} accessibilityRole="header">
             {eventTitle}
           </Text>
           {subtitle ? (
@@ -1663,7 +1666,7 @@ export default function EventChatScreen() {
             onPress={() => void toggleMute()}
             accessibilityRole="button"
             accessibilityLabel={isMuted ? 'Unmute chat notifications' : 'Mute chat notifications'}
-            accessibilityState={{ selected: isMuted }}
+            {...a11yState({ selected: isMuted }, 'button')}
           >
             {isMuted ? (
               <BellOff size={20} color={Colors.text.secondary} />
@@ -1693,7 +1696,7 @@ export default function EventChatScreen() {
         </View>
       ) : canChat && !loading && connectionStatus !== 'connected' ? (
         <View style={styles.connectionBanner}>
-          <ActivityIndicator size="small" color={Colors.text.secondary} />
+          <ActivityIndicator size="small" color={Colors.text.secondary} accessibilityLabel="Connecting" />
           <Text style={styles.connectionBannerText}>
             {connectionStatus === 'connecting' ? 'Connecting to chat…' : 'Reconnecting…'}
           </Text>
@@ -1824,9 +1827,13 @@ export default function EventChatScreen() {
                   ? `The host paused your posting until ${new Date(postStatus.block_expires_at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}. You can still read along.`
                   : 'The host removed you from this chat. You can still read along.'
                 : postStatus?.is_host
-                  // Hosts get read + moderation (20261028130000/180000) but
-                  // posting still requires a 'going' RSVP, per the INSERT policy.
-                  ? "You're viewing as host — you can read and moderate, but only going attendees can post."
+                  // Hosts post in 'open' and 'announcements' (20261102120000,
+                  // 20261103160000); only 'off' stops them.
+                  ? postStatus.chat_mode === 'off'
+                    ? 'Chat is turned off for this event. Turn it back on in Manage event to post.'
+                    : "You're viewing as host — you can read and moderate."
+                  : postStatus?.chat_mode === 'announcements'
+                  ? 'Only the host can post here. You can read along.'
                   : postStatus?.locked
                   ? 'The host locked this chat. You can read, but new messages are paused.'
                   : details?.user_rsvp === 'going'
@@ -1870,6 +1877,7 @@ export default function EventChatScreen() {
             sendBlocked={slowRemaining > 0}
             statusLine={statusLine}
             statusIsNotice={!!notice}
+            statusTone={noticeTone}
             onChangeText={handleDraftChange}
             onBlur={stopTyping}
             onSend={handleSend}

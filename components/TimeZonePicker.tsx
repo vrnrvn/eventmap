@@ -21,6 +21,7 @@ import {
   zoneDisplayLabel,
   type TimeZoneOption,
 } from '@/utils/timezone';
+import { a11yState } from '@/utils/accessibility';
 
 type Props = {
   visible: boolean;
@@ -118,7 +119,7 @@ export function TimeZonePicker({ visible, value, referenceDate, onSelect, onClos
                   }}
                   activeOpacity={0.7}
                   accessibilityRole="radio"
-                  accessibilityState={{ selected }}
+                  {...a11yState({ selected })}
                   accessibilityLabel={`${item.label}${isDevice ? ', your device zone' : ''}`}
                 >
                   <View style={styles.rowText}>

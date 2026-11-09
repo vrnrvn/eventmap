@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors, Typography, BorderRadius, Spacing } from '@/constants/theme';
+import { a11yState } from '@/utils/accessibility';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive';
 export type ButtonSize = 'md' | 'lg';
@@ -95,7 +96,7 @@ export function Button({
       disabled={isDisabled}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ disabled: isDisabled, busy: loading }}
+      {...a11yState({ disabled: isDisabled, busy: loading })}
       testID={testID}
       style={({ pressed }) => [
         ...(variant === 'primary' && gradient

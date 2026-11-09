@@ -8,6 +8,9 @@
 \timing on
 BEGIN;
 SET LOCAL work_mem = '64MB';
+-- Bulk fixture RSVPs include past/closed events; bypass the join-time guard
+-- (20261103170000) for this rolled-back run.
+SELECT set_config('eventmap.allow_approval', 'true', true);
 \set heavy_user '8b000000-0000-4000-8000-000000000001'
 \set heavy_event '8c000000-0000-4000-8000-000000000001'
 \set biz '20000000-0000-4000-8000-000000000001'

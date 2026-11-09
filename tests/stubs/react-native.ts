@@ -15,3 +15,6 @@ export const Platform = {
     return spec[Platform.OS] ?? spec.default;
   },
 };
+
+/** Alert.alert is a no-op on web and never called in unit tests. */
+export const Alert = { alert: () => {} };

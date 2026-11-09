@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import type { CircleMarker, Map as LeafletMap } from 'leaflet';
 
 type MapPickerProps = {
   initialLat?: number | null;
@@ -16,8 +17,8 @@ export function MapPicker({
   height = 300,
 }: MapPickerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
-  const markerRef = useRef<any>(null);
+  const mapRef = useRef<LeafletMap | null>(null);
+  const markerRef = useRef<CircleMarker | null>(null);
   const [ready, setReady] = useState(false);
 
   const lat = initialLat ?? 13.7563;
@@ -28,12 +29,10 @@ export function MapPicker({
     if (!container) return;
 
     let cancelled = false;
-    let L: any;
-    let map: any;
-    let marker: any;
+    let map: LeafletMap | undefined;
 
     const init = async () => {
-      L = (await import('leaflet')).default;
+      const L = (await import('leaflet')).default;
       await import('leaflet/dist/leaflet.css');
       if (cancelled) return;
 
@@ -50,7 +49,7 @@ export function MapPicker({
       }).addTo(map);
 
       // Use circleMarker instead of marker - no image assets, avoids 404s in Next.js
-      marker = L.circleMarker([lat, lng], {
+      const marker = L.circleMarker([lat, lng], {
         radius: 10,
         fillColor: '#3b82f6',
         color: '#1d4ed8',
@@ -59,7 +58,7 @@ export function MapPicker({
         fillOpacity: 0.8,
       }).addTo(map);
 
-      map.on('click', (e: { latlng: { lat: number; lng: number } }) => {
+      map.on('click', (e) => {
         const { lat: newLat, lng: newLng } = e.latlng;
         marker.setLatLng([newLat, newLng]);
         onSelect(newLat, newLng);
@@ -81,6 +80,9 @@ export function MapPicker({
       mapRef.current = null;
       markerRef.current = null;
     };
+    // Mount once: later lat/lng changes move the marker (effect below), and
+    // onSelect is read at click time, so re-creating the map is never wanted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

@@ -25,6 +25,8 @@ import { Image as ExpoImage } from 'expo-image';
 import { eventsService } from '@/services/events';
 import { getEventDataVersion } from '@/utils/eventDataVersion';
 import { eventChatService } from '@/services/eventChat';
+import { eventChatAccess, type ChatAccessSettings } from '@/utils/eventChatAccess';
+import { goBackOr } from '@/utils/navigation';
 import { socialService } from '@/services/social';
 import { reviewsService, type ReviewWithProfile } from '@/services/reviews';
 import {
@@ -96,6 +98,7 @@ import {
 } from '@/utils/eventShare';
 import * as Clipboard from 'expo-clipboard';
 import { ReportReasonSheet } from '@/components/ReportReasonSheet';
+import { a11yState } from '@/utils/accessibility';
 
 
 type InitialDetails = { details: EventDetails | null; isPreview: boolean; updatedAt: number };
@@ -178,7 +181,11 @@ export default function EventDetail() {
   const [togglingFollow, setTogglingFollow] = useState(false);
 
   const isOwner = !!(userBusiness && details?.event.business_id === userBusiness.id);
-  const chatIsOpen = details?.user_rsvp === 'going' && (details?.rsvp_count ?? 0) >= 2;
+  // The host's chat settings (mode + who unlocks it); null until loaded, which
+  // falls back to the server defaults (open, unlocks at two going).
+  const [chatSettings, setChatSettings] = useState<ChatAccessSettings>(null);
+  const chatAccess = eventChatAccess(details?.user_rsvp, details?.rsvp_count ?? 0, chatSettings);
+  const chatIsOpen = chatAccess.state === 'open';
 
   const allPhotoUrls = useMemo(() => {
     if (!details) return [];
@@ -318,6 +325,24 @@ export default function EventDetail() {
     return true;
   };
 
+  // Chat mode / open policy, refreshed on focus (the host may change them).
+  // A failure keeps the last known settings (or the defaults).
+  useFocusEffect(
+    useCallback(() => {
+      if (!id || !user) return;
+      let cancelled = false;
+      eventChatService
+        .getPostStatus(id)
+        .then((status) => {
+          if (!cancelled) setChatSettings({ chat_mode: status.chat_mode, open_policy: status.open_policy });
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }, [id, user])
+  );
+
   // A one-line preview of the latest chat message for the chat-entry row.
   // Focus-driven so it also refreshes when the user comes back from the chat.
   // Same freshness rule as the details load: a return within FOCUS_FRESH_MS
@@ -370,10 +395,8 @@ export default function EventDetail() {
   // A postgres_changes subscription on `rsvps` can't replace this: realtime
   // applies the subscriber's RLS and the only rsvps SELECT policy is
   // `auth.uid() = user_id`, so it would only ever report the viewer's own
-  // RSVP. The prepared migration 20261102130000 adds a public
-  // `event_rsvp_counts` table (maintained by trigger, in the publication);
-  // once applied, subscribe to it here with filter `event_id=eq.<id>` and
-  // call refetchCount on each change, keeping the poll as fallback.
+  // RSVP. The public `event_rsvp_counts` table (20261102130000, maintained
+  // by trigger) is subscribed to below for instant updates.
   useFocusEffect(
     useCallback(() => {
       if (!id) return;
@@ -409,7 +432,13 @@ export default function EventDetail() {
         }
       };
       const timer = setInterval(refetchCount, 20000);
-      return () => clearInterval(timer);
+      // Live: a join/leave anywhere updates the count within a second; the
+      // poll stays as the fallback (missed changes across reconnects).
+      const unsubscribe = eventsService.subscribeEventLiveStatus(id, () => void refetchCount());
+      return () => {
+        clearInterval(timer);
+        unsubscribe();
+      };
     }, [id])
   );
 
@@ -876,7 +905,7 @@ export default function EventDetail() {
           <View style={styles.heroTopBar}>
             <TouchableOpacity
               style={styles.backButton}
-              onPress={() => router.back()}
+              onPress={() => goBackOr(router)}
               accessibilityRole="button"
               accessibilityLabel="Go back"
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -891,7 +920,7 @@ export default function EventDetail() {
         </View>
         <View
           accessibilityLabel="Loading event"
-          accessibilityState={{ busy: true }}
+          {...a11yState({ busy: true })}
         >
           <View style={styles.skeletonHero} />
           <View style={styles.skeletonCard}>
@@ -922,7 +951,7 @@ export default function EventDetail() {
           <View style={styles.heroTopBar}>
             <TouchableOpacity
               style={styles.backButton}
-              onPress={() => router.back()}
+              onPress={() => goBackOr(router)}
               accessibilityRole="button"
               accessibilityLabel="Go back"
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -969,7 +998,7 @@ export default function EventDetail() {
 
   const venueLat = Number.isFinite(event.lat) ? event.lat : business.lat;
   const venueLng = Number.isFinite(event.lng) ? event.lng : business.lng;
-  const canOpenEventChat = details.user_rsvp === 'going' && details.rsvp_count >= 2;
+  const canOpenEventChat = chatIsOpen;
   const hasJoinedEvent = details.user_rsvp === 'going';
   const hasRequested = details.user_rsvp === 'requested';
   const approvalMode = event.rsvp_mode === 'approval';
@@ -1015,7 +1044,7 @@ export default function EventDetail() {
         <View style={styles.heroTopBar}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => router.back()}
+            onPress={() => goBackOr(router)}
             accessibilityRole="button"
             accessibilityLabel="Go back"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -1032,7 +1061,7 @@ export default function EventDetail() {
                 accessibilityRole="button"
                 accessibilityLabel={details.user_saved ? 'Remove from saved events' : 'Save event'}
                 accessibilityHint={pendingSave ? "Waiting for a connection; it will sync when you're back online." : undefined}
-                accessibilityState={{ selected: details.user_saved, busy: !!pendingSave }}
+                {...a11yState({ selected: details.user_saved, busy: !!pendingSave }, 'button')}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
                 {details.user_saved ? (
@@ -1124,7 +1153,7 @@ export default function EventDetail() {
                 <Text style={styles.heroCategoryText}>{category.label.toUpperCase()}</Text>
               </View>
             ) : null}
-            <Text style={styles.heroTitle}>{event.title}</Text>
+            <Text style={styles.heroTitle} accessibilityRole="header">{event.title}</Text>
           </View>
         </View>
 
@@ -1378,9 +1407,11 @@ export default function EventDetail() {
               accessibilityLabel={
                 canOpenEventChat
                   ? 'Open event chat'
-                  : hasJoinedEvent
-                    ? 'Event chat, unlocks when 2 people are going'
-                    : 'Event chat, join the event to unlock'
+                  : chatAccess.state === 'off'
+                    ? 'Event chat, turned off by the host'
+                    : hasJoinedEvent
+                      ? 'Event chat, unlocks when 2 people are going'
+                      : 'Event chat, join the event to unlock'
               }
             >
               <View style={styles.chatIconWrap}>
@@ -1407,10 +1438,14 @@ export default function EventDetail() {
                   {canOpenEventChat
                     ? chatPreview
                       ? `${chatPreview.sender?.name ?? 'Someone'}: ${chatPreview.body}`
-                      : 'Chat with everyone going'
-                    : hasJoinedEvent
-                      ? 'Unlocks when 2 people are going'
-                      : 'Join the event to unlock the chat'}
+                      : chatAccess.state === 'open' && chatAccess.announcementsOnly
+                        ? 'Announcements from the host'
+                        : 'Chat with everyone going'
+                    : chatAccess.state === 'off'
+                      ? 'The host turned the chat off'
+                      : hasJoinedEvent
+                        ? 'Unlocks when 2 people are going'
+                        : 'Join the event to unlock the chat'}
                 </Text>
               </View>
               <ChevronRight
@@ -1487,7 +1522,7 @@ export default function EventDetail() {
                 activeOpacity={0.8}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 accessibilityRole="button"
-                accessibilityState={{ selected: details.user_following_business }}
+                {...a11yState({ selected: details.user_following_business }, 'button')}
                 accessibilityLabel={
                   details.user_following_business
                     ? `Unfollow ${business.name}`
@@ -1789,11 +1824,11 @@ export default function EventDetail() {
               }
               activeOpacity={0.9}
               accessibilityRole="button"
-              accessibilityState={{
+              {...a11yState({
                 disabled: user
                   ? saving || hasJoinedEvent || hasRequested || eventClosed || (eventFull && !canWaitlist)
                   : eventClosed || eventFull,
-              }}
+              })}
               accessibilityLabel={
                 canWaitlist
                   ? onWaitlist
@@ -1882,7 +1917,7 @@ export default function EventDetail() {
                   activeOpacity={0.8}
                   accessibilityRole="button"
                   accessibilityLabel={details.user_rsvp === 'interested' ? 'Remove interest' : 'Mark as interested'}
-                  accessibilityState={{ selected: details.user_rsvp === 'interested' }}
+                  {...a11yState({ selected: details.user_rsvp === 'interested' }, 'button')}
                 >
                   <Star
                     size={22}

@@ -324,7 +324,7 @@ export default function UserProfile() {
 
         <View style={styles.hero}>
           <Avatar imageUrl={profile.avatar_url} name={profile.name} size={100} />
-          <Text style={styles.name}>{profile.name}</Text>
+          <Text style={styles.name} accessibilityRole="header">{profile.name}</Text>
         </View>
 
         {(profile.bio || profile.hobbies) ? (

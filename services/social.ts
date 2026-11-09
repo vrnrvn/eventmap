@@ -41,14 +41,6 @@ export type GoingEventsScope = 'upcoming' | 'past' | 'interested' | 'requested';
 // Prepared RPC (20261106150000) found missing this session; skip retries.
 let followerCountsRpcUnavailable = false;
 
-const untypedRpc = (fn: string, args: Record<string, unknown>) =>
-  (
-    supabase.rpc as unknown as (
-      f: string,
-      a: Record<string, unknown>
-    ) => Promise<{ data: unknown; error: { message?: string; code?: string } | null }>
-  )(fn, args);
-
 export type AttendanceCounts = {
   upcoming: number;
   attended: number;
@@ -90,13 +82,13 @@ export const socialService = {
 
   /** Join the waitlist of a full event; resolves to the 1-based position. */
   async joinWaitlist(eventId: string): Promise<number> {
-    const { data, error } = await untypedRpc('join_event_waitlist', { p_event_id: eventId });
+    const { data, error } = await supabase.rpc('join_event_waitlist', { p_event_id: eventId });
     if (error) throw new RsvpError(classifyRsvpError(error), error);
     return typeof data === 'number' ? data : 0;
   },
 
   async leaveWaitlist(eventId: string): Promise<void> {
-    const { error } = await untypedRpc('leave_event_waitlist', { p_event_id: eventId });
+    const { error } = await supabase.rpc('leave_event_waitlist', { p_event_id: eventId });
     if (error) throw error;
   },
 
@@ -367,7 +359,7 @@ export const socialService = {
     // exposes just the viewer's own rows, so the fallback below can never
     // count other users' follows (it under-reports to 0/1).
     if (!followerCountsRpcUnavailable) {
-      const { data, error } = await untypedRpc('get_business_follower_counts', {
+      const { data, error } = await supabase.rpc('get_business_follower_counts', {
         p_business_ids: unique,
       });
       if (!error) {

@@ -35,6 +35,7 @@ import {
   Repeat,
   History,
 } from '@/components/icons.generated';
+import { a11yState } from '@/utils/accessibility';
 
 const PAGE_SIZE = 20;
 
@@ -192,7 +193,7 @@ export default function JoinedEvents() {
         <View
           style={styles.skeletonList}
           accessibilityLabel="Loading events"
-          accessibilityState={{ busy: true }}
+          {...a11yState({ busy: true })}
         >
           {[0, 1, 2].map((i) => (
             <View key={i} style={styles.skeletonCard}>
@@ -271,7 +272,7 @@ export default function JoinedEvents() {
           <ArrowLeft size={22} color={Colors.text.primary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Events Joined</Text>
+          <Text style={styles.headerTitle} accessibilityRole="header">Events Joined</Text>
           <Text style={styles.headerSubtitle}>{subtitle}</Text>
         </View>
         <TouchableOpacity
@@ -296,7 +297,7 @@ export default function JoinedEvents() {
               onPress={() => setScope(key)}
               activeOpacity={0.85}
               accessibilityRole="tab"
-              accessibilityState={{ selected: active }}
+              {...a11yState({ selected: active })}
               hitSlop={{ top: 6, bottom: 6 }}
             >
               <Text style={[styles.segmentText, active && styles.segmentTextActive]}>

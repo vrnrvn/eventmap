@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
 import { ChevronLeft, ChevronRight } from '@/components/icons.generated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
@@ -142,9 +142,10 @@ export const MonthGrid = memo(function MonthGrid({
                     onPress={() => onSelectDay(cell.dayKey)}
                     activeOpacity={0.7}
                     accessibilityRole="button"
-                    accessibilityLabel={cellLabel(cell, count, locale)}
-                    accessibilityState={{ selected }}
-                    aria-selected={selected}
+                    // aria-selected is invalid on a button; on web the state
+                    // goes into the label instead (native keeps the state).
+                    accessibilityLabel={`${cellLabel(cell, count, locale)}${Platform.OS === 'web' && selected ? ', selected' : ''}`}
+                    accessibilityState={Platform.OS === 'web' ? undefined : { selected }}
                   >
                     <View style={[styles.dayCircle, selected && styles.daySelected, cell.isToday && !selected && styles.dayToday]}>
                       <Text

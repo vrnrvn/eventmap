@@ -30,6 +30,42 @@ export function focusElement(target: Component | null | undefined, delayMs = FOC
 }
 
 /**
+ * Accessibility state that reaches every platform.
+ *
+ * react-native-web (0.19+) drops `accessibilityState` entirely: only the
+ * `aria-*` props reach the DOM. React Native (0.73+) maps those same props
+ * into the native state, so emitting both keeps one call site per control.
+ * Spread the result: `{...a11yState({ selected })}`.
+ */
+export type A11yState = {
+  selected?: boolean;
+  checked?: boolean | 'mixed';
+  disabled?: boolean;
+  expanded?: boolean;
+  busy?: boolean;
+};
+
+export function a11yState(state: A11yState, role?: 'button') {
+  return {
+    accessibilityState: state,
+    // On a plain button "selected" means a toggle: aria-selected is not
+    // allowed there, aria-pressed is (native has no pressed state and keeps
+    // reading `selected`).
+    ...(state.selected !== undefined
+      ? role === 'button'
+        ? Platform.OS === 'web'
+          ? { 'aria-pressed': state.selected }
+          : null
+        : { 'aria-selected': state.selected }
+      : null),
+    ...(state.checked !== undefined ? { 'aria-checked': state.checked } : null),
+    ...(state.disabled !== undefined ? { 'aria-disabled': state.disabled } : null),
+    ...(state.expanded !== undefined ? { 'aria-expanded': state.expanded } : null),
+    ...(state.busy !== undefined ? { 'aria-busy': state.busy } : null),
+  };
+}
+
+/**
  * Props for a chip / toggle that is one choice in a group. Selection must be
  * exposed as state, not only as color (WCAG 1.4.1 / 4.1.2).
  * - 'radio': single choice (category, plan period, report reason)
@@ -37,6 +73,8 @@ export function focusElement(target: Component | null | undefined, delayMs = FOC
  */
 export function choiceA11y(selected: boolean, label: string, kind: 'radio' | 'checkbox' = 'radio') {
   return kind === 'checkbox'
-    ? ({ accessibilityRole: 'checkbox', accessibilityLabel: label, accessibilityState: { checked: selected } } as const)
-    : ({ accessibilityRole: 'radio', accessibilityLabel: label, accessibilityState: { selected } } as const);
+    ? ({ accessibilityRole: 'checkbox', accessibilityLabel: label, ...a11yState({ checked: selected }) } as const)
+    // A radio exposes `checked` (aria-checked is required on role=radio;
+    // `selected` renders aria-selected, which is invalid there).
+    : ({ accessibilityRole: 'radio', accessibilityLabel: label, ...a11yState({ checked: selected }) } as const);
 }

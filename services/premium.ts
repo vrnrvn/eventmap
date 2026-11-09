@@ -13,16 +13,6 @@
 // passes. Cancelling downgrades immediately. All UI copy must match this.
 
 import { supabase } from './supabase';
-import { businessesService } from './businesses';
-
-/**
- * True when an RPC failed because the function does not exist yet (the
- * 202610301xxxxx migrations have not been applied): Postgres 42883
- * (undefined_function) or PostgREST PGRST202 (function not in schema cache).
- */
-function isMissingDbFunction(error: { code?: string } | null): boolean {
-  return !!error && (error.code === '42883' || error.code === 'PGRST202');
-}
 
 export interface PremiumPlan {
   id: string;
@@ -160,27 +150,13 @@ export const premiumService = {
       return this.cancelSubscription(businessId);
     }
 
-    const { error } = await (supabase as any).rpc(
-      'activate_premium_simulation',
-      {
-        p_business_id: businessId,
-        p_interval: billingCycle,
-      }
-    );
-    if (!error) return { success: true };
-    if (!isMissingDbFunction(error)) throw error;
-
-    // TODO: remove fallback once 2026103xx migrations are applied
-    const expires = new Date();
-    if (billingCycle === 'yearly') {
-      expires.setFullYear(expires.getFullYear() + 1);
-    } else {
-      expires.setMonth(expires.getMonth() + 1);
-    }
-    await businessesService.updateBusiness(businessId, {
-      subscription_tier: 'premium',
-      subscription_expires_at: expires.toISOString(),
+    // The only path to premium: owners can't write the tier directly
+    // (trigger from 20261030101000), so there is no client fallback.
+    const { error } = await supabase.rpc('activate_premium_simulation', {
+      p_business_id: businessId,
+      p_interval: billingCycle,
     });
+    if (error) throw error;
     return { success: true };
   },
 
@@ -188,20 +164,13 @@ export const premiumService = {
    * Immediate cancellation: since no payment was collected, there is no paid
    * period to run out — the business goes back to the free tier right away.
    * UI copy must say access ends immediately. Goes through the owner-validated
-   * RPC, with a direct-update fallback while the migration is not applied.
+   * RPC (20261030101000).
    */
   async cancelSubscription(businessId: string): Promise<{ success: boolean }> {
-    const { error } = await (supabase as any).rpc('cancel_premium_simulation', {
+    const { error } = await supabase.rpc('cancel_premium_simulation', {
       p_business_id: businessId,
     });
-    if (!error) return { success: true };
-    if (!isMissingDbFunction(error)) throw error;
-
-    // TODO: remove fallback once 2026103xx migrations are applied
-    await businessesService.updateBusiness(businessId, {
-      subscription_tier: 'free',
-      subscription_expires_at: null,
-    });
+    if (error) throw error;
     return { success: true };
   },
 

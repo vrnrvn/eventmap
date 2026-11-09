@@ -43,7 +43,20 @@ function getProjectId(): string | null {
   return fromExpoConfig ?? fromEasConfig ?? null;
 }
 
-const ANDROID_CHANNEL_ID = 'default';
+/**
+ * Android notification channels. The server picks one per notification type
+ * (push_channel_for_type: chat_message/chat_mention -> chat; moderation,
+ * report_update, chat_block(ed) -> moderation; everything else -> events;
+ * 'default' when the type is empty). A push aimed at a channel the device
+ * hasn't created may not be shown on Android 8+, so every id the server can
+ * send must exist here. Users can mute each one separately in system settings.
+ */
+export const ANDROID_CHANNELS = [
+  { id: 'events', name: 'Events and reminders', description: 'Reminders, RSVPs, updates to events you follow or host' },
+  { id: 'chat', name: 'Event chat', description: 'New messages and mentions in event chats' },
+  { id: 'moderation', name: 'Account and moderation', description: 'Reports you made, moderation notices' },
+  { id: 'default', name: 'Other', description: 'Anything else from EventMap' },
+] as const;
 
 export async function registerPushToken(): Promise<string | null> {
   const Notifications = getNotifications();
@@ -52,13 +65,17 @@ export async function registerPushToken(): Promise<string | null> {
   configureNotificationHandler();
 
   if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
-      name: 'EventMap Notifications',
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#FF231F7C',
-    });
+    for (const channel of ANDROID_CHANNELS) {
+      await Notifications.setNotificationChannelAsync(channel.id, {
+        name: channel.name,
+        description: channel.description,
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#FF231F7C',
+      });
+    }
   }
+
 
   const existing = await Notifications.getPermissionsAsync();
   let finalStatus = existing.status;

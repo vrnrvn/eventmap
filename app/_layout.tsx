@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Text, AppState } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -171,7 +171,7 @@ const SPLASH_MAX_MS = 1150;
  * now it lifts as soon as the session restore (and profile/snapshot) settles,
  * after a short minimum, and still caps at the old duration.
  */
-function StartupSplash() {
+function StartupSplash({ onDismissed }: { onDismissed: () => void }) {
   const { loading } = useAuth();
   const [minElapsed, setMinElapsed] = useState(false);
   const [maxElapsed, setMaxElapsed] = useState(false);
@@ -185,8 +185,11 @@ function StartupSplash() {
   }, []);
   const [dismissed, setDismissed] = useState(false);
   useEffect(() => {
-    if (!dismissed && (maxElapsed || (minElapsed && !loading))) setDismissed(true);
-  }, [dismissed, maxElapsed, minElapsed, loading]);
+    if (!dismissed && (maxElapsed || (minElapsed && !loading))) {
+      setDismissed(true);
+      onDismissed();
+    }
+  }, [dismissed, maxElapsed, minElapsed, loading, onDismissed]);
   return <BrandedSplashScreen visible={!dismissed} />;
 }
 
@@ -223,6 +226,8 @@ export default function RootLayout() {
   // to wait for all font files first). Only things that draw text or
   // navigate wait for fonts; the native splash covers the screen until then.
   const uiReady = fontsLoaded || !!fontError;
+  const [splashDismissed, setSplashDismissed] = useState(false);
+  const onSplashDismissed = useCallback(() => setSplashDismissed(true), []);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -249,8 +254,10 @@ export default function RootLayout() {
                     <Stack.Screen name="premium" options={{ headerShown: false }} />
                     <Stack.Screen name="+not-found" />
                   </Stack>
-                  <StartupSplash />
-                  <OfflineBanner />
+                  <StartupSplash onDismissed={onSplashDismissed} />
+                  {/* Held back while the branded splash is up; it fades in
+                      as the splash lifts if the connection is still impaired. */}
+                  {splashDismissed ? <OfflineBanner /> : null}
                   <AppToast />
                 </>
               ) : null}

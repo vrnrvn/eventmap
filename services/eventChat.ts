@@ -1,4 +1,5 @@
 import { RealtimeChannel } from '@supabase/supabase-js';
+import { rpcArgs } from './rpcArgs';
 import { supabase, getSessionUser } from './supabase';
 import { signalEventWrites } from '@/utils/eventDataVersion';
 import { isConnectionError } from '@/utils/networkErrors';
@@ -80,12 +81,6 @@ export type ChatPostStatus = {
 /** 42883 = undefined_function, PGRST202 = not in the PostgREST schema cache. */
 const isMissingRpc = (error: { code?: string } | null): boolean =>
   !!error && (error.code === '42883' || error.code === 'PGRST202');
-
-const untypedRpc = (fn: string, args: Record<string, unknown>) =>
-  (supabase.rpc as unknown as (f: string, a: Record<string, unknown>) => ReturnType<typeof supabase.rpc>)(
-    fn,
-    args
-  );
 
 export const CHAT_SLOW_MODE_OPTIONS = [0, 10, 30, 60, 300] as const;
 export type ChatSlowModeSeconds = (typeof CHAT_SLOW_MODE_OPTIONS)[number];
@@ -479,7 +474,7 @@ export const eventChatService = {
     eventId: string,
     settings: { mode?: ChatMode; openPolicy?: ChatOpenPolicy }
   ): Promise<void> {
-    const { error } = await untypedRpc('set_event_chat_mode', {
+    const { error } = await supabase.rpc('set_event_chat_mode', {
       p_event_id: eventId,
       p_chat_mode: settings.mode,
       p_open_policy: settings.openPolicy,
@@ -495,10 +490,10 @@ export const eventChatService = {
 
   /** Host/admin: pin one message (null unpins). Needs 20261103160000. */
   async setPin(eventId: string, messageId: string | null): Promise<void> {
-    const { error } = await untypedRpc('set_event_chat_pin', {
+    const { error } = await supabase.rpc('set_event_chat_pin', rpcArgs('set_event_chat_pin', {
       p_event_id: eventId,
       p_message_id: messageId,
-    });
+    }));
     if (!error) return;
     if (isMissingRpc(error)) {
       throw new Error('Pinned messages need a database update that has not been applied yet.');

@@ -55,6 +55,7 @@ import { AvatarRing } from '@/components/AvatarRing';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { Button } from '@/components/ui/Button';
 import { TextField } from '@/components/ui/TextField';
+import { a11yState } from '@/utils/accessibility';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -507,7 +508,13 @@ export default function OnboardingScreen() {
   // ---- Render ----------------------------------------------------------------
   const shellProps = { insets, currentPage, onBack: goBack, saving: savingStep, pageHeight };
 
-  const renderPage = ({ item }: { item: number }) => {
+  const renderPage = ({ item }: { item: number }) => (
+    <PageSlot index={item} active={item === currentPage}>
+      {renderPageContent(item)}
+    </PageSlot>
+  );
+
+  const renderPageContent = (item: number) => {
     switch (item) {
       case PAGE.WELCOME:
         return <WelcomePage insets={insets} pageHeight={pageHeight} onNext={goNext} />;
@@ -633,6 +640,34 @@ export default function OnboardingScreen() {
           index,
         })}
       />
+    </View>
+  );
+}
+
+/**
+ * One pager cell. All seven pages are mounted side by side, so without this
+ * a screen reader (and Tab on web) walks straight through the pages that are
+ * off screen — "Skip", "Start Exploring" and every chip of every step. The
+ * inactive pages are hidden from assistive tech on native and made `inert`
+ * on web (not focusable, not announced, not clickable).
+ */
+function PageSlot({ index, active, children }: { index: number; active: boolean; children: React.ReactNode }) {
+  const ref = useRef<View>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const el = ref.current as unknown as HTMLElement | null;
+    if (!el) return;
+    if (active) el.removeAttribute('inert');
+    else el.setAttribute('inert', '');
+  }, [active]);
+  return (
+    <View
+      ref={ref}
+      testID={`onboarding-page-${index}`}
+      accessibilityElementsHidden={!active}
+      importantForAccessibility={active ? 'auto' : 'no-hide-descendants'}
+    >
+      {children}
     </View>
   );
 }
@@ -1024,7 +1059,7 @@ function CategoriesPage({
           style={styles.categoriesGrid}
           accessible
           accessibilityLabel="Loading interests"
-          accessibilityState={{ busy: true }}
+          {...a11yState({ busy: true })}
         >
           {CHIP_SKELETON_WIDTHS.map((width, i) => (
             <View key={i} style={[styles.categoryChipSkeleton, { width }]} />
@@ -1045,7 +1080,7 @@ function CategoriesPage({
                 onPress={() => onToggle(cat.id)}
                 activeOpacity={0.7}
                 accessibilityRole="checkbox"
-                accessibilityState={{ checked: isSelected }}
+                {...a11yState({ checked: isSelected })}
                 accessibilityLabel={cat.label}
               >
                 {isSelected ? (
@@ -1171,7 +1206,7 @@ function PermissionCard({
           activeOpacity={0.7}
           accessibilityRole="button"
           accessibilityLabel={granted ? `${title} enabled` : `Enable ${title}`}
-          accessibilityState={{ disabled: granted, selected: granted }}
+          {...a11yState({ disabled: granted, selected: granted }, 'button')}
         >
           {granted ? (
             <Check size={16} color={Palette.successGreen} />

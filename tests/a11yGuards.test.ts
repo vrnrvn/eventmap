@@ -158,7 +158,7 @@ describe('selection is not color-only', () => {
       const style = attr(node, 'style')?.initializer?.getText() ?? '';
       const match = style.match(SELECTED_STYLE);
       if (!match) return;
-      if (attr(node, 'accessibilityState') || hasSpreadCall(node, 'choiceA11y')) return;
+      if (attr(node, 'accessibilityState') || hasSpreadCall(node, 'choiceA11y') || hasSpreadCall(node, 'a11yState')) return;
       out.push(hitAt(node, sf, `${tagName(node)} ${match[0]}`));
     });
     const unexpected = hits.filter((h) => !ALLOWLIST.has(key(h)));

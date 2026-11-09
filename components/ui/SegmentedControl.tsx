@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, ViewStyle, StyleProp } from 'react-native';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { a11yState } from '@/utils/accessibility';
 
 export type SegmentOption<T extends string> = {
   value: T;
@@ -37,9 +38,7 @@ export function SegmentedControl<T extends string>({ options, value, onChange, s
             onPress={() => onChange(option.value)}
             activeOpacity={0.8}
             accessibilityRole="tab"
-            accessibilityState={{ selected: active }}
-            // react-native-web drops accessibilityState; the aria prop reaches the DOM.
-            aria-selected={active}
+            {...a11yState({ selected: active })}
             accessibilityLabel={option.accessibilityLabel ?? option.label}
           >
             <Text style={[styles.text, active && styles.textActive]} numberOfLines={1}>

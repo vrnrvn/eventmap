@@ -281,7 +281,7 @@ export default function ProfileScreen() {
             />
           </TouchableOpacity>
 
-          <Text style={styles.heroName} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.75}>
+          <Text style={styles.heroName} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.75} accessibilityRole="header">
             {headerName}
           </Text>
           {headerLocation ? (
@@ -471,7 +471,7 @@ export default function ProfileScreen() {
               onPress={() => router.push('/my-events')}
               accessibilityRole="button"
               accessibilityLabel="View all created events"
-              hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+              style={styles.sectionLinkButton}
             >
               <Text style={styles.sectionLink}>View All</Text>
             </TouchableOpacity>
@@ -985,6 +985,14 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
     fontFamily: Typography.displayFontFamilies.bold,
     fontWeight: Typography.weights.bold,
+  },
+  // 44 px target on web as well as native (hitSlop is native-only).
+  sectionLinkButton: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    marginVertical: -13,
+    marginRight: -14,
   },
   sectionLink: {
     color: Palette.primary,

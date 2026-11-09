@@ -340,6 +340,52 @@ export type Database = {
           },
         ]
       }
+      event_bans: {
+        Row: {
+          banned_by: string | null
+          created_at: string
+          event_id: string
+          reason: string | null
+          user_id: string
+        }
+        Insert: {
+          banned_by?: string | null
+          created_at?: string
+          event_id: string
+          reason?: string | null
+          user_id: string
+        }
+        Update: {
+          banned_by?: string | null
+          created_at?: string
+          event_id?: string
+          reason?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_bans_banned_by_fkey"
+            columns: ["banned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_bans_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_bans_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       event_chat_blocks: {
         Row: {
           blocked_by: string
@@ -570,22 +616,31 @@ export type Database = {
       }
       event_chat_settings: {
         Row: {
+          chat_mode: string
           event_id: string
           locked: boolean
+          open_policy: string
+          pinned_message_id: string | null
           slow_mode_seconds: number
           updated_at: string
           updated_by: string | null
         }
         Insert: {
+          chat_mode?: string
           event_id: string
           locked?: boolean
+          open_policy?: string
+          pinned_message_id?: string | null
           slow_mode_seconds?: number
           updated_at?: string
           updated_by?: string | null
         }
         Update: {
+          chat_mode?: string
           event_id?: string
           locked?: boolean
+          open_policy?: string
+          pinned_message_id?: string | null
           slow_mode_seconds?: number
           updated_at?: string
           updated_by?: string | null
@@ -599,8 +654,57 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "event_chat_settings_pinned_message_id_fkey"
+            columns: ["pinned_message_id"]
+            isOneToOne: false
+            referencedRelation: "event_chat_messages"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "event_chat_settings_updated_by_fkey"
             columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      event_interactions: {
+        Row: {
+          created_at: string
+          day: string
+          event_id: string
+          id: string
+          kind: string
+          viewer_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          day?: string
+          event_id: string
+          id?: string
+          kind: string
+          viewer_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          day?: string
+          event_id?: string
+          id?: string
+          kind?: string
+          viewer_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_interactions_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_interactions_viewer_id_fkey"
+            columns: ["viewer_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -706,6 +810,35 @@ export type Database = {
           },
         ]
       }
+      event_rsvp_counts: {
+        Row: {
+          event_id: string
+          going_count: number
+          interested_count: number
+          updated_at: string
+        }
+        Insert: {
+          event_id: string
+          going_count?: number
+          interested_count?: number
+          updated_at?: string
+        }
+        Update: {
+          event_id?: string
+          going_count?: number
+          interested_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_rsvp_counts_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: true
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       event_views: {
         Row: {
           event_id: string
@@ -745,9 +878,47 @@ export type Database = {
           },
         ]
       }
+      event_waitlist: {
+        Row: {
+          created_at: string
+          event_id: string
+          notified_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_id: string
+          notified_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          event_id?: string
+          notified_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_waitlist_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "event_waitlist_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       events: {
         Row: {
+          accessibility_notes: string | null
           address: string
+          age_restriction: string
           business_id: string
           category_id: string
           cover_image_url: string | null
@@ -759,14 +930,26 @@ export type Database = {
           lat: number
           lng: number
           max_attendees: number | null
+          price_label: string | null
+          publish_state: string
           recurrence_pattern: Json | null
+          rsvp_closed: boolean
+          rsvp_mode: string
           start_datetime: string
           status: string
+          status_note: string | null
+          ticket_url: string | null
+          timezone: string | null
           title: string
           updated_at: string
+          visibility: string
+          waitlist_mode: string
+          what_to_bring: string | null
         }
         Insert: {
+          accessibility_notes?: string | null
           address: string
+          age_restriction?: string
           business_id: string
           category_id: string
           cover_image_url?: string | null
@@ -778,14 +961,26 @@ export type Database = {
           lat: number
           lng: number
           max_attendees?: number | null
+          price_label?: string | null
+          publish_state?: string
           recurrence_pattern?: Json | null
+          rsvp_closed?: boolean
+          rsvp_mode?: string
           start_datetime: string
           status?: string
+          status_note?: string | null
+          ticket_url?: string | null
+          timezone?: string | null
           title: string
           updated_at?: string
+          visibility?: string
+          waitlist_mode?: string
+          what_to_bring?: string | null
         }
         Update: {
+          accessibility_notes?: string | null
           address?: string
+          age_restriction?: string
           business_id?: string
           category_id?: string
           cover_image_url?: string | null
@@ -797,11 +992,21 @@ export type Database = {
           lat?: number
           lng?: number
           max_attendees?: number | null
+          price_label?: string | null
+          publish_state?: string
           recurrence_pattern?: Json | null
+          rsvp_closed?: boolean
+          rsvp_mode?: string
           start_datetime?: string
           status?: string
+          status_note?: string | null
+          ticket_url?: string | null
+          timezone?: string | null
           title?: string
           updated_at?: string
+          visibility?: string
+          waitlist_mode?: string
+          what_to_bring?: string | null
         }
         Relationships: [
           {
@@ -852,6 +1057,51 @@ export type Database = {
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      host_announcements: {
+        Row: {
+          audience: string
+          body: string
+          created_at: string
+          created_by: string | null
+          event_id: string
+          id: string
+          recipients: number
+        }
+        Insert: {
+          audience: string
+          body: string
+          created_at?: string
+          created_by?: string | null
+          event_id: string
+          id?: string
+          recipients?: number
+        }
+        Update: {
+          audience?: string
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          event_id?: string
+          id?: string
+          recipients?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "host_announcements_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "host_announcements_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
             referencedColumns: ["id"]
           },
         ]
@@ -1158,6 +1408,51 @@ export type Database = {
           },
         ]
       }
+      rsvp_history: {
+        Row: {
+          changed_at: string
+          changed_by: string | null
+          event_id: string
+          from_status: string | null
+          id: number
+          to_status: string
+          user_id: string | null
+        }
+        Insert: {
+          changed_at?: string
+          changed_by?: string | null
+          event_id: string
+          from_status?: string | null
+          id?: never
+          to_status: string
+          user_id?: string | null
+        }
+        Update: {
+          changed_at?: string
+          changed_by?: string | null
+          event_id?: string
+          from_status?: string | null
+          id?: never
+          to_status?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rsvp_history_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rsvp_history_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rsvps: {
         Row: {
           created_at: string
@@ -1394,6 +1689,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      business_has_premium: {
+        Args: { business_uuid: string }
+        Returns: boolean
+      }
       calculate_distance: {
         Args: { lat1: number; lat2: number; lng1: number; lng2: number }
         Returns: number
@@ -1404,6 +1703,8 @@ export type Database = {
         Args: { p_business_id: string }
         Returns: undefined
       }
+      chat_viewer_going_event_ids: { Args: never; Returns: string[] }
+      chat_viewer_hosted_event_ids: { Args: never; Returns: string[] }
       check_event_creation_limit: {
         Args: { business_uuid: string }
         Returns: boolean
@@ -1419,8 +1720,11 @@ export type Database = {
           p_is_recurring?: boolean
           p_lat: number
           p_lng: number
+          p_max_attendees?: number
+          p_publish_state?: string
           p_recurrence_pattern?: Json
           p_start_datetime: string
+          p_timezone?: string
           p_title: string
         }
         Returns: string
@@ -1435,30 +1739,74 @@ export type Database = {
         Args: { p_message_id: string }
         Returns: number
       }
+      duplicate_event: { Args: { p_event_id: string }; Returns: string }
       ensure_profile_exists: {
         Args: { p_name?: string; p_user_id: string }
         Returns: undefined
       }
-      event_has_ended: {
-        Args: {
-          p_end_datetime: string
-          p_is_recurring: boolean
-          p_recurrence_pattern: Json
-        }
+      event_allows_rsvp_changes: {
+        Args: { p_event_id: string }
         Returns: boolean
       }
+      event_has_ended:
+        | {
+            Args: {
+              p_end_datetime: string
+              p_is_recurring: boolean
+              p_recurrence_pattern: Json
+            }
+            Returns: boolean
+          }
+        | {
+            Args: {
+              p_end_datetime: string
+              p_is_recurring: boolean
+              p_recurrence_pattern: Json
+              p_timezone: string
+            }
+            Returns: boolean
+          }
       event_is_open_for_rsvp: { Args: { p_event_id: string }; Returns: boolean }
-      event_next_occurrence: {
-        Args: {
-          p_is_recurring: boolean
-          p_recurrence_pattern: Json
-          p_start_datetime: string
-        }
-        Returns: string
+      event_next_occurrence:
+        | {
+            Args: {
+              p_is_recurring: boolean
+              p_recurrence_pattern: Json
+              p_start_datetime: string
+            }
+            Returns: string
+          }
+        | {
+            Args: {
+              p_is_recurring: boolean
+              p_recurrence_pattern: Json
+              p_start_datetime: string
+              p_timezone: string
+            }
+            Returns: string
+          }
+      event_requires_approval: {
+        Args: { p_event_id: string }
+        Returns: boolean
       }
+      event_rsvps_closed: { Args: { p_event_id: string }; Returns: boolean }
       get_business_analytics: {
         Args: { business_uuid: string; days?: number }
         Returns: Json
+      }
+      get_business_follower_counts: {
+        Args: { p_business_ids: string[] }
+        Returns: {
+          business_id: string
+          follower_count: number
+        }[]
+      }
+      get_business_review_summary: {
+        Args: { p_business_id: string }
+        Returns: {
+          average: number
+          review_count: number
+        }[]
       }
       get_event_attendees_page: {
         Args: {
@@ -1510,6 +1858,7 @@ export type Database = {
           block_expires_at: string
           can_post: boolean
           can_read: boolean
+          chat_mode: string
           is_admin: boolean
           is_banned: boolean
           is_blocked: boolean
@@ -1518,6 +1867,8 @@ export type Database = {
           last_read_at: string
           locked: boolean
           muted: boolean
+          open_policy: string
+          pinned_message_id: string
           slow_mode_seconds: number
         }[]
       }
@@ -1544,6 +1895,22 @@ export type Database = {
         }[]
       }
       get_event_details: { Args: { event_uuid: string }; Returns: Json }
+      get_event_host_attendees_page: {
+        Args: {
+          p_event_id: string
+          p_limit?: number
+          p_offset?: number
+          p_search?: string
+          p_status?: string
+        }
+        Returns: Json
+      }
+      get_event_host_overview: { Args: { p_event_id: string }; Returns: Json }
+      get_event_insights: {
+        Args: { p_days?: number; p_event_id: string }
+        Returns: Json
+      }
+      get_host_events_counts: { Args: { p_event_ids: string[] }; Returns: Json }
       get_profiles_display: { Args: { user_ids: string[] }; Returns: Json }
       get_public_profile: { Args: { user_id_param: string }; Returns: Json }
       get_ranked_events: {
@@ -1571,11 +1938,14 @@ export type Database = {
           description: string
           distance_km: number
           end_datetime: string
+          has_ended: boolean
           id: string
           is_premium: boolean
           is_recurring: boolean
           lat: number
           lng: number
+          max_attendees: number
+          next_start_datetime: string
           recurrence_pattern: Json
           rsvp_count: number
           save_count: number
@@ -1612,6 +1982,15 @@ export type Database = {
           verified: boolean
         }[]
       }
+      get_user_calendar: {
+        Args: {
+          p_from: string
+          p_limit?: number
+          p_sources?: string[]
+          p_to: string
+        }
+        Returns: Json
+      }
       get_user_going_events: {
         Args: {
           p_limit?: number
@@ -1641,15 +2020,89 @@ export type Database = {
         Args: { user_id_param: string }
         Returns: Json
       }
-      is_admin_user: { Args: never; Returns: boolean }
-      join_event_with_capacity: {
-        Args: { p_event_id: string; p_status: string }
+      handle_event_seats_freed: {
+        Args: { p_event_id: string }
+        Returns: number
+      }
+      host_display_name: {
+        Args: { p_name: string; p_private: boolean }
+        Returns: string
+      }
+      host_promote_from_waitlist: {
+        Args: { p_event_id: string; p_user_id: string }
         Returns: undefined
       }
+      host_remove_attendee: {
+        Args: {
+          p_ban?: boolean
+          p_event_id: string
+          p_reason?: string
+          p_user_id: string
+        }
+        Returns: undefined
+      }
+      host_review_rsvp: {
+        Args: { p_decision: string; p_event_id: string; p_user_id: string }
+        Returns: undefined
+      }
+      host_set_event_capacity: {
+        Args: { p_event_id: string; p_max_attendees: number }
+        Returns: undefined
+      }
+      host_set_event_settings: {
+        Args: {
+          p_event_id: string
+          p_rsvp_closed?: boolean
+          p_rsvp_mode?: string
+          p_waitlist_mode?: string
+        }
+        Returns: Json
+      }
+      host_unban_attendee: {
+        Args: { p_event_id: string; p_user_id: string }
+        Returns: undefined
+      }
+      is_admin_user: { Args: never; Returns: boolean }
+      is_valid_time_zone: { Args: { p_tz: string }; Returns: boolean }
+      join_event_waitlist: { Args: { p_event_id: string }; Returns: number }
+      join_event_with_capacity: {
+        Args: { p_event_id: string; p_status: string }
+        Returns: string
+      }
+      leave_event_waitlist: { Args: { p_event_id: string }; Returns: undefined }
       mark_event_chat_read: { Args: { p_event_id: string }; Returns: undefined }
+      notify_event_waitlist_free_seats: {
+        Args: { p_event_id: string }
+        Returns: number
+      }
       notify_followers_about_event: {
         Args: { p_event_id: string }
         Returns: number
+      }
+      notify_followers_for_event: {
+        Args: { p_event_id: string }
+        Returns: number
+      }
+      postpone_event: {
+        Args: { p_event_id: string; p_note?: string }
+        Returns: Json
+      }
+      publish_event: { Args: { p_event_id: string }; Returns: Json }
+      refresh_event_rsvp_counts: {
+        Args: { p_event_id: string }
+        Returns: undefined
+      }
+      reschedule_event: {
+        Args: {
+          p_address?: string
+          p_end_datetime: string
+          p_event_id: string
+          p_lat?: number
+          p_lng?: number
+          p_note?: string
+          p_start_datetime: string
+        }
+        Returns: Json
       }
       reset_monthly_event_counter: {
         Args: { business_uuid: string }
@@ -1659,13 +2112,29 @@ export type Database = {
         Args: { p_message_id: string }
         Returns: boolean
       }
+      send_event_announcement: {
+        Args: { p_audience?: string; p_body: string; p_event_id: string }
+        Returns: Json
+      }
       send_event_reminders: { Args: never; Returns: undefined }
       send_promotional_notification: {
         Args: { p_promotion_id: string }
         Returns: number
       }
+      set_event_chat_mode: {
+        Args: {
+          p_chat_mode?: string
+          p_event_id: string
+          p_open_policy?: string
+        }
+        Returns: Json
+      }
       set_event_chat_muted: {
         Args: { p_event_id: string; p_muted: boolean }
+        Returns: undefined
+      }
+      set_event_chat_pin: {
+        Args: { p_event_id: string; p_message_id?: string }
         Returns: undefined
       }
       set_event_chat_settings: {
@@ -1680,10 +2149,18 @@ export type Database = {
         Args: { p_message_id: string }
         Returns: undefined
       }
+      track_event_interaction: {
+        Args: { p_event_id: string; p_kind: string }
+        Returns: undefined
+      }
       track_event_view: { Args: { event_uuid: string }; Returns: undefined }
       unblock_event_chat_user: {
         Args: { p_event_id: string; p_user_id: string }
         Returns: undefined
+      }
+      unreferenced_owned_images: {
+        Args: { p_urls: string[] }
+        Returns: string[]
       }
       upsert_push_token:
         | {
@@ -1708,6 +2185,10 @@ export type Database = {
         Returns: boolean
       }
       user_is_banned: { Args: { p_user_id: string }; Returns: boolean }
+      user_is_banned_from_event: {
+        Args: { p_event_id: string; p_user_id: string }
+        Returns: boolean
+      }
       user_is_blocked_from_event_chat: {
         Args: { event_uuid: string; p_user_id: string }
         Returns: boolean

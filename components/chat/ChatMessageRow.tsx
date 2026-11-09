@@ -393,7 +393,8 @@ const styles = StyleSheet.create({
     fontFamily: Typography.labelFontFamilies.medium,
   },
   messageMetaMine: {
-    color: alpha(Colors.surface, 0.75),
+    // 0.75 gave 4.3:1 on the primary bubble; 0.92 clears 4.5:1 for 12 px text.
+    color: alpha(Colors.surface, 0.92),
   },
   messageMetaFailed: {
     color: Colors.error,

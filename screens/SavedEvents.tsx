@@ -33,6 +33,7 @@ import {
   ChevronRight,
   Repeat,
 } from '@/components/icons.generated';
+import { a11yState } from '@/utils/accessibility';
 
 const PAGE_SIZE = 30;
 
@@ -91,7 +92,7 @@ const SavedEventRow = memo(function SavedEventRow({
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             accessibilityRole="button"
             accessibilityLabel={`Remove ${event.title} from saved events`}
-            accessibilityState={{ selected: true }}
+            {...a11yState({ selected: true }, 'button')}
           >
             <Bookmark size={14} color={Colors.primary} fill={Colors.primary} />
           </TouchableOpacity>
@@ -148,7 +149,7 @@ export default function SavedEvents() {
     void query
       .refetch()
       .then((result) => {
-        if (result.isError && result.data) notify.backgroundError("Couldn't refresh saved events.");
+        if (result.isError && result.data) notify.backgroundError("Couldn't refresh saved events.", result.error);
       })
       .finally(() => setPulling(false));
   }, [query]);
@@ -249,7 +250,7 @@ export default function SavedEvents() {
             <Bookmark size={18} color={Colors.primary} />
           </View>
           <View>
-            <Text style={styles.headerTitle}>Saved Events</Text>
+            <Text style={styles.headerTitle} accessibilityRole="header">Saved Events</Text>
             <Text style={styles.headerSubtitle}>
               {loading
                 ? 'Loading…'
@@ -266,7 +267,7 @@ export default function SavedEvents() {
         <View
           style={styles.skeletonList}
           accessibilityLabel="Loading your saved events"
-          accessibilityState={{ busy: true }}
+          {...a11yState({ busy: true })}
         >
           {[0, 1, 2].map((i) => (
             <View key={i} style={styles.skeletonCard}>

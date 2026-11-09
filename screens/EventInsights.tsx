@@ -42,6 +42,7 @@ import {
   type MedianDelta,
 } from '@/utils/analytics';
 import { describeEventDateTime } from '@/utils/timezone';
+import { a11yState } from '@/utils/accessibility';
 
 type Period = '7' | '30' | '90';
 type TrendMetric = 'views' | 'saves' | 'going';
@@ -92,7 +93,7 @@ export default function EventInsightsScreen() {
   let body: ReactNode;
   if (query.isPending) {
     body = (
-      <View style={styles.center} accessibilityLabel="Loading insights" accessibilityState={{ busy: true }}>
+      <View style={styles.center} accessibilityLabel="Loading insights" {...a11yState({ busy: true })}>
         <ActivityIndicator size="large" color={Colors.primary} />
       </View>
     );

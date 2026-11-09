@@ -211,7 +211,10 @@ const GoogleMapViewInner = forwardRef<GoogleMapHandle, GoogleMapViewProps>(funct
   return (
     <View style={[styles.container, style]}>
       {Platform.OS === 'web' ? (
-        <iframe ref={iframeRef} title="Event map" srcDoc={html}
+        // tabIndex -1 keeps Tab out of the map document (zoom controls,
+        // attribution links and one stop per marker came before the search
+        // field). The list below carries the same events for keyboard users.
+        <iframe ref={iframeRef} title="Event map" srcDoc={html} tabIndex={-1}
           style={{ width: '100%', height: '100%', border: 0, flex: 1 }}
           onLoad={() => handleMessage('{"type":"mapReady"}')} />
       ) : (

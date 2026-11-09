@@ -94,7 +94,11 @@ export const businessesService = {
     const business = await this.getBusiness(businessId);
     if (!business) throw new Error('Business not found');
 
-    const maxCount = business.subscription_tier === 'premium' ? 30 : 2;
+    // Same rule as the server's business_has_premium(): tier + unexpired.
+    const premium =
+      business.subscription_tier === 'premium' &&
+      (!business.subscription_expires_at || new Date(business.subscription_expires_at).getTime() > Date.now());
+    const maxCount = premium ? 30 : 2;
     let currentCount = business.events_created_this_month;
 
     // UTC month, like the server's reset (see utils/premiumState).

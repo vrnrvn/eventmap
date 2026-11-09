@@ -63,7 +63,8 @@ import {
   zoneDisplayLabel,
 } from '@/utils/timezone';
 import { TimeZonePicker } from '@/components/TimeZonePicker';
-import { choiceA11y } from '@/utils/accessibility';
+import { choiceA11y, a11yState, announce } from '@/utils/accessibility';
+import { validationSummary } from '@/utils/validationSummary';
 
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
 const MAX_EVENT_DATE = new Date();
@@ -433,6 +434,8 @@ export default function EditEvent() {
       setShowExtras(true);
     }
     setErrors(e);
+    // Screen readers otherwise hear nothing when Save is refused.
+    if (Object.keys(e).length > 0) announce(validationSummary(e));
     return Object.keys(e).length === 0;
   };
 
@@ -539,12 +542,17 @@ export default function EditEvent() {
     const timePlaceChanged = 'start_datetime' in updates || 'end_datetime' in updates || placeChanged;
     const isPostponed = originalEvent.current?.status === 'postponed';
     let viaReschedule = false;
-    if (timePlaceChanged && (goingCount.current > 0 || isPostponed)) {
+    // reschedule_event notifies going, interested and savers, so the prompt
+    // can't be gated on the going count alone (details only carry that one).
+    // Drafts have no audience yet and save silently.
+    const isDraft = originalEvent.current?.publish_state === 'draft';
+    if (timePlaceChanged && (isPostponed || !isDraft)) {
+      const going = goingCount.current;
       const proceed = await confirmAction({
         title: isPostponed ? 'Set the new date?' : 'Notify attendees?',
         message: isPostponed
           ? 'This reopens joining and tells everyone the event is back on at the new time.'
-          : `Changing the time or location sends a "rescheduled" notification to everyone who's going or interested (${goingCount.current} going). Save anyway?`,
+          : `Changing the time or location sends a "rescheduled" notification to everyone who's going, interested or has saved this event${going > 0 ? ` (${going} going)` : ''}. Save anyway?`,
         confirmLabel: isPostponed ? 'Set date' : 'Save and notify',
         cancelLabel: 'Keep editing',
       });
@@ -998,7 +1006,7 @@ export default function EditEvent() {
           style={styles.dateButton}
           onPress={() => setShowExtras((v) => !v)}
           accessibilityRole="button"
-          accessibilityState={{ expanded: showExtras }}
+          {...a11yState({ expanded: showExtras })}
           accessibilityLabel="More options: visibility, tickets, age, accessibility"
         >
           <Text style={styles.dateButtonText}>More options</Text>

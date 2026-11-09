@@ -54,6 +54,7 @@ import { describeEventTime, getDeviceTimeZone } from '@/utils/timezone';
 import { isEventInProgress } from '@/utils/eventStatus';
 import { shareCalendarIcs } from '@/utils/eventShare';
 import { notify } from '@/utils/notify';
+import { a11yState } from '@/utils/accessibility';
 
 type ViewMode = 'month' | 'agenda';
 
@@ -360,8 +361,7 @@ export default function CalendarScreen() {
               onPress={() => toggleSource(source)}
               activeOpacity={0.8}
               accessibilityRole="checkbox"
-              accessibilityState={{ checked: on }}
-              aria-checked={on}
+              {...a11yState({ checked: on })}
               accessibilityLabel={`Show ${SOURCE_LABELS[source].toLowerCase()} events`}
             >
               <View style={[styles.chipDot, { backgroundColor: on ? Colors.white : SOURCE_COLORS[source] }]} />
@@ -426,7 +426,7 @@ export default function CalendarScreen() {
     }
     if (screenState === 'loading') {
       return (
-        <View style={styles.center} accessibilityLabel="Loading events" accessibilityState={{ busy: true }}>
+        <View style={styles.center} accessibilityLabel="Loading events" {...a11yState({ busy: true })}>
           <ActivityIndicator size="large" color={Colors.primary} />
         </View>
       );
@@ -523,7 +523,7 @@ export default function CalendarScreen() {
               style={styles.iconBtn}
               accessibilityRole="button"
               accessibilityLabel="Export calendar"
-              accessibilityState={{ disabled: exporting }}
+              {...a11yState({ disabled: exporting })}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               {exporting ? (

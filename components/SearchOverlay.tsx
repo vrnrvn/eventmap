@@ -30,6 +30,7 @@ import { GooglePlacesAutocomplete, parseDescription } from './GooglePlacesAutoco
 import type { AutocompletePrediction } from '@/services/places';
 import { RegionGrid, type RegionItem } from './RegionGrid';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
+import { a11yState } from '@/utils/accessibility';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -308,7 +309,7 @@ export function SearchOverlay({
                         onPress={() => applyDatePreset(preset.key)}
                         activeOpacity={0.85}
                         accessibilityRole="button"
-                        accessibilityState={{ selected }}
+                        {...a11yState({ selected }, 'button')}
                         accessibilityLabel={preset.label}
                         hitSlop={{ top: 6, bottom: 6 }}
                       >

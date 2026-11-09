@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-nativ
 import { Star } from '@/components/icons.generated';
 import { Colors, Spacing, Typography } from '@/constants/theme';
 import { notify } from '@/utils/notify';
+import { a11yState } from '@/utils/accessibility';
 
 type ReviewFormProps = {
   initialRating?: number;
@@ -50,7 +51,7 @@ export function ReviewForm({
             activeOpacity={0.7}
             accessibilityRole="button"
             accessibilityLabel={`Rate ${value} of 5 stars`}
-            accessibilityState={{ selected: value <= rating }}
+            {...a11yState({ selected: value <= rating }, 'button')}
             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
           >
             <Star

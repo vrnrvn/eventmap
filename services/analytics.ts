@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import { eventsService } from './events';
 import { hostToolsService } from './hostTools';
-import { isMissingDbFunction, isRpcKnownMissing, markRpcMissing, MISSING_RPC_ERROR, rpcSignatureKey } from '@/utils/rpcErrors';
+import { isMissingDbFunction } from '@/utils/rpcErrors';
 import { parseEventInsights, type EventInsights } from '@/utils/analytics';
 
 export type { EventInsights };
@@ -20,18 +20,6 @@ export class InsightsNotFoundError extends Error {
     this.name = 'InsightsNotFoundError';
   }
 }
-
-/** The prepared RPC isn't in the generated types yet. */
-// Memoizes "function missing" per session (see utils/rpcErrors).
-const untypedRpc = async (fn: string, args: Record<string, unknown>) => {
-  const signature = rpcSignatureKey(fn, args);
-  if (isRpcKnownMissing(signature)) return { data: null, error: MISSING_RPC_ERROR };
-  const result = await (
-    supabase.rpc as unknown as (f: string, a: Record<string, unknown>) => ReturnType<typeof supabase.rpc>
-  )(fn, args);
-  if (result.error && isMissingDbFunction(result.error)) markRpcMissing(signature);
-  return result;
-};
 
 export type AnalyticsTrendPoint = {
   date: string;
@@ -202,7 +190,7 @@ export const analyticsService = {
    * marks the time-series sections as unavailable instead of locked.
    */
   async getEventInsights(eventId: string, days = 30): Promise<EventInsights> {
-    const { data, error } = await untypedRpc('get_event_insights', { p_event_id: eventId, p_days: days });
+    const { data, error } = await supabase.rpc('get_event_insights', { p_event_id: eventId, p_days: days });
     if (!error) return parseEventInsights(data);
 
     const message = String(error.message || '');

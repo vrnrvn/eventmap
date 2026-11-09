@@ -8,6 +8,7 @@
  * result. `source` on each result tells the UI which path was used so it can
  * hide controls that need the real thing.
  */
+import { rpcArgs } from './rpcArgs';
 import { supabase } from './supabase';
 import { signalEventWrites } from '@/utils/eventDataVersion';
 import { socialService } from './social';
@@ -15,31 +16,11 @@ import { eventsService } from './events';
 import type { EventDetails, RsvpMode, RsvpStatus, WaitlistMode } from '@/types/database';
 import {
   isMissingDbFunction,
-  isRpcKnownMissing,
-  markRpcMissing,
-  MISSING_RPC_ERROR,
-  rpcSignatureKey,
 } from '@/utils/rpcErrors';
 
 // Re-exported from the pure module so existing importers keep working;
 // services without native deps import '@/utils/rpcErrors' directly.
 export { isMissingDbFunction };
-
-/**
- * The prepared RPCs aren't in the generated types yet. Once a function comes
- * back as missing (migration not applied on this backend), that result is
- * remembered for the session and later calls short-circuit to the fallback
- * instead of paying a failed round trip each time.
- */
-const untypedRpc = async (fn: string, args: Record<string, unknown>) => {
-  const signature = rpcSignatureKey(fn, args);
-  if (isRpcKnownMissing(signature)) return { data: null, error: MISSING_RPC_ERROR };
-  const result = await (
-    supabase.rpc as unknown as (f: string, a: Record<string, unknown>) => ReturnType<typeof supabase.rpc>
-  )(fn, args);
-  if (result.error && isMissingDbFunction(result.error)) markRpcMissing(signature);
-  return result;
-};
 
 /**
  * Raised by the `guard_event_capacity_shrink` trigger when a plain UPDATE
@@ -142,7 +123,7 @@ export const hostToolsService = {
    * only knows going + saves (+ waitlist count once 20261102160000 is live).
    */
   async getOverview(eventId: string, details?: EventDetails | null): Promise<HostOverview> {
-    const { data, error } = await untypedRpc('get_event_host_overview', { p_event_id: eventId });
+    const { data, error } = await supabase.rpc('get_event_host_overview', { p_event_id: eventId });
     if (!error && data) {
       const raw = data as Omit<HostOverview, 'source'>;
       return {
@@ -192,7 +173,7 @@ export const hostToolsService = {
     const offset = opts.offset ?? 0;
     const search = opts.search?.trim() ? opts.search.trim() : undefined;
 
-    const { data, error } = await untypedRpc('get_event_host_attendees_page', {
+    const { data, error } = await supabase.rpc('get_event_host_attendees_page', {
       p_event_id: eventId,
       p_status: status,
       p_limit: limit,
@@ -253,15 +234,15 @@ export const hostToolsService = {
    * when neither exists.
    */
   async removeAttendee(eventId: string, userId: string, reason?: string | null): Promise<void> {
-    const args = {
+    const args = rpcArgs('host_remove_attendee', {
       p_event_id: eventId,
       p_user_id: userId,
       p_reason: reason?.trim() ? reason.trim() : null,
-    };
-    const first = await untypedRpc('host_remove_attendee', { ...args, p_ban: true });
+    });
+    const first = await supabase.rpc('host_remove_attendee', { ...args, p_ban: true });
     if (!first.error) return;
     if (!isMissingDbFunction(first.error)) throw first.error;
-    const second = await untypedRpc('host_remove_attendee', args);
+    const second = await supabase.rpc('host_remove_attendee', args);
     if (!second.error) return;
     if (isMissingDbFunction(second.error)) throw new HostToolsUnavailableError('Removing attendees');
     throw second.error;
@@ -275,10 +256,10 @@ export const hostToolsService = {
    * back to a direct update while the RPC is missing.
    */
   async setCapacity(eventId: string, maxAttendees: number | null): Promise<void> {
-    const { error } = await untypedRpc('host_set_event_capacity', {
+    const { error } = await supabase.rpc('host_set_event_capacity', rpcArgs('host_set_event_capacity', {
       p_event_id: eventId,
       p_max_attendees: maxAttendees,
-    });
+    }));
     if (!error) return;
     if (!isMissingDbFunction(error)) throw error;
     await eventsService.updateEvent(eventId, { max_attendees: maxAttendees });
@@ -292,7 +273,7 @@ export const hostToolsService = {
   async getEventsCounts(eventIds: string[]): Promise<Map<string, HostEventCounts>> {
     const out = new Map<string, HostEventCounts>();
     if (eventIds.length === 0) return out;
-    const { data, error } = await untypedRpc('get_host_events_counts', { p_event_ids: eventIds });
+    const { data, error } = await supabase.rpc('get_host_events_counts', { p_event_ids: eventIds });
     if (!error) {
       for (const row of (data ?? []) as { event_id: string; going: number; interested: number; waitlist: number }[]) {
         out.set(row.event_id, {
@@ -335,7 +316,7 @@ export const hostToolsService = {
   ): Promise<{ rsvp_closed: boolean; waitlist_mode: WaitlistMode; rsvp_mode: RsvpMode }> {
     // 20261103170000 adds p_rsvp_mode; the 3-arg shape (20261103130000) is
     // retried without it when PostgREST reports the new one missing.
-    const first = await untypedRpc('host_set_event_settings', {
+    const first = await supabase.rpc('host_set_event_settings', {
       p_event_id: eventId,
       p_rsvp_closed: settings.rsvpClosed,
       p_waitlist_mode: settings.waitlistMode,
@@ -345,7 +326,7 @@ export const hostToolsService = {
     if (first.error) {
       if (!isMissingDbFunction(first.error)) throw first.error;
       if (settings.rsvpMode !== undefined) throw new HostToolsUnavailableError('Approval mode');
-      const second = await untypedRpc('host_set_event_settings', {
+      const second = await supabase.rpc('host_set_event_settings', {
         p_event_id: eventId,
         p_rsvp_closed: settings.rsvpClosed,
         p_waitlist_mode: settings.waitlistMode,
@@ -369,7 +350,7 @@ export const hostToolsService = {
    * 20261103170000). Approval re-checks capacity server-side (`EVENT_FULL`).
    */
   async reviewRsvp(eventId: string, userId: string, decision: 'approve' | 'decline'): Promise<void> {
-    const { error } = await untypedRpc('host_review_rsvp', {
+    const { error } = await supabase.rpc('host_review_rsvp', {
       p_event_id: eventId,
       p_user_id: userId,
       p_decision: decision,
@@ -388,7 +369,7 @@ export const hostToolsService = {
     body: string,
     audience: 'going' | 'all'
   ): Promise<{ recipients: number; sentToday: number }> {
-    const { data, error } = await untypedRpc('send_event_announcement', {
+    const { data, error } = await supabase.rpc('send_event_announcement', {
       p_event_id: eventId,
       p_body: body.trim(),
       p_audience: audience,
@@ -403,7 +384,7 @@ export const hostToolsService = {
 
   /** Draft → published; checks the monthly allowance and notifies followers. */
   async publishEvent(eventId: string): Promise<{ notified: number }> {
-    const { data, error } = await untypedRpc('publish_event', { p_event_id: eventId });
+    const { data, error } = await supabase.rpc('publish_event', { p_event_id: eventId });
     if (error) {
       if (isMissingDbFunction(error)) throw new HostToolsUnavailableError('Publishing drafts');
       throw error;
@@ -414,10 +395,10 @@ export const hostToolsService = {
 
   /** Pauses the event: RSVPs kept, joining closed, "new date coming" banner. */
   async postponeEvent(eventId: string, note?: string | null): Promise<{ notified: number }> {
-    const { data, error } = await untypedRpc('postpone_event', {
+    const { data, error } = await supabase.rpc('postpone_event', rpcArgs('postpone_event', {
       p_event_id: eventId,
       p_note: note?.trim() ? note.trim() : null,
-    });
+    }));
     if (error) {
       if (isMissingDbFunction(error)) throw new HostToolsUnavailableError('Postponing');
       throw error;
@@ -442,7 +423,7 @@ export const hostToolsService = {
       lng?: number | null;
     }
   ): Promise<{ status: string; notified: number }> {
-    const { data, error } = await untypedRpc('reschedule_event', {
+    const { data, error } = await supabase.rpc('reschedule_event', rpcArgs('reschedule_event', {
       p_event_id: eventId,
       p_start_datetime: change.startIso,
       p_end_datetime: change.endIso,
@@ -450,7 +431,7 @@ export const hostToolsService = {
       p_address: change.address ?? null,
       p_lat: change.lat ?? null,
       p_lng: change.lng ?? null,
-    });
+    }));
     if (!error) {
       const raw = (data ?? {}) as { status?: string; notified?: number };
       return { status: raw.status ?? 'active', notified: Number(raw.notified ?? 0) };
@@ -468,7 +449,7 @@ export const hostToolsService = {
 
   /** Copies the event into a new draft and returns its id. */
   async duplicateEvent(eventId: string): Promise<string> {
-    const { data, error } = await untypedRpc('duplicate_event', { p_event_id: eventId });
+    const { data, error } = await supabase.rpc('duplicate_event', { p_event_id: eventId });
     if (error) {
       if (isMissingDbFunction(error)) throw new HostToolsUnavailableError('Duplicating events');
       throw error;
@@ -480,7 +461,7 @@ export const hostToolsService = {
 
   /** Lifts an event ban and the chat block that came with the removal. */
   async unbanAttendee(eventId: string, userId: string): Promise<void> {
-    const { error } = await untypedRpc('host_unban_attendee', {
+    const { error } = await supabase.rpc('host_unban_attendee', {
       p_event_id: eventId,
       p_user_id: userId,
     });
@@ -495,7 +476,7 @@ export const hostToolsService = {
    * callers classify with `classifyRsvpError`.
    */
   async promoteFromWaitlist(eventId: string, userId: string): Promise<void> {
-    const { error } = await untypedRpc('host_promote_from_waitlist', {
+    const { error } = await supabase.rpc('host_promote_from_waitlist', {
       p_event_id: eventId,
       p_user_id: userId,
     });

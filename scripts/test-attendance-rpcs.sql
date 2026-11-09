@@ -60,6 +60,9 @@ FROM (VALUES
   (:'rec_open', 'Recurring, no end',     now() - interval '30 days', now() - interval '30 days' + interval '1 hour', true,  '{"frequency":"weekly","interval":1}'::jsonb)
 ) AS v(id, title, start_at, end_at, recurring, pattern);
 
+-- Fixture RSVPs (some on past/closed events): bypass the join-time guard
+-- from 20261103170000 for this statement only.
+SELECT set_config('eventmap.allow_approval', 'true', true);
 INSERT INTO rsvps (user_id, event_id, status) VALUES
   (:'alex', :'past_ev',  'going'),
   (:'alex', :'live_ev',  'going'),
@@ -67,6 +70,15 @@ INSERT INTO rsvps (user_id, event_id, status) VALUES
   (:'alex', :'rec_open', 'going'),
   (:'alex', :'ev2',      'interested')   -- downgrade seeded "going" to make sure it is excluded
 ON CONFLICT (user_id, event_id) DO UPDATE SET status = EXCLUDED.status;
+SELECT set_config('eventmap.allow_approval', '', true);
+
+-- The seed's demo events have fixed dates that age out; keep ev1/ev2 upcoming
+-- for this run (rolled back with everything else). People are going, so the
+-- reschedule guard (20261103150000) is bypassed for this statement.
+SELECT set_config('eventmap.allow_reschedule', 'true', true);
+UPDATE events SET start_datetime = now() + interval '3 days', end_datetime = now() + interval '3 days 2 hours'
+WHERE id IN (:'ev1', :'ev2');
+SELECT set_config('eventmap.allow_reschedule', '', true);
 
 -- Make sure the baseline privacy flags are the defaults
 UPDATE profiles SET is_profile_private = false, show_future_events = true, show_attendance_publicly = true
@@ -270,8 +282,12 @@ $$;
 -- ---------------------------------------------------------------------------
 SELECT set_config('role', 'postgres', true);
 UPDATE profiles SET show_attendance_publicly = false WHERE id = :'sam';
+-- Fixture RSVPs (some on past/closed events): bypass the join-time guard
+-- from 20261103170000 for this statement only.
+SELECT set_config('eventmap.allow_approval', 'true', true);
 INSERT INTO rsvps (user_id, event_id, status) VALUES (:'sam', :'live_ev', 'going')
 ON CONFLICT (user_id, event_id) DO UPDATE SET status = 'going';
+SELECT set_config('eventmap.allow_approval', '', true);
 SELECT pg_temp.act_as(:'alex');
 
 SELECT pg_temp.check(
@@ -321,10 +337,14 @@ SELECT ('7a000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid, 'Bulk User 
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;
 UPDATE profiles SET show_attendance_publicly = false WHERE id IN (
   SELECT ('7a000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid FROM generate_series(40, 45) n);
+-- Fixture RSVPs (some on past/closed events): bypass the join-time guard
+-- from 20261103170000 for this statement only.
+SELECT set_config('eventmap.allow_approval', 'true', true);
 INSERT INTO rsvps (user_id, event_id, status, created_at)
 SELECT ('7a000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid, :'ev1', 'going', now() - (n || ' minutes')::interval
 FROM generate_series(1, 45) n
 ON CONFLICT (user_id, event_id) DO UPDATE SET status = 'going';
+SELECT set_config('eventmap.allow_approval', '', true);
 
 SELECT pg_temp.act_as(:'alex');
 SELECT pg_temp.check(
@@ -384,6 +404,9 @@ FROM (VALUES
 UPDATE profiles SET event_reminder_enabled = true, event_reminder_minutes = 60,
   notification_preferences = COALESCE(notification_preferences, '{}'::jsonb) || '{"interested_reminder": true}'::jsonb
 WHERE id IN (:'alex', :'sam');
+-- Fixture RSVPs (some on past/closed events): bypass the join-time guard
+-- from 20261103170000 for this statement only.
+SELECT set_config('eventmap.allow_approval', 'true', true);
 INSERT INTO rsvps (user_id, event_id, status, created_at) VALUES
   (:'alex', :'rem_going', 'going',      now() - interval '2 days'),
   (:'alex', :'rem_int24', 'interested', now() - interval '2 days'),
@@ -392,6 +415,7 @@ INSERT INTO rsvps (user_id, event_id, status, created_at) VALUES
   (:'sam',  :'rem_int24', 'interested', now() - interval '2 days'),   -- sam opts out below
   (:'sam',  :'rem_going', 'going',      now() - interval '2 days')    -- sam disables reminders below
 ON CONFLICT (user_id, event_id) DO UPDATE SET status = EXCLUDED.status, created_at = EXCLUDED.created_at;
+SELECT set_config('eventmap.allow_approval', '', true);
 UPDATE profiles SET notification_preferences = notification_preferences || '{"interested_reminder": false}'::jsonb,
   event_reminder_enabled = false WHERE id = :'sam';
 DELETE FROM notifications WHERE type = 'event_reminder' AND user_id IN (:'alex', :'sam');

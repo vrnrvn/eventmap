@@ -9,6 +9,7 @@ import {
 } from '@/services/eventChat';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
+import { a11yState } from '@/utils/accessibility';
 
 export type ChatMessageActionsTarget = {
   id: string;
@@ -112,7 +113,7 @@ export function ChatMessageActionsSheet({
                     pressed && styles.pressed,
                   ]}
                   accessibilityRole="radio"
-                  accessibilityState={{ selected }}
+                  {...a11yState({ selected })}
                 >
                   <Text style={[styles.reasonChipText, selected && styles.reasonChipTextSelected]}>
                     {option}
@@ -174,7 +175,7 @@ export function ChatMessageActionsSheet({
                     pressed && styles.pressed,
                   ]}
                   accessibilityRole="radio"
-                  accessibilityState={{ selected }}
+                  {...a11yState({ selected })}
                 >
                   <Text style={[styles.reasonChipText, selected && styles.reasonChipTextSelected]}>
                     {option.label}

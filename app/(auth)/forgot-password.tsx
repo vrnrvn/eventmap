@@ -11,6 +11,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { goBackOr } from '@/utils/navigation';
 import { authService } from '@/services/auth';
 import { TextField } from '@/components/ui/TextField';
 import { Button } from '@/components/ui/Button';
@@ -24,6 +25,7 @@ import {
   LogIn,
   KeyRound,
 } from '@/components/icons.generated';
+import { a11yState } from '@/utils/accessibility';
 
 export default function ForgotPasswordScreen() {
   const insets = useSafeAreaInsets();
@@ -110,7 +112,9 @@ export default function ForgotPasswordScreen() {
             {/* Back to sign in */}
             <Button
               label="Back to Sign In"
-              onPress={() => router.replace('/(auth)/login')}
+              // Came from sign-in: go back to it. `replace` left the original
+              // sign-in (with whatever was typed) underneath a second copy.
+              onPress={() => goBackOr(router, '/(auth)/login')}
               size="lg"
               fullWidth
               gradient
@@ -130,7 +134,7 @@ export default function ForgotPasswordScreen() {
               accessibilityLabel={
                 resendCooldown > 0 ? `Resend available in ${resendCooldown} seconds` : 'Try again'
               }
-              accessibilityState={{ disabled: resendCooldown > 0 }}
+              {...a11yState({ disabled: resendCooldown > 0 })}
               hitSlop={{ top: 8, bottom: 8, left: 12, right: 12 }}
             >
               <Text
@@ -186,7 +190,7 @@ export default function ForgotPasswordScreen() {
                 <KeyRound size={28} color="#FFFFFF" />
               </LinearGradient>
             </View>
-            <Text style={styles.heroTitle}>Forgot Password?</Text>
+            <Text style={styles.heroTitle} accessibilityRole="header">Forgot Password?</Text>
             <Text style={styles.heroSubtitle}>
               No worries — enter your email and we&apos;ll{'\n'}send you a reset link
             </Text>

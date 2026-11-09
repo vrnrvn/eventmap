@@ -53,6 +53,8 @@ import { complaintsService } from '@/services/complaints';
 import { notify, notifyConfirm } from '@/utils/notify';
 import { connectionErrorMessage } from '@/utils/networkErrors';
 import { runOrQueueWithNotice } from '@/services/pendingWrites';
+import { usePendingWrite } from '@/hooks/usePendingWrite';
+import { a11yState } from '@/utils/accessibility';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -102,6 +104,8 @@ export default function BusinessDetail() {
   const [averageRating, setAverageRating] = useState({ average: 0, count: 0 });
   const [followerCount, setFollowerCount] = useState(0);
   const [following, setFollowing] = useState(false);
+  // A follow/unfollow queued offline for this business (shown on the button).
+  const pendingFollow = usePendingWrite('follow', id);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -320,10 +324,11 @@ export default function BusinessDetail() {
               onPress={handleFollow}
               disabled={saving}
               accessibilityRole="button"
-              accessibilityState={{ selected: following, disabled: saving }}
+              {...a11yState({ selected: following, disabled: saving, busy: !!pendingFollow }, 'button')}
               accessibilityLabel={
                 following ? `Unfollow ${business.name}` : `Follow ${business.name}`
               }
+              accessibilityHint={pendingFollow ? "Waiting for a connection; it will sync when you're back online." : undefined}
               hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
             >
               <Heart
@@ -332,7 +337,7 @@ export default function BusinessDetail() {
                 fill={following ? Colors.text.inverse : 'transparent'}
               />
               <Text style={[styles.followBtnText, following && styles.followBtnTextActive]}>
-                {following ? 'Following' : 'Follow'}
+                {pendingFollow ? (following ? 'Following · syncing' : 'Follow · syncing') : following ? 'Following' : 'Follow'}
               </Text>
             </TouchableOpacity>
           )}
@@ -532,12 +537,22 @@ export default function BusinessDetail() {
                       void queryClient.invalidateQueries({ queryKey: ['business-reviews', id], refetchType: 'none' });
                       // Show the saved response now; the reload is best-effort
                       // so a failure can't report the saved response as failed.
-                      setReviews((prev) =>
-                        prev.map((r) => (r.id === reviewId ? { ...r, business_response: response } : r))
-                      );
+                      const withResponse = (list: ReviewWithProfile[]) =>
+                        list.map((r) => (r.id === reviewId ? { ...r, business_response: response } : r));
+                      setReviews(withResponse);
+                      // The cached page too, or coming back to this screen
+                      // (or opening it offline) would show the old response.
+                      const applyReviews = (next: ReviewWithProfile[]) =>
+                        queryClient.setQueryData<BusinessPage>(queryKeys.businessPage(id!), (page) =>
+                          page ? { ...page, reviews: next } : page
+                        );
+                      applyReviews(withResponse(reviews));
                       reviewsService
                         .getReviewsForBusiness(id!)
-                        .then(setReviews)
+                        .then((fresh) => {
+                          setReviews(fresh);
+                          applyReviews(fresh);
+                        })
                         .catch(() => {});
                     }
                   : undefined

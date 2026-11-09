@@ -52,7 +52,7 @@ import {
   matchDatePreset,
   type DatePresetKey,
 } from '@/utils/datePresets';
-import { focusElement } from '@/utils/accessibility';
+import { focusElement, a11yState } from '@/utils/accessibility';
 
 /** Collapsed sheet peek, as a share of window height. */
 const SHEET_PEEK_RATIO = 0.13;
@@ -117,7 +117,7 @@ export default function DiscoverScreen() {
   const eventCardWidth = windowWidth - LIST_HORIZONTAL_PADDING * 2;
   const { profile } = useAuth();
   const { hasBusiness, loading: appLoading } = useApp();
-  const { location: searchLocation, dateRange, setDateRange } = useSearch();
+  const { dateRange, setDateRange } = useSearch();
   const queryClient = useQueryClient();
   const connectivity = useConnectivity();
   // The last unfiltered area this device loaded (utils/discoverSnapshot):
@@ -332,6 +332,11 @@ export default function DiscoverScreen() {
   }, [events]);
   const loadRequestIdRef = useRef(0);
   const loadingMoreRef = useRef(false);
+  // The centre the current first page was loaded at. Later pages must use the
+  // same one: `center` state can lag the map (pull-to-refresh loads at the
+  // live map centre), and paging a different centre at this offset skips or
+  // repeats events and mixes in another area.
+  const pagedCenterRef = useRef<{ lat: number; lng: number } | null>(null);
 
   /**
    * Filters that haven't been committed to state yet. The overlay search sets
@@ -373,6 +378,7 @@ export default function DiscoverScreen() {
         { limit: EVENTS_PAGE_SIZE, offset: 0 }
       );
       if (requestId !== loadRequestIdRef.current) return false;
+      pagedCenterRef.current = { lat, lng };
       fetchOffsetRef.current = items.length;
       setHasMoreEvents(hasMore);
       setEvents(applyDateFilter(items, rangeFor(override)));
@@ -388,7 +394,7 @@ export default function DiscoverScreen() {
         setLoadError(true);
         // With stale events still on screen the ErrorState (empty-list only)
         // never shows, so surface the failure explicitly.
-        if (eventsRef.current.length > 0) notify.backgroundError("Couldn't refresh events.");
+        if (eventsRef.current.length > 0) notify.backgroundError("Couldn't refresh events.", err);
       }
     } finally {
       if (requestId === loadRequestIdRef.current) setLoading(false);
@@ -410,9 +416,10 @@ export default function DiscoverScreen() {
     setLoadingMore(true);
     let shouldChain = false;
     try {
+      const pageCenter = pagedCenterRef.current ?? center;
       const { items, hasMore } = await eventsService.getRankedEventsPage(
-        center.lat,
-        center.lng,
+        pageCenter.lat,
+        pageCenter.lng,
         currentFilters(),
         { limit: EVENTS_PAGE_SIZE, offset: fetchOffsetRef.current }
       );
@@ -616,6 +623,7 @@ export default function DiscoverScreen() {
     const area = readLastArea(queryClient);
     if (!area) return;
     pendingInitialRef.current = mapCenterRef.current;
+    pagedCenterRef.current = area.center;
     fetchOffsetRef.current = area.items.length;
     setEvents(area.items);
     setHasMoreEvents(area.hasMore);
@@ -740,6 +748,12 @@ export default function DiscoverScreen() {
     const map = new Map<string, string>();
     for (const event of events) {
       if (!event.is_recurring || !event.recurrence_pattern) continue;
+      // get_ranked_events computes the next occurrence server-side (same
+      // rule as the ranking); the client walk is only the fallback.
+      if (event.next_start_datetime) {
+        map.set(event.id, event.next_start_datetime);
+        continue;
+      }
       const [next] = getNextOccurrences(event, 1);
       if (next) map.set(event.id, next.toISOString());
     }
@@ -840,14 +854,14 @@ export default function DiscoverScreen() {
       <View style={styles.sheetHeaderRow}>
         <View>
           <Text style={styles.sheetEyebrow}>Happening Nearby</Text>
-          <Text style={styles.sheetTitle}>Discover</Text>
+          <Text style={styles.sheetTitle} accessibilityRole="header">Discover</Text>
         </View>
         <TouchableOpacity
           onPress={() => bottomSheetRef.current?.snapToIndex(1)}
           activeOpacity={0.8}
-          hitSlop={{ top: 12, bottom: 12, left: 16, right: 16 }}
+          style={styles.seeAllButton}
           accessibilityRole="button"
-          accessibilityLabel="Expand the event list"
+          accessibilityLabel="See all events"
         >
           <Text style={styles.seeAllText}>See all</Text>
         </TouchableOpacity>
@@ -1012,7 +1026,7 @@ export default function DiscoverScreen() {
             hitSlop={CHIP_HIT_SLOP}
             accessibilityRole="button"
             accessibilityLabel="Only events happening today"
-            accessibilityState={{ selected: activeDatePreset === 'today' }}
+            {...a11yState({ selected: activeDatePreset === 'today' }, 'button')}
           >
             <Text
               style={[
@@ -1029,8 +1043,8 @@ export default function DiscoverScreen() {
             activeOpacity={0.85}
             hitSlop={CHIP_HIT_SLOP}
             accessibilityRole="button"
-            accessibilityLabel="Show all event categories"
-            accessibilityState={{ selected: selectedCategories.length === 0 }}
+            accessibilityLabel="All categories"
+            {...a11yState({ selected: selectedCategories.length === 0 }, 'button')}
           >
             <Text style={[styles.overlayChipText, selectedCategories.length === 0 && styles.overlayChipTextActive]}>
               ALL EVENTS
@@ -1047,7 +1061,7 @@ export default function DiscoverScreen() {
                 hitSlop={CHIP_HIT_SLOP}
                 accessibilityRole="button"
                 accessibilityLabel={`${category.label} filter`}
-                accessibilityState={{ selected }}
+                {...a11yState({ selected }, 'button')}
               >
                 <CategoryIcon category={category.slug} size="sm" variant="minimal" />
                 <Text style={[styles.overlayChipText, selected && styles.overlayChipTextActive]}>
@@ -1136,7 +1150,7 @@ export default function DiscoverScreen() {
                     onPress={() => applyDatePreset(preset.key)}
                     activeOpacity={0.85}
                     accessibilityRole="button"
-                    accessibilityState={{ selected }}
+                    {...a11yState({ selected }, 'button')}
                     accessibilityLabel={preset.label}
                   >
                     <Text
@@ -1180,7 +1194,7 @@ export default function DiscoverScreen() {
                     onPress={() => toggleCategory(category.id)}
                     accessibilityRole="button"
                     accessibilityLabel={`${category.label} category`}
-                    accessibilityState={{ selected: isSelected }}
+                    {...a11yState({ selected: isSelected }, 'button')}
                     hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                   >
                     <CategoryIcon category={category.slug} size="sm" />
@@ -1259,6 +1273,9 @@ export default function DiscoverScreen() {
         topInset={headerHeight}
         enablePanDownToClose={false}
         handleIndicatorStyle={styles.handleIndicator}
+        // The library marks the sheet and handle role="slider" ("adjustable")
+        // without a value, which is invalid ARIA on web; "See all" expands it.
+        {...(Platform.OS === 'web' ? { accessibilityRole: null, accessibilityLabel: null } : null)}
         backgroundStyle={styles.sheetBackground}
         style={styles.sheetContainer}
         onChange={setSheetIndex}
@@ -1800,6 +1817,15 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
     fontFamily: Typography.displayFontFamilies.extrabold,
     fontWeight: Typography.weights.extrabold,
+  },
+  // 44 px tall target on every platform (hitSlop is native-only); the
+  // negative vertical margin keeps the header row height.
+  seeAllButton: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.md,
+    marginVertical: -11,
+    marginRight: -Spacing.md,
   },
   seeAllText: {
     color: Colors.primary,

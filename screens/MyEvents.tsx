@@ -44,13 +44,14 @@ import {
   Clock,
   FileText,
 } from '@/components/icons.generated';
+import { a11yState } from '@/utils/accessibility';
 
 const PAGE_SIZE = 30;
 
 type Scope = 'upcoming' | 'drafts' | 'past';
 const SCOPES: { value: Scope; label: string; a11y: string }[] = [
   { value: 'upcoming', label: 'Upcoming', a11y: 'Upcoming events' },
-  { value: 'drafts', label: 'Drafts', a11y: 'Draft events' },
+  { value: 'drafts', label: 'Drafts', a11y: 'Drafts' },
   { value: 'past', label: 'Past', a11y: 'Past and cancelled events' },
 ];
 
@@ -508,7 +509,7 @@ export default function MyEvents() {
             <View style={styles.headerIconWrap}>
               <CalendarDays size={18} color={Colors.primary} />
             </View>
-            <Text style={styles.headerTitle}>My Events</Text>
+            <Text style={styles.headerTitle} accessibilityRole="header">My Events</Text>
           </View>
           <View style={styles.headerSpacer} />
         </View>
@@ -553,7 +554,7 @@ export default function MyEvents() {
             <CalendarDays size={18} color={Colors.primary} />
           </View>
           <View>
-            <Text style={styles.headerTitle}>My Events</Text>
+            <Text style={styles.headerTitle} accessibilityRole="header">My Events</Text>
             <Text style={styles.headerSubtitle}>
               {loading
                 ? 'Loading…'
@@ -576,7 +577,7 @@ export default function MyEvents() {
               onPress={() => switchScope(tab.value)}
               activeOpacity={0.8}
               accessibilityRole="tab"
-              accessibilityState={{ selected: active }}
+              {...a11yState({ selected: active })}
               accessibilityLabel={tab.a11y}
             >
               <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{tab.label}</Text>
@@ -589,7 +590,7 @@ export default function MyEvents() {
         <View
           style={styles.skeletonList}
           accessibilityLabel="Loading your events"
-          accessibilityState={{ busy: true }}
+          {...a11yState({ busy: true })}
         >
           {[0, 1, 2].map((i) => (
             <View key={i} style={styles.skeletonCard}>

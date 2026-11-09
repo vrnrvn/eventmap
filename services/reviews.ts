@@ -28,10 +28,6 @@ export type AverageRatingResult = {
 
 // Prepared RPC (20261106150000) found missing this session; skip retries.
 let summaryRpcUnavailable = false;
-/** The prepared RPC isn't in the generated types yet. */
-const untypedRpc = (fn: string, args: Record<string, unknown>) =>
-  (supabase.rpc as unknown as (f: string, a: Record<string, unknown>) => ReturnType<typeof supabase.rpc>)(fn, args);
-
 export const reviewsService = {
   async createOrUpdateReview(
     businessId: string,
@@ -114,7 +110,7 @@ export const reviewsService = {
     // row — the device download was unbounded and silently wrong past
     // PostgREST's max_rows for well-reviewed businesses.
     if (!summaryRpcUnavailable) {
-      const { data, error } = await untypedRpc('get_business_review_summary', {
+      const { data, error } = await supabase.rpc('get_business_review_summary', {
         p_business_id: businessId,
       });
       if (!error) {

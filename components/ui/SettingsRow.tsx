@@ -2,6 +2,7 @@ import React, { ReactNode } from 'react';
 import { StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { ChevronRight } from '@/components/icons.generated';
 import { alpha, Colors, Typography } from '@/constants/theme';
+import { a11yState } from '@/utils/accessibility';
 
 type BaseProps = {
   /** Icon rendered inside the tinted well on the left. */
@@ -107,7 +108,7 @@ export function SettingsRow(props: SettingsRowProps) {
       accessibilityRole="button"
       accessibilityLabel={title}
       accessibilityHint={description}
-      accessibilityState={{ disabled: !!disabled }}
+      {...a11yState({ disabled: !!disabled })}
       testID={testID}
     >
       {content}

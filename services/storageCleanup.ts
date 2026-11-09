@@ -24,9 +24,7 @@ export function releaseEventImages(urls: readonly (string | null | undefined)[])
   if (candidates.length === 0 || isRpcKnownMissing(RPC)) return;
   void (async () => {
     try {
-      const { data, error } = await (
-        supabase.rpc as unknown as (f: string, a: Record<string, unknown>) => ReturnType<typeof supabase.rpc>
-      )(RPC, { p_urls: candidates });
+      const { data, error } = await supabase.rpc(RPC, { p_urls: candidates });
       if (error) {
         if (isMissingDbFunction(error)) markRpcMissing(RPC);
         return;

@@ -5,6 +5,7 @@ import { BottomSheetModal, BottomSheetView, TouchableOpacity } from '@gorhom/bot
 import { Check } from '@/components/icons.generated';
 import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { RECURRENCE_OPTIONS, type RecurrenceOption } from '@/utils/recurrence';
+import { a11yState } from '@/utils/accessibility';
 
 export type RecurrencePickerHandle = {
   present: () => void;
@@ -88,7 +89,7 @@ export const RecurrencePicker = forwardRef<RecurrencePickerHandle, RecurrencePic
                 activeOpacity={0.7}
                 accessibilityRole="button"
                 accessibilityLabel={`Repeat ${opt.label}`}
-                accessibilityState={{ selected: isSelected, disabled }}
+                {...a11yState({ selected: isSelected, disabled }, 'button')}
               >
                 <Text style={[styles.optionText, isSelected && styles.optionTextSelected, disabled && styles.optionTextDisabled]}>
                   {opt.label}

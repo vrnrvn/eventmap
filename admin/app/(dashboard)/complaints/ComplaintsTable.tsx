@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
 type Complaint = {
@@ -15,17 +16,22 @@ type Complaint = {
   profiles: { name: string } | { name: string }[] | null;
 };
 
-export function ComplaintsTable({ complaints }: { complaints: Complaint[] }) {
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+export function ComplaintsTable({
+  complaints,
+  statusFilter,
+}: {
+  complaints: Complaint[];
+  statusFilter: string;
+}) {
+  const router = useRouter();
   const [statuses, setStatuses] = useState<Record<string, string>>(
     Object.fromEntries(complaints.map((c) => [c.id, c.status]))
   );
   const [loading, setLoading] = useState<string | null>(null);
 
-  const filtered =
-    statusFilter === 'all'
-      ? complaints
-      : complaints.filter((c) => (statuses[c.id] ?? c.status) === statusFilter);
+  // Filtering happens in the page query (all pages); a row whose status is
+  // changed here stays visible until the next load so the action is seen.
+  const filtered = complaints;
 
   const getReporterName = (c: Complaint) => {
     const p = c.profiles;
@@ -59,7 +65,9 @@ export function ComplaintsTable({ complaints }: { complaints: Complaint[] }) {
       <div className="mb-4 flex gap-2">
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) =>
+            router.push(e.target.value === 'all' ? '/complaints' : `/complaints?status=${e.target.value}`)
+          }
           className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
         >
           <option value="all">All</option>

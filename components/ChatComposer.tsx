@@ -24,6 +24,8 @@ type Props = {
   /** Typing indicators / notices / slow-mode line, left of the counter. */
   statusLine: string;
   statusIsNotice: boolean;
+  /** 'error' colours the notice as a failure (default info). */
+  statusTone?: 'info' | 'error';
   /**
    * Every text change, user-typed or programmatic (setText/clear), so the
    * screen can mirror the draft into a ref, drive typing broadcasts and
@@ -52,6 +54,7 @@ export const ChatComposer = memo(
       sendBlocked,
       statusLine,
       statusIsNotice,
+      statusTone = 'info',
       onChangeText,
       onBlur,
       onSend,
@@ -89,7 +92,7 @@ export const ChatComposer = memo(
       <>
         <View style={styles.statusRow}>
           <Text
-            style={[styles.statusText, statusIsNotice && styles.statusTextNotice]}
+            style={[styles.statusText, statusIsNotice && styles.statusTextNotice, statusIsNotice && statusTone === 'error' && styles.statusTextError]}
             numberOfLines={1}
             accessibilityLiveRegion="polite"
           >
@@ -147,6 +150,9 @@ const styles = StyleSheet.create({
   },
   statusTextNotice: {
     color: Colors.text.secondary,
+  },
+  statusTextError: {
+    color: Colors.error,
   },
   charCounter: {
     marginLeft: Spacing.sm,

@@ -32,14 +32,10 @@ export function isCalendarRpcKnownUnavailable(): boolean {
   return rpcUnavailable;
 }
 
-/** The prepared RPC isn't in the generated types yet. */
-const untypedRpc = (fn: string, args: Record<string, unknown>) =>
-  (supabase.rpc as unknown as (f: string, a: Record<string, unknown>) => ReturnType<typeof supabase.rpc>)(fn, args);
-
 export const calendarService = {
   async getUserCalendar(from: Date, to: Date, sources: readonly CalendarSource[]): Promise<CalendarRange> {
     if (rpcUnavailable) throw new CalendarRpcUnavailableError();
-    const { data, error } = await untypedRpc('get_user_calendar', {
+    const { data, error } = await supabase.rpc('get_user_calendar', {
       p_from: from.toISOString(),
       p_to: to.toISOString(),
       p_sources: toRpcSources(sources),

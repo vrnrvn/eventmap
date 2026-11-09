@@ -3,6 +3,7 @@ import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-nativ
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X } from '@/components/icons.generated';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
+import { a11yState } from '@/utils/accessibility';
 
 export const REPORT_REASONS = [
   'Spam or misleading',
@@ -92,7 +93,7 @@ export function ReportReasonSheet({
                   pressed && styles.pressed,
                 ]}
                 accessibilityRole="radio"
-                accessibilityState={{ selected }}
+                {...a11yState({ selected })}
                 accessibilityLabel={option}
               >
                 <Text style={[styles.reasonText, selected && styles.reasonTextSelected]}>
@@ -132,7 +133,7 @@ export function ReportReasonSheet({
               pressed && styles.pressed,
             ]}
             accessibilityRole="button"
-            accessibilityState={{ disabled: !reason }}
+            {...a11yState({ disabled: !reason })}
           >
             <Text style={styles.submitText}>Send report</Text>
           </Pressable>

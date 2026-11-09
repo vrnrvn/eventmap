@@ -59,7 +59,9 @@ import {
   validateExtras,
   type EventExtrasDraft,
 } from '@/components/EventExtrasFields';
-import { choiceA11y } from '@/utils/accessibility';
+import { choiceA11y, a11yState, announce } from '@/utils/accessibility';
+import { validationSummary } from '@/utils/validationSummary';
+import { uuidv4 } from '@/utils/uuid';
 
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
 const MAX_EVENT_DATE = new Date();
@@ -113,6 +115,11 @@ export default function CreateScreen() {
   // address seeding below from silently overwriting their choice when the
   // business object is refreshed.
   const venueChosenRef = useRef(false);
+  // One key per event being written: a retried Publish after a lost response
+  // returns the event that was already created instead of making a second one.
+  // Separate keys for draft and publish: a lost "Save as draft" followed by
+  // Publish must create (or find) a published event, not return the draft.
+  const requestKeyRef = useRef({ draft: uuidv4(), published: uuidv4() });
 
   const businessLocation = userBusiness
     ? { lat: userBusiness.lat, lng: userBusiness.lng, address: userBusiness.address }
@@ -153,6 +160,7 @@ export default function CreateScreen() {
 
   const resetForm = () => {
     clearDraft();
+    requestKeyRef.current = { draft: uuidv4(), published: uuidv4() };
     venueChosenRef.current = false;
     setFormData({
       title: '',
@@ -351,13 +359,18 @@ export default function CreateScreen() {
       setShowExtras(true);
     }
     setErrors(e);
+    lastErrorsRef.current = e;
     return Object.keys(e);
   };
+  // Last validation result, for the spoken summary.
+  const lastErrorsRef = useRef<Record<string, string>>({});
 
   const handleSubmit = async (mode: 'publish' | 'draft' = 'publish') => {
     if (blockedOffline('save or publish events. Your form is kept on this device')) return;
     const problems = validate();
     if (problems.length > 0) {
+      // Screen readers otherwise hear nothing when Publish is refused.
+      announce(validationSummary(lastErrorsRef.current));
       // Scroll to the first failing section rather than the top, so the
       // message the user needs to read is on screen.
       const target = problems
@@ -392,9 +405,12 @@ export default function CreateScreen() {
       : (businessLocation?.lng ?? formData.lng);
 
     try {
-      // Drafts are free; the allowance is checked again at publish time.
+      // Drafts are free; the allowance is checked again at publish time. A
+      // retry after a lost response skips the pre-check: the first attempt
+      // may have used the last slot on this very event (the server still
+      // enforces the limit if it didn't).
       const { canCreate, currentCount, maxCount } =
-        mode === 'draft'
+        mode === 'draft' || eventsService.hasUncertainCreate(requestKeyRef.current.published)
           ? { canCreate: true, currentCount: 0, maxCount: 0 }
           : await businessesService.checkEventLimit(userBusiness.id);
       if (!canCreate) {
@@ -414,7 +430,8 @@ export default function CreateScreen() {
         ? Number(formData.maxAttendees.trim())
         : null;
       if (mode === 'draft') setSavingDraft(true);
-      const { id: eventId, capacityApplied, timezoneApplied, extrasApplied } = await eventsService.createEvent({
+      const { id: eventId, capacityApplied, timezoneApplied, extrasApplied, recovered } = await eventsService.createEvent({
+        requestKey: requestKeyRef.current[mode === 'draft' ? 'draft' : 'published'],
         businessId: userBusiness.id,
         title: formData.title.trim(),
         description: formData.description.trim(),
@@ -516,7 +533,9 @@ export default function CreateScreen() {
           ? `${mode === 'draft' ? 'Draft saved' : 'Event published'}, but ${warnings.join(' Also, ')}`
           : mode === 'draft'
             ? 'Draft saved. Publish it from Manage event when ready.'
-            : 'Event created!'
+            : recovered
+              ? 'Event created. Your earlier attempt had already gone through.'
+              : 'Event created!'
       );
       // Keep the quota pill current for the next event.
       void refreshSubscription();
@@ -605,7 +624,7 @@ export default function CreateScreen() {
             resizeMode="contain"
           />
           <View style={styles.pageHeaderText}>
-            <Text style={styles.pageTitle}>Create Event</Text>
+            <Text style={styles.pageTitle} accessibilityRole="header">Create Event</Text>
             <Text style={styles.pageSubtitle}>
               Fill in the details below to publish
             </Text>
@@ -1023,7 +1042,7 @@ export default function CreateScreen() {
             onPress={() => setShowExtras((v) => !v)}
             activeOpacity={0.6}
             accessibilityRole="button"
-            accessibilityState={{ expanded: showExtras }}
+            {...a11yState({ expanded: showExtras })}
             accessibilityLabel="More options: visibility, tickets, age, accessibility"
           >
             <View style={styles.dateTextBlock}>

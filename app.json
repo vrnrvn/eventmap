@@ -102,7 +102,7 @@
     },
     "owner": "shalommeoded",
     "runtimeVersion": {
-      "policy": "appVersion"
+      "policy": "fingerprint"
     },
     "updates": {
       "url": "https://u.expo.dev/a7da7dc4-919f-4d29-981b-777798915b54"
