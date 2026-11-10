@@ -14,7 +14,7 @@ import {
   Linking,
 } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as Location from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import BottomSheet, { BottomSheetFlatList } from '@gorhom/bottom-sheet';
@@ -33,13 +33,15 @@ import { isUnfiltered, makeDiscoverSnapshot, parseDiscoverSnapshot } from '@/uti
 import { getConnectivity, subscribeConnectivity } from '@/utils/connectivity';
 import { RankedEvent } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
-import { getCategoryIconColor } from '@/constants/categoryIcons';
+import { orderCategoriesForViewer, presentCategory } from '@/utils/categoryPresentation';
+import { categoryRoute, findCategoryBySlug } from '@/utils/categoryBrowse';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { X, Search, SlidersHorizontal, Plus, MapPin, Flame } from '@/components/icons.generated';
 import { EventmapFilter, EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView';
 import { SearchOverlay } from '@/components/SearchOverlay';
-import { filterEventsByDateRange, getNextOccurrences } from '@/utils/recurrence';
+import { filterEventsByDateRange } from '@/utils/recurrence';
+import { useEffectiveNextDates } from '@/hooks/useEffectiveNextDates';
 import { centroidOf, isInBounds, radiusKmFromBounds, zoomForPoints } from '@/utils/geoBounds';
 import { bannersService, type AppBanner } from '@/services/banners';
 import { AppBannerCarousel } from '@/components/AppBannerCarousel';
@@ -129,7 +131,13 @@ export default function DiscoverScreen() {
   const [eventsUpdatedAt, setEventsUpdatedAt] = useState(lastArea?.updatedAt ?? 0);
   // Category chips load on their own (shared, cached query): a failure keeps
   // the chips already shown and never stops the events request.
-  const { categories, refetch: refetchCategories } = useCategories();
+  const { categories, byId: categoryById, refetch: refetchCategories } = useCategories();
+  // Chips lead with the viewer's interests (onboarding / Settings), then the
+  // taxonomy order. Retired categories drop out unless they are an interest.
+  const orderedCategories = useMemo(
+    () => orderCategoriesForViewer(categories, profile?.preferred_categories),
+    [categories, profile?.preferred_categories]
+  );
   const [loading, setLoading] = useState(!lastArea);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
@@ -223,6 +231,18 @@ export default function DiscoverScreen() {
   // Seeded with the initial signature so mount doesn't duplicate
   // loadInitialData's fetch.
   const lastFilterSignatureRef = useRef(filterSignature);
+
+  // `/(tabs)/discover?category=<slug>` (the browse screen's "Show on map"):
+  // select exactly that category once categories are known, then drop the
+  // param so returning to the tab later doesn't re-apply it over the user's
+  // own chip choices. The signature effect below does the reload.
+  const { category: categoryParam } = useLocalSearchParams<{ category?: string }>();
+  useEffect(() => {
+    if (!categoryParam || categories.length === 0) return;
+    const match = findCategoryBySlug(categories, categoryParam);
+    if (match) setSelectedCategories([match.id]);
+    router.setParams({ category: undefined } as never);
+  }, [categoryParam, categories]);
 
   useEffect(() => {
     if (lastFilterSignatureRef.current === filterSignature) return;
@@ -355,6 +375,7 @@ export default function DiscoverScreen() {
       radiusKm: radiusKmFromBounds(mapBoundsRef.current),
       searchQuery: (override?.searchQuery ?? searchQuery) || undefined,
       categories: selectedCategories.length > 0 ? selectedCategories : undefined,
+      preferredCategories: profile?.preferred_categories?.length ? profile.preferred_categories : undefined,
       startDate: range?.start ?? null,
       endDate: range?.end ?? null,
     };
@@ -744,21 +765,9 @@ export default function DiscoverScreen() {
   // date in the series instead of the original (possibly long-past) start.
   // Display-only: filtering/sorting still uses the raw start_datetime.
   // Memoized per events array so the FlatList re-renders don't re-walk days.
-  const nextOccurrenceById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const event of events) {
-      if (!event.is_recurring || !event.recurrence_pattern) continue;
-      // get_ranked_events computes the next occurrence server-side (same
-      // rule as the ranking); the client walk is only the fallback.
-      if (event.next_start_datetime) {
-        map.set(event.id, event.next_start_datetime);
-        continue;
-      }
-      const [next] = getNextOccurrences(event, 1);
-      if (next) map.set(event.id, next.toISOString());
-    }
-    return map;
-  }, [events]);
+  // Series: the server's next_start_datetime (the ranking's value) unless a
+  // skipped/moved date or the clock says otherwise (E-R1 / G2).
+  const nextOccurrenceById = useEffectiveNextDates(events);
 
   const activeFilterCount =
     selectedCategories.length + (searchQuery.length > 0 ? 1 : 0) + (dateRange != null ? 1 : 0);
@@ -801,11 +810,13 @@ export default function DiscoverScreen() {
         lng: e.lng,
         title: e.title,
         categorySlug: e.category_slug,
+        categoryColor: categoryById.get(e.category_id)?.color ?? null,
+        categoryIconKey: categoryById.get(e.category_id)?.icon_key ?? null,
         coverImageUrl: e.cover_image_url,
         businessLogoUrl: e.business_logo_url,
         businessName: e.business_name,
       })),
-    [events]
+    [events, categoryById]
   );
 
   const openEvent = useCallback((eventId: string) => {
@@ -959,7 +970,7 @@ export default function DiscoverScreen() {
               </View>
               <View style={styles.floatingCardWhitePanel}>
                 <View style={styles.floatingCardCategoryRow}>
-                  <CategoryIcon category={activeEvent.category_slug} size="sm" />
+                  <CategoryIcon category={categoryById.get(activeEvent.category_id) ?? activeEvent.category_slug} size="sm" />
                   <Text style={styles.floatingCardTitle} numberOfLines={2}>
                     {activeEvent.title}
                   </Text>
@@ -1034,7 +1045,7 @@ export default function DiscoverScreen() {
                 activeDatePreset === 'today' && styles.overlayChipTextActive,
               ]}
             >
-              TODAY
+              Today
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -1043,29 +1054,35 @@ export default function DiscoverScreen() {
             activeOpacity={0.85}
             hitSlop={CHIP_HIT_SLOP}
             accessibilityRole="button"
-            accessibilityLabel="All categories"
+            accessibilityLabel="All events"
             {...a11yState({ selected: selectedCategories.length === 0 }, 'button')}
           >
             <Text style={[styles.overlayChipText, selectedCategories.length === 0 && styles.overlayChipTextActive]}>
-              ALL EVENTS
+              All events
             </Text>
           </TouchableOpacity>
-          {categories.slice(0, 8).map((category) => {
+          {orderedCategories.map((category) => {
             const selected = selectedCategories.includes(category.id);
+            const { label, color } = presentCategory(category);
             return (
               <TouchableOpacity
                 key={category.id}
-                style={[styles.overlayChip, selected && styles.overlayChipActive]}
+                style={[styles.overlayChip, selected && { backgroundColor: color, borderColor: color }]}
                 onPress={() => toggleCategory(category.id)}
                 activeOpacity={0.85}
                 hitSlop={CHIP_HIT_SLOP}
                 accessibilityRole="button"
-                accessibilityLabel={`${category.label} filter`}
+                accessibilityLabel={`${label} filter`}
                 {...a11yState({ selected }, 'button')}
               >
-                <CategoryIcon category={category.slug} size="sm" variant="minimal" />
+                <CategoryIcon
+                  category={category}
+                  size="sm"
+                  variant="minimal"
+                  color={selected ? Colors.text.inverse : undefined}
+                />
                 <Text style={[styles.overlayChipText, selected && styles.overlayChipTextActive]}>
-                  {category.label.toUpperCase()}
+                  {label}
                 </Text>
               </TouchableOpacity>
             );
@@ -1178,9 +1195,9 @@ export default function DiscoverScreen() {
               Categories
             </Text>
             <View style={styles.categoriesGrid}>
-              {categories.map((category) => {
+              {orderedCategories.map((category) => {
                 const isSelected = selectedCategories.includes(category.id);
-                const categoryColor = getCategoryIconColor(category.slug);
+                const { label: categoryLabel, color: categoryColor } = presentCategory(category);
                 return (
                   <TouchableOpacity
                     key={category.id}
@@ -1193,18 +1210,23 @@ export default function DiscoverScreen() {
                     ]}
                     onPress={() => toggleCategory(category.id)}
                     accessibilityRole="button"
-                    accessibilityLabel={`${category.label} category`}
+                    accessibilityLabel={`${categoryLabel} category`}
                     {...a11yState({ selected: isSelected }, 'button')}
                     hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
                   >
-                    <CategoryIcon category={category.slug} size="sm" />
+                    <CategoryIcon
+                      category={category}
+                      size="sm"
+                      variant={isSelected ? 'minimal' : 'pill'}
+                      color={isSelected ? Colors.text.inverse : undefined}
+                    />
                     <Text
                       style={[
                         styles.categoryChipText,
                         isSelected && styles.categoryChipTextSelected,
                       ]}
                     >
-                      {category.label}
+                      {categoryLabel}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -1228,6 +1250,11 @@ export default function DiscoverScreen() {
         onSearch={handleSearchFromOverlay}
         userLocation={userLocation}
         initialKeyword={searchQuery}
+        onSelectCategory={(category) => {
+          // A category pick replaces the typed text: "gig" → Live Music.
+          setSearchQuery('');
+          setSelectedCategories([category.id]);
+        }}
       />
 
       {loading && events.length === 0 && (
@@ -1348,6 +1375,30 @@ export default function DiscoverScreen() {
                   >
                     <Text style={styles.clearFiltersText}>Clear filters</Text>
                   </TouchableOpacity>
+                ) : null}
+                {offscreenEvents.length === 0 && orderedCategories.length > 0 ? (
+                  <View style={styles.browseBlock}>
+                    <Text style={styles.browseTitle}>Browse by category</Text>
+                    <View style={styles.browseGrid}>
+                      {orderedCategories.slice(0, 6).map((category) => {
+                        const { label } = presentCategory(category);
+                        return (
+                          <TouchableOpacity
+                            key={category.id}
+                            style={styles.categoryChip}
+                            onPress={() => router.push(categoryRoute(category.slug) as never)}
+                            activeOpacity={0.8}
+                            accessibilityRole="link"
+                            accessibilityLabel={`Browse ${label}`}
+                            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+                          >
+                            <CategoryIcon category={category} size="sm" />
+                            <Text style={styles.categoryChipText}>{label}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
                 ) : null}
               </View>
             )
@@ -1483,7 +1534,7 @@ const styles = StyleSheet.create({
   },
   overlayChipText: {
     fontSize: Typography.sizes.xs,
-    letterSpacing: 0.2,
+    letterSpacing: 0.1,
     color: Colors.text.primary,
     fontFamily: Typography.labelFontFamilies.semibold,
   },
@@ -1848,6 +1899,23 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamily,
     color: Colors.primary,
+  },
+  browseBlock: {
+    marginTop: Spacing.lg,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+  },
+  browseTitle: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    color: Colors.text.secondary,
+    marginBottom: Spacing.sm,
+  },
+  browseGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: Spacing.sm,
   },
   categoriesGrid: {
     flexDirection: 'row',

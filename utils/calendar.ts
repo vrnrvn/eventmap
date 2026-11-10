@@ -10,6 +10,7 @@
  * falls on (including the event-zone DST handling added in Phase 2).
  */
 import { getNextOccurrences, type RecurrencePattern } from '@/utils/recurrence';
+import { occurrenceDateKey, type OccurrenceException } from '@/utils/occurrences';
 import {
   dateKeyInZone,
   describeEventTime,
@@ -158,7 +159,13 @@ export function occurrenceDayKeys(start: Date, end: Date, tz: string): string[] 
 export function expandOccurrences<T extends CalendarEvent>(
   rows: readonly SourcedEvent<T>[],
   range: DayRange,
-  viewerTz: string = getDeviceTimeZone()
+  viewerTz: string = getDeviceTimeZone(),
+  /**
+   * Per-date exceptions by event id (services/occurrences). Skipped dates
+   * are dropped; moved dates appear at their new time. A date moved INTO the
+   * range from outside it is not picked up (the walk keys on original dates).
+   */
+  exceptionsByEvent?: ReadonlyMap<string, readonly OccurrenceException[]>
 ): Occurrence<T>[] {
   const tz = isValidTimeZone(viewerTz) ? viewerTz : 'UTC';
   const fromKey = dateKeyInZone(range.from, tz);
@@ -220,8 +227,29 @@ export function expandOccurrences<T extends CalendarEvent>(
     // most one occurrence per day, so the day count bounds the walk.
     const lookBack = Math.min(Math.ceil(duration / DAY_MS), MAX_SPAN_DAYS);
     const walkFrom = new Date(range.from.getTime() - lookBack * DAY_MS);
+    const exByKey = new Map((exceptionsByEvent?.get(event.id) ?? []).map((x) => [x.occurrence_date.slice(0, 10), x]));
+    // G15: a date moved INTO the range from outside it is not reached by the
+    // walk over original dates, so add such moves directly.
+    const walked = new Set<string>();
+    for (const x of exByKey.values()) {
+      if (x.kind !== 'rescheduled' || !x.new_start || !x.new_end) continue;
+      const ns = new Date(x.new_start);
+      const key = dateKeyInZone(ns, tz);
+      if (key < fromKey || key > toKey) continue;
+      const original = x.occurrence_date.slice(0, 10);
+      // Only when the original date is outside what the walk below covers.
+      if (original >= dateKeyInZone(walkFrom, tz) && original <= toKey) continue;
+      push(event, sorted, pending, ns, new Date(x.new_end), true);
+      walked.add(original);
+    }
     for (const occStart of getNextOccurrences(event, rangeDays + lookBack, walkFrom)) {
       if (dateKeyInZone(occStart, tz) > toKey) break;
+      const ex = exByKey.size ? exByKey.get(occurrenceDateKey(occStart, event.timezone)) : undefined;
+      if (ex?.kind === 'cancelled') continue;
+      if (ex?.kind === 'rescheduled' && ex.new_start && ex.new_end) {
+        push(event, sorted, pending, new Date(ex.new_start), new Date(ex.new_end), true);
+        continue;
+      }
       push(event, sorted, pending, occStart, new Date(occStart.getTime() + duration), true);
     }
   }
@@ -418,7 +446,7 @@ export function calendarIcsInputs<T extends CalendarEvent>(
       endIso: new Date(anchor.getTime() + duration).toISOString(),
       address: event.address ?? null,
       description: event.description,
-      recurrence: buildRecurrenceRule(event.recurrence_pattern, event.is_recurring, event.timezone),
+      recurrence: buildRecurrenceRule(event.recurrence_pattern, event.is_recurring, event.timezone, event.start_datetime),
       timezone: event.timezone ?? null,
     });
   }

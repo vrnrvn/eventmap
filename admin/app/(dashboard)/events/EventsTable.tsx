@@ -10,7 +10,9 @@ type Event = {
   start_datetime: string;
   end_datetime: string;
   created_at: string;
+  category_id?: string | null;
   businesses: { name: string } | { name: string }[] | null;
+  categories?: { label: string } | { label: string }[] | null;
 };
 
 export function EventsTable({ events }: { events: Event[] }) {
@@ -22,6 +24,11 @@ export function EventsTable({ events }: { events: Event[] }) {
   const getBusinessName = (e: Event) => {
     const b = e.businesses;
     return Array.isArray(b) ? b[0]?.name : (b as { name: string })?.name ?? '—';
+  };
+
+  const getCategoryLabel = (e: Event) => {
+    const c = e.categories;
+    return (Array.isArray(c) ? c[0]?.label : c?.label) ?? '—';
   };
 
   const handleDelete = async (eventId: string) => {
@@ -47,6 +54,7 @@ export function EventsTable({ events }: { events: Event[] }) {
             <tr>
               <th className="px-4 py-3 text-left font-medium text-zinc-700">Title</th>
               <th className="px-4 py-3 text-left font-medium text-zinc-700">Business</th>
+              <th className="px-4 py-3 text-left font-medium text-zinc-700">Category</th>
               <th className="px-4 py-3 text-left font-medium text-zinc-700">Start</th>
               <th className="px-4 py-3 text-left font-medium text-zinc-700">End</th>
               <th className="px-4 py-3 text-left font-medium text-zinc-700">Actions</th>
@@ -61,6 +69,7 @@ export function EventsTable({ events }: { events: Event[] }) {
                   </Link>
                 </td>
                 <td className="px-4 py-3 text-zinc-600">{getBusinessName(e)}</td>
+                <td className="px-4 py-3 text-zinc-600">{getCategoryLabel(e)}</td>
                 <td className="px-4 py-3 text-zinc-600">
                   {new Date(e.start_datetime).toLocaleString()}
                 </td>

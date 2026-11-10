@@ -425,3 +425,51 @@ describe('dayMarkers', () => {
     expect(dayMarkers([])).toEqual([]);
   });
 });
+
+describe('expandOccurrences with per-date exceptions', () => {
+  it('drops skipped dates and moves rescheduled ones', async () => {
+    const { expandOccurrences } = await import('@/utils/calendar');
+    const event = {
+      id: 'jam',
+      title: 'Weekly Jam',
+      start_datetime: '2026-11-03T19:00:00Z',
+      end_datetime: '2026-11-03T21:00:00Z',
+      is_recurring: true,
+      recurrence_pattern: { frequency: 'weekly' as const, interval: 1 },
+      timezone: 'UTC',
+    };
+    const range = { from: new Date('2026-11-09T00:00:00Z'), to: new Date('2026-11-30T23:59:59Z') };
+    const ex = new Map([
+      ['jam', [
+        { event_id: 'jam', occurrence_date: '2026-11-10', kind: 'cancelled' as const, new_start: null, new_end: null, note: null },
+        { event_id: 'jam', occurrence_date: '2026-11-17', kind: 'rescheduled' as const, new_start: '2026-11-18T20:00:00Z', new_end: '2026-11-18T22:00:00Z', note: null },
+      ]],
+    ]);
+    const days = expandOccurrences([{ event, source: 'going' } as never], range, 'UTC', ex).map((o) => o.dayKey);
+    expect(days).toEqual(['2026-11-18', '2026-11-24']);
+    const plain = expandOccurrences([{ event, source: 'going' } as never], range, 'UTC').map((o) => o.dayKey);
+    expect(plain).toEqual(['2026-11-10', '2026-11-17', '2026-11-24']);
+  });
+});
+
+describe('expandOccurrences: date moved INTO the range (G15)', () => {
+  it('shows a date moved in from outside the visible range', async () => {
+    const { expandOccurrences } = await import('@/utils/calendar');
+    const event = {
+      id: 'jam2',
+      title: 'Weekly Jam',
+      start_datetime: '2026-11-03T19:00:00Z',
+      end_datetime: '2026-11-03T21:00:00Z',
+      is_recurring: true,
+      recurrence_pattern: { frequency: 'weekly' as const, interval: 1 },
+      timezone: 'UTC',
+    };
+    // Range: just 11–13 Nov. 24 Nov (outside) is moved to 12 Nov.
+    const range = { from: new Date('2026-11-11T00:00:00Z'), to: new Date('2026-11-13T23:59:59Z') };
+    const ex = new Map([
+      ['jam2', [{ event_id: 'jam2', occurrence_date: '2026-11-24', kind: 'rescheduled' as const, new_start: '2026-11-12T18:00:00Z', new_end: '2026-11-12T20:00:00Z', note: null }]],
+    ]);
+    const days = expandOccurrences([{ event, source: 'going' } as never], range, 'UTC', ex).map((o) => o.dayKey);
+    expect(days).toEqual(['2026-11-12']);
+  });
+});

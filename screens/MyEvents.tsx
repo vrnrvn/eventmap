@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
+import { useEffectiveNextDates } from '@/hooks/useEffectiveNextDates';
 import { useIsRestoring, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/hooks/queryKeys';
 import { useConnectivity } from '@/services/connectivity';
@@ -29,7 +30,6 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import { EventListItem, formatEventDate } from '@/components/EventListItem';
 import { Event } from '@/types/database';
 import { hasEventEnded, isEventInProgress } from '@/utils/eventStatus';
-import { getNextOccurrences } from '@/utils/recurrence';
 import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import {
   ArrowLeft,
@@ -75,6 +75,7 @@ export default function MyEvents() {
   const { hasBusiness, userBusiness } = useApp();
   const [scope, setScope] = useState<Scope>('upcoming');
   const [events, setEvents] = useState<Event[]>([]);
+  const nextById = useEffectiveNextDates(events);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -287,7 +288,7 @@ export default function MyEvents() {
       // Recurring series: show the next occurrence, not the first one.
       const nextStart =
         item.is_recurring && !ended && !cancelled
-          ? (getNextOccurrences(item, 1)[0]?.toISOString() ?? item.start_datetime)
+          ? (nextById.get(item.id) ?? item.start_datetime)
           : item.start_datetime;
       const badge = cancelled
         ? { label: 'Cancelled', tone: 'danger' as const }
@@ -387,7 +388,7 @@ export default function MyEvents() {
         </View>
       );
     },
-    [handleCancelEvent, handleNotifyFollowers, counts]
+    [handleCancelEvent, handleNotifyFollowers, counts, nextById]
   );
 
   const keyExtractor = useCallback((item: Event) => item.id, []);

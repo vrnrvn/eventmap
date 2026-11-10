@@ -13,7 +13,7 @@ import {
 } from '@/utils/webviewInject';
 
 /** Bump when changing map icon logic or HTML structure to force WebView reload */
-const MAP_HTML_VERSION = 9;
+const MAP_HTML_VERSION = 11;
 
 export type GoogleMapHandle = {
   animateTo: (lat: number, lng: number, zoom?: number) => void;
@@ -24,7 +24,10 @@ type MapMarker = {
   lat: number;
   lng: number;
   title: string;
-  categorySlug?: string;
+  categorySlug?: string | null;
+  /** From the category row; the WebView falls back to the slug when absent. */
+  categoryColor?: string | null;
+  categoryIconKey?: string | null;
   coverImageUrl?: string | null;
   businessLogoUrl?: string | null;
   businessName?: string;

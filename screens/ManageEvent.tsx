@@ -12,6 +12,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  ScrollView,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -77,7 +78,10 @@ import { notify } from '@/utils/notify';
 import { classifyRsvpError } from '@/utils/rsvpErrors';
 import { formatEventDate, formatEventWhen } from '@/utils/formatEventWhen';
 import { describeEventTime, formatInZone, getDeviceTimeZone, isValidTimeZone } from '@/utils/timezone';
-import { getNextOccurrences } from '@/utils/recurrence';
+import { effectiveNextStartIso, listOccurrences } from '@/utils/occurrences';
+import { OccurrencesUnavailableError, occurrencesService } from '@/services/occurrences';
+import { useOccurrenceExceptions } from '@/hooks/useOccurrenceExceptions';
+import { SeriesDatesSection } from '@/components/SeriesDatesSection';
 import {
   formatSecondaryCounts,
   getHostActions,
@@ -343,19 +347,32 @@ export default function ManageEvent() {
   const badge = HOST_PHASE_BADGE[phase];
   const tone = badgeTones[badge.tone];
 
+  const { exceptions: manageExceptions } = useOccurrenceExceptions(event?.id, !!event?.is_recurring);
+  // Next dates offered as attendee filters (F-R3), with skips/moves applied.
+  const attendeeDateOptions = useMemo(() => {
+    if (!event?.is_recurring) return [] as { key: string; label: string }[];
+    return listOccurrences(event, manageExceptions, { count: 6, includeCancelled: false, strict: true }).map((o) => ({
+      key: o.dateKey,
+      label: o.start.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }),
+    }));
+  }, [event, manageExceptions]);
+
   const nextStart = useMemo(() => {
     if (!event) return null;
     if (event.is_recurring && phase !== 'ended' && phase !== 'cancelled') {
-      return getNextOccurrences(event, 1)[0]?.toISOString() ?? event.start_datetime;
+      return effectiveNextStartIso(event, manageExceptions);
     }
     return event.start_datetime;
-  }, [event, phase]);
+  }, [event, phase, manageExceptions]);
 
   const going = overview?.going ?? details?.rsvp_count ?? 0;
   const capacity = summarizeCapacity(going, event?.max_attendees);
 
   // ── Attendees tab ─────────────────────────────────────────────────────────
   const [attendeeStatus, setAttendeeStatus] = useState<HostAttendeeStatus>('going');
+  /** F-R3: 'YYYY-MM-DD' to list one date's goers (series only); null = whole series. */
+  const [attendeeDate, setAttendeeDate] = useState<string | null>(null);
+  const [attendeeDateUnavailable, setAttendeeDateUnavailable] = useState(false);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [attendees, setAttendees] = useState<HostAttendee[]>([]);
@@ -381,6 +398,43 @@ export default function ManageEvent() {
       setAttendeesLoading(true);
       setAttendeesError(false);
       try {
+        if (attendeeDate && attendeeStatus === 'going') {
+          // One date of a series (get_occurrence_attendees_page). Rows are
+          // read-only here: remove/ban act on the series list.
+          try {
+            const page = await occurrencesService.getDateAttendeesPage(id, attendeeDate, { limit: ATTENDEE_PAGE, offset });
+            if (seq !== attendeeReqSeq.current) return;
+            const q = debouncedSearch.trim().toLowerCase();
+            const items: HostAttendee[] = page.items
+              .filter((a) => !q || a.name.toLowerCase().includes(q))
+              .map((a) => ({
+                user_id: a.user_id,
+                name: a.via === 'date' ? `${a.name} · this date only` : a.name,
+                avatar_url: a.avatar_url,
+                bio: null,
+                is_private: a.is_private,
+                status: 'going',
+                joined_at: a.joined_at,
+                reason: null,
+                chat_blocked: false,
+                can_manage: false,
+              }));
+            setAttendees((prev) => (offset === 0 ? items : [...prev, ...items]));
+            setAttendeeTotal(page.total);
+            setAttendeeHasMore(page.has_more);
+            setAttendeeSource('host_rpc');
+            setAttendeeDateUnavailable(false);
+          } catch (e) {
+            if (seq !== attendeeReqSeq.current) return;
+            if (e instanceof OccurrencesUnavailableError) {
+              setAttendeeDateUnavailable(true);
+              setAttendeeDate(null);
+              return;
+            }
+            throw e;
+          }
+          return;
+        }
         const page = await hostToolsService.getAttendeesPage(id, {
           status: attendeeStatus,
           limit: ATTENDEE_PAGE,
@@ -399,7 +453,7 @@ export default function ManageEvent() {
         if (seq === attendeeReqSeq.current) setAttendeesLoading(false);
       }
     },
-    [id, attendeeStatus, debouncedSearch]
+    [id, attendeeStatus, debouncedSearch, attendeeDate]
   );
 
   useEffect(() => {
@@ -985,6 +1039,10 @@ export default function ManageEvent() {
           ) : null}
         </SettingsSection>
 
+        {event.is_recurring && phase !== 'ended' && phase !== 'cancelled' ? (
+          <SeriesDatesSection event={event} canEdit={actions.canEdit} />
+        ) : null}
+
         {actions.canReschedule || actions.canPostpone ? (
           <SettingsSection
             title="Schedule"
@@ -1071,6 +1129,37 @@ export default function ManageEvent() {
             accessibilityLabel="Search attendees by name"
           />
         </View>
+        {event?.is_recurring && attendeeStatus === 'going' ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateChips} accessibilityLabel="Which date">
+            {[{ key: null as string | null, label: 'Whole series' }, ...attendeeDateOptions].map((opt) => {
+              const selected = attendeeDate === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key ?? 'all'}
+                  style={[styles.dateChip, selected && styles.dateChipOn]}
+                  onPress={() => {
+                    if (attendeeDate === opt.key) return;
+                    setAttendeeDate(opt.key);
+                    setAttendees([]);
+                    setAttendeeTotal(0);
+                    setAttendeeHasMore(false);
+                    setAttendeeSource(null);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={opt.key ? `Going on ${opt.label}` : 'Everyone going to the series'}
+                  {...a11yState({ selected }, 'button')}
+                >
+                  <Text style={[styles.dateChipText, selected && styles.dateChipTextOn]}>{opt.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        ) : null}
+        {attendeeDateUnavailable ? (
+          <Text style={styles.limitedNote}>Per-date lists need a database update that has not been applied yet.</Text>
+        ) : attendeeDate ? (
+          <Text style={styles.limitedNote}>Showing who is coming on this date. Remove or message people from the whole-series list.</Text>
+        ) : null}
         {fallback && attendeeStatus !== 'going' ? (
           <Text style={styles.limitedNote}>
             The {attendeeStatus} list needs a database update that has not been applied yet.
@@ -1710,6 +1799,20 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.md,
     marginTop: Spacing.sm,
   },
+  dateChips: { gap: Spacing.sm, paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm },
+  dateChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    minHeight: 34,
+    justifyContent: 'center',
+    borderRadius: BorderRadius.round,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+    backgroundColor: Colors.surface,
+  },
+  dateChipOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  dateChipText: { fontSize: Typography.sizes.xs, fontFamily: Typography.fontFamilies.medium, color: Colors.text.primary },
+  dateChipTextOn: { color: '#FFFFFF' },
   subTabs: {
     marginBottom: Spacing.md,
   },

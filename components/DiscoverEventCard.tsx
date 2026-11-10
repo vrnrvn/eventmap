@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { cadenceLabel } from '@/utils/recurrence';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { MapPin, BookmarkCheck } from '@/components/icons.generated';
@@ -96,6 +97,11 @@ export const DiscoverEventCard = memo(function DiscoverEventCard({
             <View style={styles.badgeDark}>
               <Text style={styles.badgeDarkText}>{item.category_label.toUpperCase()}</Text>
             </View>
+            {item.is_recurring && item.recurrence_pattern ? (
+              <View style={styles.badgeLight} accessibilityLabel={`Repeats ${cadenceLabel(item.recurrence_pattern).toLowerCase()}`}>
+                <Text style={styles.badgeLightText}>{cadenceLabel(item.recurrence_pattern).toUpperCase()}</Text>
+              </View>
+            ) : null}
             {item.user_rsvp === 'going' ? (
               <View style={styles.badgeGoing}>
                 <Text style={styles.badgeGoingText}>GOING</Text>

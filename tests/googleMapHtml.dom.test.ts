@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { JSDOM, type DOMWindow } from 'jsdom';
 import { buildMapHtml } from '@/utils/googleMapHtml';
-import { CATEGORY_COLORS } from '@/constants/categories';
+import { CATEGORY_SLUG_STYLES } from '@/constants/categoryMarkers';
 import { MARKER_SIZE } from '@/constants/categoryMarkers';
 
 type Listener = (...args: unknown[]) => void;
@@ -203,7 +203,7 @@ describe('markers', () => {
     const icon = markers[0].icon;
     expect(String(icon.url)).toMatch(/^data:image\/svg\+xml/);
     const decoded = decodeURIComponent(String(icon.url).split(',')[1]);
-    expect(decoded).toContain(CATEGORY_COLORS.nightlife);
+    expect(decoded).toContain(CATEGORY_SLUG_STYLES.nightlife.color);
     expect((icon.scaledSize as any).width).toBe(MARKER_SIZE);
     expect((icon.anchor as any).x).toBe(MARKER_SIZE / 2);
   });

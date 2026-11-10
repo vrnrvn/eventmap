@@ -26,6 +26,9 @@ import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { businessLocationStore } from '@/stores/businessLocationStore';
 import { profileLocationStore } from '@/stores/profileLocationStore';
 import { CategoryIcon } from '@/components/CategoryIcon';
+import { BUSINESS_CATEGORY_LABELS } from '@/constants/businessCategories';
+import { CategoryPicker } from '@/components/CategoryPicker';
+import { useCategories } from '@/hooks/useCategories';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { clearOnboardingDraft } from '@/utils/onboardingDraft';
@@ -94,24 +97,19 @@ const EVENT_REMINDER_OPTIONS: { value: number | null; label: string }[] = [
   { value: 1440, label: '24 hours' },
 ];
 
-const BUSINESS_CATEGORIES = [
-  'Restaurant',
-  'Bar & Nightlife',
-  'Fitness & Wellness',
-  'Coffee Shop',
-  'Entertainment',
-  'Arts & Culture',
-  'Sports & Recreation',
-  'Education',
-  'Community',
-  'Other',
-];
+const BUSINESS_CATEGORIES = BUSINESS_CATEGORY_LABELS;
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { user, profile, refreshProfile, signOut } = useAuth();
   const { userBusiness, refreshBusiness, userMode, hasBusiness } = useApp();
   const { isPremium } = usePremium();
+  const {
+    categories,
+    isPending: categoriesPending,
+    isError: categoriesError,
+    refetch: refetchCategories,
+  } = useCategories();
   const [saving, setSaving] = useState<'user' | 'business' | null>(null);
   const [savedSection, setSavedSection] = useState<'user' | 'business' | null>(null);
 
@@ -126,6 +124,7 @@ export default function SettingsScreen() {
     name: '',
     bio: '',
     hobbies: '',
+    preferredCategories: [] as string[],
     instagram: '',
     facebook: '',
     city: '',
@@ -145,6 +144,7 @@ export default function SettingsScreen() {
     eventUpdate: true,
     rsvp: true,
     nearbyEvent: true,
+    interestEvents: false,
     hostAnnouncement: true,
     chatMessage: true,
     eventReminderEnabled: true,
@@ -208,6 +208,7 @@ export default function SettingsScreen() {
         name: profile.name ?? '',
         bio: profile.bio ?? '',
         hobbies: profile.hobbies ?? '',
+        preferredCategories: profile.preferred_categories ?? [],
         instagram: handles.instagram ?? '',
         facebook: handles.facebook ?? '',
         city: profile.city ?? '',
@@ -226,6 +227,8 @@ export default function SettingsScreen() {
         eventUpdate: prefs.event_update ?? true,
         rsvp: prefs.rsvp ?? true,
         nearbyEvent: prefs.nearby_event ?? true,
+        // Opt-in (absent = off), unlike the other preferences.
+        interestEvents: prefs.interest_events ?? false,
         chatMessage: prefs.chat_message ?? true,
         hostAnnouncement: prefs.host_announcement ?? true,
         eventReminderEnabled: profile.event_reminder_enabled ?? true,
@@ -313,6 +316,7 @@ export default function SettingsScreen() {
         name: userForm.name.trim(),
         bio: userForm.bio.trim() || null,
         hobbies: userForm.hobbies.trim() || null,
+        preferred_categories: userForm.preferredCategories,
         social_handles: {
           instagram: userForm.instagram.trim() || undefined,
           facebook: userForm.facebook.trim() || undefined,
@@ -413,6 +417,7 @@ export default function SettingsScreen() {
         event_update: next.eventUpdate,
         rsvp: next.rsvp,
         nearby_event: next.nearbyEvent,
+        interest_events: next.interestEvents,
         chat_message: next.chatMessage,
         host_announcement: next.hostAnnouncement,
         interested_reminder: next.interestedReminder,
@@ -478,6 +483,7 @@ export default function SettingsScreen() {
       (userForm.name ?? '') !== (profile.name ?? '') ||
       (userForm.bio ?? '') !== (profile.bio ?? '') ||
       (userForm.hobbies ?? '') !== (profile.hobbies ?? '') ||
+      userForm.preferredCategories.join(',') !== (profile.preferred_categories ?? []).join(',') ||
       (userForm.instagram ?? '') !== (handles.instagram ?? '') ||
       (userForm.facebook ?? '') !== (handles.facebook ?? '') ||
       (userForm.city ?? '') !== (profile.city ?? '') ||
@@ -1097,6 +1103,37 @@ export default function SettingsScreen() {
 
                 <View style={styles.fieldSeparator} />
 
+                {/* Interests (event categories Discover leads with) */}
+                <View style={styles.fieldRowNoPad}>
+                  <View style={[styles.fieldIcon, { marginTop: 14 }]}>
+                    <Sparkles size={16} color={accentColor} />
+                  </View>
+                  <View style={styles.catContainer}>
+                    <Text style={styles.catLabel}>Interests</Text>
+                    <Text style={styles.catHint}>
+                      Discover shows these categories first. Pick as many as you like.
+                    </Text>
+                    <CategoryPicker
+                      categories={categories}
+                      status={categoriesError && categories.length === 0 ? 'error' : categoriesPending && categories.length === 0 ? 'loading' : 'loaded'}
+                      onRetry={() => void refetchCategories()}
+                      selectedIds={userForm.preferredCategories}
+                      onToggle={(id) =>
+                        setUserForm((p) => ({
+                          ...p,
+                          preferredCategories: p.preferredCategories.includes(id)
+                            ? p.preferredCategories.filter((x) => x !== id)
+                            : [...p.preferredCategories, id],
+                        }))
+                      }
+                      density="compact"
+                      showCount={false}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.fieldSeparator} />
+
                 {/* Instagram */}
                 <View style={styles.fieldRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
@@ -1399,23 +1436,24 @@ export default function SettingsScreen() {
                     </View>
                   </>
                 )}
+                {/* G23: the 'Nearby events' toggle was removed — nothing ever sent nearby_event notifications. */}
                 <View style={styles.fieldSeparator} />
                 <View style={styles.privacyRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
                     <MapPin size={16} color={accentColor} />
                   </View>
                   <View style={styles.privacyContent}>
-                    <Text style={styles.privacyTitle}>Nearby events</Text>
-                    <Text style={styles.privacyDesc}>Events starting soon near you</Text>
+                    <Text style={styles.privacyTitle}>New events in my interests</Text>
+                    <Text style={styles.privacyDesc}>Within 25 km, for the interests you picked. At most one a day.</Text>
                   </View>
                   <Switch
-                    value={notificationForm.nearbyEvent}
-                    onValueChange={(v) => handleNotificationToggle('nearbyEvent', v)}
-                    accessibilityLabel="Nearby events"
-                    accessibilityHint="Events starting soon near you"
+                    value={notificationForm.interestEvents}
+                    onValueChange={(v) => handleNotificationToggle('interestEvents', v)}
+                    accessibilityLabel="New events in my interests"
+                    accessibilityHint="Within 25 km, for the interests you picked. At most one a day."
                     trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
                     thumbColor={
-                      notificationForm.nearbyEvent ? Colors.primary : Colors.background.secondary
+                      notificationForm.interestEvents ? Colors.primary : Colors.background.secondary
                     }
                   />
                 </View>
@@ -1939,6 +1977,12 @@ const styles = StyleSheet.create({
     color: Colors.text.tertiary,
     marginBottom: 8,
     marginLeft: 4,
+  },
+  catHint: {
+    fontSize: Typography.sizes.xs,
+    color: Colors.text.tertiary,
+    fontFamily: Typography.fontFamilies.regular,
+    marginBottom: Spacing.sm,
   },
   catScrollContent: {
     flexDirection: 'row',

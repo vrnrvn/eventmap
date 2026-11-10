@@ -17,6 +17,12 @@ import { rpcArgs } from './rpcArgs';
  * mid-request): the event may exist even though the call failed.
  */
 const uncertainCreates = new Set<string>();
+/**
+ * Set once the server shows it doesn't know p_preferred_category_ids
+ * (20261109110000 not applied): later pages skip the boost instead of
+ * failing first and retrying every time.
+ */
+let preferredBoostUnsupported = false;
 /** Set once the server shows it doesn't know p_client_request_id (pending migration). */
 let createKeyParamUnsupported = false;
 /** How far back a retry looks for the event an uncertain attempt created. */
@@ -144,7 +150,7 @@ export const eventsService = {
     filters: Partial<FilterOptions> = {},
     page: { limit: number; offset: number }
   ): Promise<{ items: RankedEvent[]; hasMore: boolean }> {
-    const { data, error } = await supabase.rpc('get_ranked_events', {
+    const args = {
       user_lat: userLat,
       user_lng: userLng,
       radius_km: filters.radiusKm || 50,
@@ -154,7 +160,23 @@ export const eventsService = {
       search_query: filters.searchQuery || undefined,
       result_limit: page.limit,
       p_offset: page.offset,
-    });
+    };
+    const preferred = filters.preferredCategories?.length ? filters.preferredCategories : null;
+    const callRanked = (withBoost: boolean) =>
+      supabase.rpc(
+        'get_ranked_events',
+        // The boost argument is only known after 20261109110000; cast until
+        // types/supabase.generated.ts is regenerated from that schema.
+        (withBoost ? { ...args, p_preferred_category_ids: preferred } : args) as typeof args
+      );
+    const boost = preferred != null && !preferredBoostUnsupported;
+    let { data, error } = await callRanked(boost);
+    if (error && boost && isMissingFunction(error)) {
+      // PostgREST matches functions by argument names, so an unknown name is
+      // PGRST202 and nothing ran: retry without the boost.
+      preferredBoostUnsupported = true;
+      ({ data, error } = await callRanked(false));
+    }
     if (error) throw error;
     const items = (data || []) as RankedEvent[];
     return { items, hasMore: items.length >= page.limit };

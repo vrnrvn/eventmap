@@ -207,6 +207,84 @@ history. Hosted databases have not been checked or changed.
 - After applying: `npm run backend:types`, then drop the
   `p_client_request_id` cast/fallback in `services/events.ts`.
 
+Prepared 2026-11-09, **not applied** anywhere (validated on an isolated scratch
+copy only; see docs/CATEGORIES_AND_SERIES_PLAN.md §7):
+
+- [ ] `supabase/migrations/20261109100000_category_taxonomy.sql` — categories
+  gain `color`, `description`, `synonyms`, `is_active`; labels shortened,
+  `icon_key` switched to Lucide names, `community` + `family` added. The
+  client presents pre-migration rows from a bundled seed, so the app works
+  before and after. After applying: `npm run backend:types`.
+- [ ] `supabase/migrations/20261109110000_category_discovery.sql` — apply
+  **after** the taxonomy file (needs `categories.synonyms`). Re-creates
+  `get_ranked_events` with `p_preferred_category_ids` (interests boost +0.3)
+  and category label/synonym search. Output columns unchanged; the 9-arg
+  overload is dropped. The client retries without the boost argument on
+  PGRST202, so it works before this is applied (no boost, no category-word
+  search).
+- [ ] `supabase/migrations/20261109120000_admin_categories.sql` — apply
+  after the taxonomy file. Admin INSERT/UPDATE policies on `categories` (no
+  DELETE: retire via `is_active`), slug-format CHECK,
+  `admin_reorder_categories(uuid[])`, `admin_category_stats()`. The admin
+  /categories page is read-only until then and says so on every write.
+  **Heads-up:** a sibling worktree has an unapplied
+  `20261109120000_admin_category_management.sql` with the same timestamp and
+  overlapping objects. Reconcile the two files before either is applied.
+  (Correction 2026-11-09: the `admin_category_stats` / `categories_validate`
+  objects seen earlier were NOT on the shared DB; they came from the sibling
+  session writing to the same scratch database name. See below.)
+- [ ] `supabase/migrations/20261109130000_recurrence_patterns_v2.sql` —
+  independent of the category files. `byWeekday` / `monthly: nthWeekday`
+  support in `event_next_occurrence` (5-arg with `p_now` + 4-arg wrapper),
+  `event_recurrence_matches`, and the `c_validate_event_recurrence` trigger.
+  **Heads-up:** the sibling session has its own version of these objects
+  (seen in the shared scratch name, NOT on the shared DB — correction below).
+  This file uses the same names, keys and Monday-based weeks and agreed with
+  it on 559 of 560 sampled answers; reconcile before applying (decision D1). Verified: no
+  change for any existing (v1) pattern across 2,268 inputs vs the original.
+- [ ] `supabase/migrations/20261109140000_occurrence_exceptions.sql` — apply
+  after `20261109130000`. `event_occurrence_exceptions` (read follows event
+  visibility, writes RPC-only), `skip_occurrence` / `reschedule_occurrence` /
+  `restore_occurrence` (host/admin, real future dates only, optional
+  notify), `event_next_effective_occurrence`, and per-occurrence reminders
+  (`event_reminder_sent.occurrence_start` joins the primary key;
+  `send_event_reminders` "going" loop rewritten). The reminder body was
+  captured from the shared-DB snapshot: diff it against the live function
+  before applying in case another session changed it since.
+- [ ] `supabase/migrations/20261109150000_rsvp_occurrences.sql` — after
+  140000. Per-date going/not-going overrides, `set_occurrence_rsvp` (now
+  capacity-checked, `event_full`), `get_occurrence_going_counts`,
+  `get_occurrence_attendees_page` (host per-date list), per-date waitlist
+  (`occurrence_going_count`, `promote_occurrence_waitlist`, status
+  'waitlist'), leave-series trigger, reminders honour overrides. The counts
+  RPC's return type changed (adds `waitlist_count`): the file DROPs the old
+  signature first. 140000 also gained the orphan-pruning
+  trigger (`z_prune_orphaned_occurrence_rows`). **The sibling
+  session built an overlapping design** (same table shape;
+  `set_occurrence_going`, `get_occurrence_counts`, `occurrence_reminder_wanted`)
+  — reconcile to one API before applying.
+- [ ] `supabase/migrations/20261109160000_split_series.sql` — after 150000.
+  `split_series_from` ("this and following"); moves per-date rows before
+  shortening the original (prune-trigger ordering). Sibling has `split_series`.
+- [ ] `supabase/migrations/20261109170000_interest_event_notifications.sql` —
+  after the taxonomy file. Opt-in "new event in your interests near you".
+
+**Regression suite for the categories/series stack:**
+`scripts/test-categories-series.sql` (rollback-only, ASSERT-based). Run it
+on a scratch copy after applying all 202611091* migrations; see the header.
+On 2026-11-09 it and the four existing suites (host tools, calendar,
+attendance, insights) all passed on a fresh copy with every prepared
+migration applied.
+
+**Scratch database name collision (found 2026-11-09).** This worktree and a
+sibling are both named `oak`, so both sessions defaulted to
+`SCRATCH_DB=eventmap_scratch_oak` and wrote into the same scratch copy.
+Objects earlier reported as "already on the shared DB" came from that
+collision. This branch now validates on `eventmap_scratch_oak_catseries`
+(fresh copy): all seven migrations apply cleanly and idempotently in order,
+and the shared DB has none of the categories/recurrence objects. Pick
+unique scratch names per session (e.g. include the branch id).
+
 Not written (low): reminder nudge at `now() + 25h` ignores the event's time
 zone (should key off the event's local day); blanket `REVOKE EXECUTE ... FROM
 PUBLIC` + explicit grants to `authenticated` for RPCs; require a session for

@@ -69,3 +69,21 @@ describe('known-missing registry', () => {
     expect(m.isMissingDbFunction({ code: 'pgrst202' })).toBe(false);
   });
 });
+
+import { recurrenceErrorMessage } from '@/utils/rpcErrors';
+
+describe('recurrenceErrorMessage', () => {
+  it('turns the trigger error into host-facing text', () => {
+    expect(recurrenceErrorMessage({ message: 'invalid_recurrence: byWeekday must be a non-empty array' })).toBe(
+      "This repeat setting isn't valid (byWeekday must be a non-empty array). Open Repeat and adjust it."
+    );
+    expect(recurrenceErrorMessage(new Error('invalid_recurrence: interval must be a whole number from 1 to 99.'))).toMatch(
+      /1 to 99\)/
+    );
+  });
+  it('ignores unrelated errors', () => {
+    expect(recurrenceErrorMessage({ message: 'duplicate key' })).toBeNull();
+    expect(recurrenceErrorMessage(null)).toBeNull();
+    expect(recurrenceErrorMessage(42)).toBeNull();
+  });
+});

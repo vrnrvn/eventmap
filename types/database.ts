@@ -85,16 +85,24 @@ export type Category = {
   id: string;
   slug: string;
   label: string;
+  /** Lucide icon name resolved by constants/categoryIconRegistry.ts. */
   icon_key: string;
   sort_order: number;
   created_at: string;
+  /**
+   * Added by 20261109100000_category_taxonomy. Optional (and undefined on a
+   * database that has not applied it): utils/categoryPresentation falls back
+   * to the bundled seed by slug.
+   */
+  color?: string | null;
+  description?: string;
+  synonyms?: string[];
+  is_active?: boolean;
 };
 
-export type RecurrencePattern = {
-  frequency: 'daily' | 'weekly' | 'monthly';
-  interval: number;
-  endDate?: string;
-};
+/** Single definition lives with the logic that interprets it. */
+export type { RecurrencePattern } from '@/utils/recurrence';
+import type { RecurrencePattern } from '@/utils/recurrence';
 
 export type Event = {
   id: string;

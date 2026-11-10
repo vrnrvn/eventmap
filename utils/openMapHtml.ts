@@ -82,8 +82,10 @@ export function buildOpenMapHtml(center: { lat: number; lng: number }, zoom: num
         var label=count>99?'99+':String(count);
         var cls='evm-cluster'+(count>99?' evm-cluster-lg':'');
         var a11y=count+' events in this area. Activate to zoom in.';
+        // Dominant category colour of the children (shared rule with Google).
+        var color=__markerDominantColor(cluster.getAllChildMarkers().map(function(mk){return mk.options.evmStyle||null}));
         return L.divIcon({
-          html:'<div role="button" aria-label="'+a11y+'" title="'+a11y+'">'+label+'</div>',
+          html:'<div role="button" aria-label="'+a11y+'" title="'+a11y+'" style="background:'+color+';border-color:'+color+';color:#fff">'+label+'</div>',
           className:cls,
           iconSize:[__markerSize,__markerSize],
           iconAnchor:[__markerSize/2,__markerSize/2]
@@ -99,7 +101,7 @@ export function buildOpenMapHtml(center: { lat: number; lng: number }, zoom: num
   // the viewport here (animateTo on list scroll, guarded by its programmatic-
   // move flag), and a second source of camera movement would fight it. See
   // docs/ISSUES.md for the follow-up.
-  window.__updateActiveMarker=function(id){markers.forEach(function(m){m.marker.setIcon(icon(m.categorySlug,m.id===id))})};
+  window.__updateActiveMarker=function(id){markers.forEach(function(m){m.marker.setIcon(icon(m.style,m.id===id))})};
   window.__updateMarkers=function(data,active){
     clearMarkers();
     markers=[];
@@ -111,15 +113,15 @@ export function buildOpenMapHtml(center: { lat: number; lng: number }, zoom: num
       var lat=typeof m.lat==='number'?m.lat:parseFloat(m.lat);
       var lng=typeof m.lng==='number'?m.lng:parseFloat(m.lng);
       if(!isFinite(lat)||!isFinite(lng))return;
-      var slug=m.categorySlug||'';
-      var marker=L.marker([lat,lng],{icon:icon(slug,m.id===active),title:m.title||'Event',alt:m.title||'Event',riseOnHover:true});
+      var style={categorySlug:m.categorySlug||'',categoryColor:m.categoryColor||'',categoryIconKey:m.categoryIconKey||''};
+      var marker=L.marker([lat,lng],{evmStyle:style,icon:icon(style,m.id===active),title:m.title||'Event',alt:m.title||'Event',riseOnHover:true});
       // textContent, not innerHTML — event titles are user-supplied.
       var label=document.createElement('span');
       label.textContent=m.title||'';
       marker.bindTooltip(label,{direction:'top',offset:[0,0]});
       marker.on('click',function(){emit({type:'markerPress',eventId:m.id})});
       batch.push(marker);
-      markers.push({id:m.id,marker:marker,categorySlug:slug});
+      markers.push({id:m.id,marker:marker,style:style});
     });
     // One bulk insert instead of N layer events.
     if(clusterGroup){clusterGroup.addLayers(batch)}else{batch.forEach(function(mk){mk.addTo(map)})}

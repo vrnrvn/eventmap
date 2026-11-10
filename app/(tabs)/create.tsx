@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { blockedOffline } from '@/utils/requireOnline';
 import { useFormDraft } from '@/hooks/useFormDraft';
+import { readLastCategory, rememberLastCategory } from '@/utils/lastCategory';
+import { recurrenceErrorMessage } from '@/utils/rpcErrors';
 import { draftKeys } from '@/utils/formDraft';
 import { useFocusEffect, router } from 'expo-router';
 import {
@@ -29,7 +31,7 @@ import { usePremium } from '@/contexts/PremiumContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/ui/Button';
-import { CategoryIcon } from '@/components/CategoryIcon';
+import { CategorySelectGrid } from '@/components/CategorySelectGrid';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import { WebDateTimeInput } from '@/components/WebDateTimeInput';
 import { RecurrenceEndRow } from '@/components/RecurrenceEndRow';
@@ -59,7 +61,7 @@ import {
   validateExtras,
   type EventExtrasDraft,
 } from '@/components/EventExtrasFields';
-import { choiceA11y, a11yState, announce } from '@/utils/accessibility';
+import { a11yState, announce } from '@/utils/accessibility';
 import { validationSummary } from '@/utils/validationSummary';
 import { uuidv4 } from '@/utils/uuid';
 
@@ -183,15 +185,21 @@ export default function CreateScreen() {
   useEffect(() => {
     if (!draftKey) return;
     let cancelled = false;
-    void readDraft().then((draft) => {
+    void readDraft().then(async (draft) => {
       if (cancelled) return;
       if (draft && typeof draft.title === 'string' && draft.startDatetime instanceof Date && draft.endDatetime instanceof Date) {
         setFormData((f) => ({ ...f, ...draft, extras: { ...f.extras, ...draft.extras } }));
         // A restored venue must not be overwritten by the business address.
         if (draft.address) venueChosenRef.current = true;
         notify.withAction('Restored the event you were writing.', { label: 'Start over', onPress: resetForm });
+      } else {
+        // No draft: start from the category this business used last time.
+        // The host can still change it; a stale id (retired category) is
+        // simply not in the grid and leaves the field unselected.
+        const last = await readLastCategory(userBusiness?.id);
+        if (!cancelled && last) setFormData((f) => (f.categoryId ? f : { ...f, categoryId: last }));
       }
-      setDraftReady(true);
+      if (!cancelled) setDraftReady(true);
     });
     return () => {
       cancelled = true;
@@ -539,6 +547,7 @@ export default function CreateScreen() {
       );
       // Keep the quota pill current for the next event.
       void refreshSubscription();
+      rememberLastCategory(userBusiness?.id, formData.categoryId);
       // Land on the new event (owner view with Edit / Insights) so the host
       // sees exactly what they published.
       router.push((mode === 'draft' ? `/business/manage-event/${eventId}` : `/event/${eventId}`) as never);
@@ -548,7 +557,7 @@ export default function CreateScreen() {
           ? err.message
           : (err as { message?: string })?.message ?? 'Failed to create event';
       if (__DEV__) console.error('[CreateEvent]', err);
-      notify.error(message);
+      notify.error(recurrenceErrorMessage(err) ?? message);
     } finally {
       setLoading(false);
       setSavingDraft(false);
@@ -705,40 +714,14 @@ export default function CreateScreen() {
         {/* ── Section: Category ── */}
         <Text style={styles.sectionLabel} onLayout={captureSection('category')}>Category</Text>
         <View style={styles.card}>
-          <View style={styles.fieldRowNoPad}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.catScroll}
-              contentContainerStyle={styles.catScrollContent}
-              accessibilityRole="radiogroup"
-              accessibilityLabel="Category"
-            >
-              {categories.map((c) => {
-                const selected = formData.categoryId === c.id;
-                return (
-                  <TouchableOpacity
-                    key={c.id}
-                    style={[styles.catChip, selected && styles.catChipSelected]}
-                    onPress={() =>
-                      setFormData((f) => ({ ...f, categoryId: c.id }))
-                    }
-                    activeOpacity={0.7}
-                    {...choiceA11y(selected, c.label)}
-                  >
-                    <CategoryIcon category={c.slug} size="sm" variant="pill" />
-                    <Text
-                      style={[
-                        styles.catChipText,
-                        selected && styles.catChipTextSelected,
-                      ]}
-                    >
-                      {c.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+          <View style={styles.catGridWrap}>
+            <CategorySelectGrid
+              categories={categories}
+              selectedId={formData.categoryId}
+              onSelect={(id) => setFormData((f) => ({ ...f, categoryId: id }))}
+              title={formData.title}
+              description={formData.description}
+            />
           </View>
           {errors.categoryId && (
             <View style={styles.inlineError}>
@@ -937,7 +920,7 @@ export default function CreateScreen() {
             <View style={styles.dateTextBlock}>
               <Text style={styles.dateLabel}>Repeat</Text>
               <Text style={styles.dateValue}>
-                {getRecurrenceLabel(formData.recurrence)}
+                {getRecurrenceLabel(formData.recurrence, formData.startDatetime)}
                 {!isPremiumBusiness && ' (Premium)'}
               </Text>
             </View>
@@ -1146,12 +1129,23 @@ export default function CreateScreen() {
       />
       <RecurrencePicker
         ref={recurrencePickerRef}
+        seriesStart={formData.startDatetime}
+        onMoveStart={(d) =>
+          setFormData((f) => {
+            // Keep the time of day and the event's length; only the date moves.
+            const start = new Date(f.startDatetime);
+            start.setFullYear(d.getFullYear(), d.getMonth(), d.getDate());
+            const duration = f.endDatetime.getTime() - f.startDatetime.getTime();
+            return { ...f, startDatetime: start, endDatetime: new Date(start.getTime() + duration) };
+          })
+        }
         selectedValue={formData.recurrence}
         onSelect={(v) =>
           setFormData((f) => ({
             ...f,
-            // Changing the cadence keeps any end date already chosen.
-            recurrence: v ? { ...v, ...(f.recurrence?.endDate ? { endDate: f.recurrence.endDate } : {}) } : null,
+            // Changing the cadence keeps any end date already chosen, unless
+            // "Ends after N times" sends its own endDate, which wins.
+            recurrence: v ? { ...(f.recurrence?.endDate ? { endDate: f.recurrence.endDate } : {}), ...v } : null,
           }))
         }
       />
@@ -1308,41 +1302,9 @@ const styles = StyleSheet.create({
     color: Colors.text.tertiary,
   },
 
-  /* ── Category chips ── */
-  catScroll: {
-    flex: 1,
-  },
-  catScrollContent: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingVertical: 14,
-    paddingRight: 16,
-  },
-  catChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: 20,
-    backgroundColor: Palette.surfaceMuted,
-    borderWidth: 1.5,
-    borderColor: Palette.separator,
-  },
-  catChipSelected: {
-    backgroundColor: Palette.badge,
-    borderColor: Palette.badge,
-  },
-  catChipText: {
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-    color: Colors.text.primary,
-  },
-  catChipTextSelected: {
-    color: '#FFFFFF',
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
+  /* ── Category grid ── */
+  catGridWrap: {
+    padding: Spacing.md,
   },
 
   /* ── Date rows ── */

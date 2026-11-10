@@ -14,7 +14,9 @@ export type InjectableMarker = {
   lat: number;
   lng: number;
   title?: string;
-  categorySlug?: string;
+  categorySlug?: string | null;
+  categoryColor?: string | null;
+  categoryIconKey?: string | null;
   [key: string]: unknown;
 };
 

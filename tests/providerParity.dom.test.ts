@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 import { JSDOM } from 'jsdom';
 import { buildOpenMapHtml } from '@/utils/openMapHtml';
 import { buildMapHtml } from '@/utils/googleMapHtml';
-import { buildCategoryMarkerSvg, CATEGORY_MARKER_PATHS } from '@/constants/categoryMarkers';
+import { buildCategoryMarkerSvg, CATEGORY_SLUG_STYLES } from '@/constants/categoryMarkers';
 import { buildAnimateToInjection } from '@/utils/webviewInject';
 
 const leafletHtml = buildOpenMapHtml({ lat: 37.7749, lng: -122.4194 }, 12, true);
@@ -133,7 +133,7 @@ describe('marker artwork is identical across providers', () => {
   it('Leaflet and Google draw the same pin for every category and state', () => {
     const leaflet = markerSvgFrom(leafletHtml);
     const google = markerSvgFrom(googleHtml);
-    const slugs = [...Object.keys(CATEGORY_MARKER_PATHS), 'cafe', 'food-drink', 'Restaurant', 'unknown'];
+    const slugs = [...Object.keys(CATEGORY_SLUG_STYLES), 'Restaurant', 'unknown'];
     for (const slug of slugs) {
       for (const active of [false, true]) {
         const fromLeaflet = leaflet(slug, active);

@@ -116,15 +116,15 @@ describe('Leaflet marker rendering', () => {
 
   it('passes the category through to the icon, not a fixed colour', () => {
     // Regression: pins used to be a hardcoded red dot that ignored categorySlug.
-    expect(html).toContain('icon(slug,m.id===active)');
-    expect(html).toContain('categorySlug:slug');
+    expect(html).toContain('icon(style,m.id===active)');
+    expect(html).toContain("categorySlug:m.categorySlug||''");
     expect(html).not.toContain('#b41924');
   });
 
   it('keeps the category on each marker so active repaints stay correct', () => {
     // __updateActiveMarker re-icons every marker; without the stored slug it
     // would repaint them all as the default pin.
-    expect(html).toContain('icon(m.categorySlug,m.id===id)');
+    expect(html).toContain('icon(m.style,m.id===id)');
   });
 
   it('strips Leaflet default divIcon chrome', () => {

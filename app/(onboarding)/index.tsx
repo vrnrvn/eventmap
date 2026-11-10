@@ -48,11 +48,10 @@ import { geocodingService } from '@/services/geocoding';
 import { useFocusEffect } from '@react-navigation/native';
 import { onboardingLocationStore } from '@/stores/onboardingLocationStore';
 import { Category, Profile } from '@/types/database';
-import { getCategoryColor } from '@/constants/categories';
 import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { Avatar } from '@/components/Avatar';
 import { AvatarRing } from '@/components/AvatarRing';
-import { CategoryIcon } from '@/components/CategoryIcon';
+import { CategoryPicker } from '@/components/CategoryPicker';
 import { Button } from '@/components/ui/Button';
 import { TextField } from '@/components/ui/TextField';
 import { a11yState } from '@/utils/accessibility';
@@ -73,7 +72,6 @@ const TOTAL_PAGES = 7;
 const STEP_COUNT = TOTAL_PAGES - 1;
 
 /** Pill widths for the interests loading skeleton — varied so it reads as chips. */
-const CHIP_SKELETON_WIDTHS = [104, 128, 88, 140, 96, 120, 84, 112];
 
 const BIO_MAX = 160;
 const HOBBIES_MAX = 80;
@@ -1039,71 +1037,13 @@ function CategoriesPage({
         />
       }
     >
-      {categoriesStatus === 'error' ? (
-        <View style={styles.categoriesError}>
-          <Text style={styles.categoriesErrorText}>
-            Couldn&apos;t load interests. Check your connection and try again.
-          </Text>
-          <TouchableOpacity
-            style={styles.categoriesRetryBtn}
-            onPress={onRetryCategories}
-            activeOpacity={0.8}
-            accessibilityRole="button"
-            accessibilityLabel="Retry loading interests"
-          >
-            <Text style={styles.categoriesRetryText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      ) : categoriesStatus === 'loading' ? (
-        <View
-          style={styles.categoriesGrid}
-          accessible
-          accessibilityLabel="Loading interests"
-          {...a11yState({ busy: true })}
-        >
-          {CHIP_SKELETON_WIDTHS.map((width, i) => (
-            <View key={i} style={[styles.categoryChipSkeleton, { width }]} />
-          ))}
-        </View>
-      ) : (
-        <View style={styles.categoriesGrid}>
-          {categories.map((cat) => {
-            const isSelected = selectedCategories.includes(cat.id);
-            const color = getCategoryColor(cat.slug);
-            return (
-              <TouchableOpacity
-                key={cat.id}
-                style={[
-                  styles.categoryChip,
-                  isSelected && { backgroundColor: color, borderColor: color },
-                ]}
-                onPress={() => onToggle(cat.id)}
-                activeOpacity={0.7}
-                accessibilityRole="checkbox"
-                {...a11yState({ checked: isSelected })}
-                accessibilityLabel={cat.label}
-              >
-                {isSelected ? (
-                  <Check size={14} color="#FFFFFF" />
-                ) : (
-                  <CategoryIcon category={cat.slug} size="sm" variant="minimal" />
-                )}
-                <Text
-                  style={[
-                    styles.categoryChipText,
-                    isSelected && styles.categoryChipTextSelected,
-                  ]}
-                >
-                  {cat.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      )}
-      <Text style={styles.selectedCount}>
-        {none ? 'Nothing selected yet' : `${selectedCategories.length} selected`}
-      </Text>
+      <CategoryPicker
+        categories={categories}
+        status={categoriesStatus}
+        onRetry={onRetryCategories}
+        selectedIds={selectedCategories}
+        onToggle={onToggle}
+      />
     </PageShell>
   );
 }
@@ -1810,72 +1750,6 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   /* ─── Interests ─── */
-  categoriesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  categoryChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Palette.cardBg,
-    borderWidth: 1.5,
-    borderColor: Colors.border.light,
-    ...Shadows.sm,
-  },
-  categoryChipText: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-    color: Colors.text.primary,
-  },
-  categoryChipTextSelected: {
-    color: '#FFFFFF',
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-  },
-  categoryChipSkeleton: {
-    height: 44,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Colors.background.tertiary,
-  },
-  categoriesError: {
-    marginTop: 24,
-    alignItems: 'center',
-    gap: 14,
-  },
-  categoriesErrorText: {
-    fontSize: Typography.sizes.md,
-    color: Colors.text.secondary,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  categoriesRetryBtn: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: BorderRadius.lg,
-    backgroundColor: Palette.accentSoft,
-    borderWidth: 1.5,
-    borderColor: Colors.primary,
-  },
-  categoriesRetryText: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
-    color: Colors.primary,
-  },
-  selectedCount: {
-    marginTop: 16,
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.medium,
-    fontWeight: Typography.weights.medium,
-    color: Colors.text.tertiary,
-    textAlign: 'center',
-  },
 
   /* ─── Permissions ─── */
   permissionCards: {

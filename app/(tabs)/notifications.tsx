@@ -85,6 +85,7 @@ const getIconMeta = (type: NotificationType) => {
     case 'new_event_from_followed':
       return { Icon: CalendarPlus, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
     case 'nearby_event':
+    case 'interest_event':
       return { Icon: MapPin, bg: alpha(Colors.secondary, 0.12), color: Palette.secondary };
     case 'promotion':
       return { Icon: BellRing, bg: alpha(Colors.primary, 0.08), color: Palette.primary };

@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 const navItems = [
   { href: '/users', label: 'Users' },
   { href: '/events', label: 'Events' },
+  { href: '/categories', label: 'Categories' },
   { href: '/businesses', label: 'Businesses' },
   { href: '/subscriptions', label: 'Subscriptions' },
   { href: '/complaints', label: 'Complaints' },

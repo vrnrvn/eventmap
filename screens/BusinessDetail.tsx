@@ -31,7 +31,6 @@ import { formatEventDate } from '@/utils/formatEventWhen';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { Avatar } from '@/components/Avatar';
 import { CategoryIcon } from '@/components/CategoryIcon';
-import { getCategorySlug } from '@/constants/categoryIcons';
 import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ReviewCard } from '@/components/ReviewCard';
 import { GoogleMapView } from '@/components/GoogleMapView';
@@ -431,7 +430,7 @@ export default function BusinessDetail() {
                     lat: business.lat,
                     lng: business.lng,
                     title: business.name,
-                    categorySlug: getCategorySlug(business.category) ?? undefined,
+                    categorySlug: business.category,
                   },
                 ]}
               />

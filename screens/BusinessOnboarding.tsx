@@ -19,6 +19,7 @@ import { useApp } from '@/contexts/AppContext';
 import { Input } from '@/components/Input';
 import { AddressSearchInput } from '@/components/AddressSearchInput';
 import { CategoryIcon } from '@/components/CategoryIcon';
+import { BUSINESS_CATEGORY_LABELS } from '@/constants/businessCategories';
 import { GoogleMapView } from '@/components/GoogleMapView';
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/ui/Button';
@@ -27,18 +28,7 @@ import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { Briefcase } from '@/components/icons.generated';
 import { choiceA11y } from '@/utils/accessibility';
 
-const BUSINESS_CATEGORIES = [
-  'Restaurant',
-  'Bar & Nightlife',
-  'Fitness & Wellness',
-  'Coffee Shop',
-  'Entertainment',
-  'Arts & Culture',
-  'Sports & Recreation',
-  'Education',
-  'Community',
-  'Other',
-];
+const BUSINESS_CATEGORIES = BUSINESS_CATEGORY_LABELS;
 
 export default function BusinessOnboarding() {
   const insets = useSafeAreaInsets();

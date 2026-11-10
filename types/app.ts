@@ -8,6 +8,11 @@ export type FilterOptions = {
   endDate: Date | null;
   radiusKm: number;
   searchQuery: string;
+  /**
+   * Viewer interests (profiles.preferred_categories). Boosts ranking, never
+   * filters (20261109110000_category_discovery).
+   */
+  preferredCategories?: string[];
 };
 
 export type MapRegion = {

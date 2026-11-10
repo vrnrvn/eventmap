@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { cadenceLabel } from '@/utils/recurrence';
+import { useEffectiveNextDates } from '@/hooks/useEffectiveNextDates';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { queryKeys } from '@/hooks/queryKeys';
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
@@ -89,6 +91,7 @@ export default function JoinedEvents() {
   useRefetchOnFocus(countsQuery.refetch, !!userId, queryKeys.attendanceCounts(userId));
 
   const items = useMemo(() => dedupeById(query.data?.pages.flat() ?? []), [query.data]);
+  const nextById = useEffectiveNextDates(items, scope !== 'past');
   const hasData = query.data !== undefined;
   const { state: screenState, freshness } = useScreenState(query, { hasData, isEmpty: items.length === 0 });
   const loaded = hasData;
@@ -139,7 +142,7 @@ export default function JoinedEvents() {
 
   const renderItem = useCallback(
     ({ item }: { item: RankedEvent }) => {
-      const when = scope === 'past' ? item.start_datetime : item.next_start_datetime || item.start_datetime;
+      const when = scope === 'past' ? item.start_datetime : nextById.get(item.id) || item.next_start_datetime || item.start_datetime;
       const live = scope !== 'past' && isEventInProgress(item);
       const unread = chatUnread[item.id] ?? 0;
       // Upcoming rows: event-zone time plus "your time" when the viewer's
@@ -148,7 +151,7 @@ export default function JoinedEvents() {
       const dateLine =
         (scope === 'past' ? formatEventDate(when) : zoned && zoned.secondary ? zoned.primary : formatEventWhen(when)) +
         // The repeat icon already marks series; skip the suffix on the longer zoned line.
-        (item.is_recurring && scope !== 'past' && !zoned?.secondary ? ' · repeats' : '');
+        (item.is_recurring && scope !== 'past' && !zoned?.secondary ? ` · ${cadenceLabel(item.recurrence_pattern).toLowerCase() || 'repeats'}` : '');
       const zoneLine = scope !== 'past' && zoned?.secondary ? [zoned.secondary] : undefined;
       return (
         <EventListItem
@@ -183,7 +186,7 @@ export default function JoinedEvents() {
         />
       );
     },
-    [scope, chatUnread]
+    [scope, chatUnread, nextById]
   );
 
   const renderEmpty = () => {

@@ -52,7 +52,8 @@ import {
 } from '@/components/EventExtrasFields';
 import { eventLocationStore } from '@/stores/eventLocationStore';
 import { useCategories } from '@/hooks/useCategories';
-import { CategoryIcon } from '@/components/CategoryIcon';
+import { CategorySelectGrid } from '@/components/CategorySelectGrid';
+import { recurrenceErrorMessage } from '@/utils/rpcErrors';
 import { Event, EventPhoto } from '@/types/database';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { withShiftedEnd } from '@/utils/eventDatetime';
@@ -63,7 +64,7 @@ import {
   zoneDisplayLabel,
 } from '@/utils/timezone';
 import { TimeZonePicker } from '@/components/TimeZonePicker';
-import { choiceA11y, a11yState, announce } from '@/utils/accessibility';
+import { a11yState, announce } from '@/utils/accessibility';
 import { validationSummary } from '@/utils/validationSummary';
 
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
@@ -710,7 +711,7 @@ export default function EditEvent() {
         notify.error('Someone joined while you were editing. Reload and save again to reschedule them properly.');
         return;
       }
-      notify.error(err instanceof Error ? err.message : 'Failed to update event');
+      notify.error(recurrenceErrorMessage(err) ?? (err instanceof Error ? err.message : 'Failed to update event'));
     } finally {
       setSaving(false);
       setUploadProgress(null);
@@ -777,36 +778,15 @@ export default function EditEvent() {
         />
 
         <Text style={styles.label}>Category</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoriesScroll}
-          contentContainerStyle={styles.categoriesRow}
-          accessibilityRole="radiogroup"
-          accessibilityLabel="Category"
-        >
-          {categories.map((c) => (
-            <TouchableOpacity
-              key={c.id}
-              style={[
-                styles.categoryChip,
-                formData.categoryId === c.id && styles.categoryChipSelected,
-              ]}
-              onPress={() => setFormData((f) => ({ ...f, categoryId: c.id }))}
-              {...choiceA11y(formData.categoryId === c.id, c.label)}
-            >
-              <CategoryIcon category={c.slug} size="sm" variant="pill" />
-              <Text
-                style={[
-                  styles.categoryChipText,
-                  formData.categoryId === c.id && styles.categoryChipTextSelected,
-                ]}
-              >
-                {c.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        <View style={styles.categoriesGridWrap}>
+          <CategorySelectGrid
+            categories={categories}
+            selectedId={formData.categoryId}
+            onSelect={(id) => setFormData((f) => ({ ...f, categoryId: id }))}
+            title={formData.title}
+            description={formData.description}
+          />
+        </View>
         {errors.categoryId && (
           <Text style={styles.errorText}>{errors.categoryId}</Text>
         )}
@@ -965,7 +945,7 @@ export default function EditEvent() {
             <Repeat size={18} color={Colors.primary} />
             <View style={styles.recurrenceTextWrap}>
               <Text style={styles.dateButtonText}>
-                {getRecurrenceLabel(formData.recurrence)}
+                {getRecurrenceLabel(formData.recurrence, formData.startDatetime)}
               </Text>
             </View>
             {!isPremiumBusiness && (
@@ -976,6 +956,19 @@ export default function EditEvent() {
             <ChevronRight size={18} color={Colors.text.tertiary} />
           </View>
         </TouchableOpacity>
+        {formData.recurrence ? (
+          <Text style={styles.seriesScopeHint}>
+            Changes here apply to every upcoming date. To change one date, or a date and everything after it,{' '}
+            <Text
+              style={styles.seriesScopeLink}
+              onPress={() => router.push(`/business/manage-event/${id}` as never)}
+              accessibilityRole="link"
+            >
+              open Upcoming dates
+            </Text>
+            .
+          </Text>
+        ) : null}
         {formData.recurrence ? (
           <RecurrenceEndRow
             variant="flat"
@@ -1091,13 +1084,24 @@ export default function EditEvent() {
       />
       <RecurrencePicker
           ref={recurrencePickerRef}
+          seriesStart={formData.startDatetime}
+          onMoveStart={(d) =>
+            setFormData((f) => {
+              // Keep the time of day and the event's length; only the date moves.
+              const start = new Date(f.startDatetime);
+              start.setFullYear(d.getFullYear(), d.getMonth(), d.getDate());
+              const duration = f.endDatetime.getTime() - f.startDatetime.getTime();
+              return { ...f, startDatetime: start, endDatetime: new Date(start.getTime() + duration) };
+            })
+          }
           selectedValue={formData.recurrence}
           noneOnly={!isPremiumBusiness}
           onSelect={(v) =>
             setFormData((f) => ({
               ...f,
-              // Changing the cadence keeps any end date already chosen.
-              recurrence: v ? { ...v, ...(f.recurrence?.endDate ? { endDate: f.recurrence.endDate } : {}) } : null,
+              // Changing the cadence keeps any end date already chosen, unless
+              // "Ends after N times" sends its own endDate, which wins.
+              recurrence: v ? { ...(f.recurrence?.endDate ? { endDate: f.recurrence.endDate } : {}), ...v } : null,
             }))
           }
         />
@@ -1118,6 +1122,18 @@ export default function EditEvent() {
 }
 
 const styles = StyleSheet.create({
+  seriesScopeLink: {
+    color: Colors.primary,
+    fontFamily: Typography.fontFamilies.semibold,
+  },
+  seriesScopeHint: {
+    fontSize: Typography.sizes.xs,
+    lineHeight: 17,
+    color: Colors.text.secondary,
+    fontFamily: Typography.fontFamilies.regular,
+    marginTop: -Spacing.xs,
+    marginBottom: Spacing.sm,
+  },
   container: {
     flex: 1,
     backgroundColor: Colors.background.primary,
@@ -1161,35 +1177,8 @@ const styles = StyleSheet.create({
     fontSize: Typography.sizes.xs,
     color: Colors.text.tertiary,
   },
-  categoriesScroll: {
+  categoriesGridWrap: {
     marginBottom: Spacing.md,
-  },
-  categoriesRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    paddingVertical: Spacing.xs,
-  },
-  categoryChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.round,
-    backgroundColor: Colors.background.secondary,
-  },
-  categoryChipSelected: {
-    backgroundColor: Colors.primary,
-  },
-  categoryChipText: {
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamilies.regular,
-    color: Colors.text.primary,
-  },
-  categoryChipTextSelected: {
-    color: Colors.text.inverse,
-    fontFamily: Typography.fontFamilies.semibold,
-    fontWeight: Typography.weights.semibold,
   },
   dateButton: {
     backgroundColor: Colors.background.secondary,

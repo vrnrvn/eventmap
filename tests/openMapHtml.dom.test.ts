@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { JSDOM, type DOMWindow } from 'jsdom';
 import { buildOpenMapHtml } from '@/utils/openMapHtml';
-import { CATEGORY_COLORS } from '@/constants/categories';
+import { CATEGORY_SLUG_STYLES } from '@/constants/categoryMarkers';
 
 type MapWindow = Window & {
   __updateMarkers: (data: unknown[], active: string) => void;
@@ -86,10 +86,10 @@ describe('markers', () => {
   it('colours the pin by category', () => {
     win.__updateMarkers(markers(1, 'nightlife'), '');
     const svg = q('.event-pin')[0].innerHTML;
-    expect(svg).toContain(CATEGORY_COLORS.nightlife);
+    expect(svg).toContain(CATEGORY_SLUG_STYLES.nightlife.color);
 
     win.__updateMarkers(markers(1, 'sports'), '');
-    expect(q('.event-pin')[0].innerHTML).toContain(CATEGORY_COLORS.sports);
+    expect(q('.event-pin')[0].innerHTML).toContain(CATEGORY_SLUG_STYLES.sports.color);
   });
 
   it('gives the pin a 44pt footprint', () => {

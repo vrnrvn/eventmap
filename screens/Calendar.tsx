@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { occurrencesService } from '@/services/occurrences';
+import type { OccurrenceException } from '@/utils/occurrences';
 import {
   ActivityIndicator,
   FlatList,
@@ -205,7 +208,27 @@ export default function CalendarScreen() {
     { hasData: data.hasData, isEmpty: data.rows.length === 0 }
   );
 
-  const occurrences = useMemo(() => expandOccurrences(data.rows, range, viewerTz), [data.rows, range, viewerTz]);
+  // Skipped / moved dates for the series on screen (one query; [] before
+  // migration 20261109140000 or when there are no series).
+  const seriesIds = useMemo(
+    () => [...new Set(data.rows.filter((r) => r.event.is_recurring).map((r) => r.event.id))].sort(),
+    [data.rows]
+  );
+  const exceptionsQuery = useQuery({
+    queryKey: ['event', 'occurrence-exceptions', 'many', seriesIds.join(',')],
+    enabled: seriesIds.length > 0,
+    queryFn: () => occurrencesService.listExceptionsForEvents(seriesIds),
+    staleTime: 60 * 1000,
+  });
+  const exceptionsByEvent = useMemo(() => {
+    const m = new Map<string, OccurrenceException[]>();
+    for (const x of exceptionsQuery.data ?? []) m.set(x.event_id, [...(m.get(x.event_id) ?? []), x]);
+    return m;
+  }, [exceptionsQuery.data]);
+  const occurrences = useMemo(
+    () => expandOccurrences(data.rows, range, viewerTz, exceptionsByEvent),
+    [data.rows, range, viewerTz, exceptionsByEvent]
+  );
   const byDay = useMemo(() => groupByDay(occurrences), [occurrences]);
   const overlaps = useMemo(() => findOverlaps(occurrences), [occurrences]);
   const sections = useMemo(() => (view === 'agenda' ? agendaSections(occurrences) : []), [view, occurrences]);

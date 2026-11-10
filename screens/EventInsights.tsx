@@ -42,6 +42,11 @@ import {
   type MedianDelta,
 } from '@/utils/analytics';
 import { describeEventDateTime } from '@/utils/timezone';
+import { describeRecurrence } from '@/utils/recurrence';
+import { listOccurrences, type Occurrence } from '@/utils/occurrences';
+import { occurrencesService } from '@/services/occurrences';
+import { eventsService } from '@/services/events';
+import { useOccurrenceExceptions } from '@/hooks/useOccurrenceExceptions';
 import { a11yState } from '@/utils/accessibility';
 
 type Period = '7' | '30' | '90';
@@ -75,6 +80,29 @@ export default function EventInsightsScreen() {
   const [period, setPeriod] = useState<Period>('30');
   const [metric, setMetric] = useState<TrendMetric>('views');
   const days = Number(period);
+
+  // Series details (pattern, zone, exceptions) for the per-date view; the
+  // insights RPC itself only says `isRecurring`. Uses the Event Detail cache
+  // when present.
+  const detailsQuery = useQuery({
+    queryKey: queryKeys.eventDetails(id ?? 'none'),
+    enabled: !!id,
+    queryFn: () => eventsService.getEventDetails(id!),
+    staleTime: 5 * 60 * 1000,
+  });
+  const seriesEvent = detailsQuery.data?.event?.is_recurring ? detailsQuery.data.event : null;
+  const { exceptions: seriesExceptions } = useOccurrenceExceptions(id, !!seriesEvent);
+  const seriesDates = useMemo(
+    () => (seriesEvent ? listOccurrences(seriesEvent, seriesExceptions, { count: 6, includeCancelled: false, strict: true }) : []),
+    [seriesEvent, seriesExceptions]
+  );
+  const seriesDateKeys = useMemo(() => seriesDates.map((o) => o.dateKey), [seriesDates]);
+  const dateCountsQuery = useQuery({
+    queryKey: queryKeys.dateGoingCounts(id ?? 'none', seriesDateKeys.join(',')),
+    enabled: !!id && seriesDateKeys.length > 0,
+    queryFn: () => occurrencesService.getDateGoingCounts(id!, seriesDateKeys),
+    staleTime: 60 * 1000,
+  });
 
   const query = useQuery({
     queryKey: queryKeys.eventInsights(id, days),
@@ -136,6 +164,15 @@ export default function EventInsightsScreen() {
         metric={metric}
         onMetricChange={setMetric}
         refreshing={query.isFetching && !pulling}
+        series={
+          seriesEvent
+            ? {
+                summary: describeRecurrence(seriesEvent.recurrence_pattern, seriesEvent.start_datetime, { withEnd: true }),
+                dates: seriesDates,
+                counts: dateCountsQuery.data?.going,
+              }
+            : null
+        }
       />
     );
   }
@@ -163,6 +200,13 @@ export default function EventInsightsScreen() {
   );
 }
 
+/** Series extras for the per-date view (E-R3); null for one-off events. */
+type SeriesInsights = {
+  summary: string;
+  dates: Occurrence[];
+  counts: Record<string, number> | undefined;
+};
+
 function InsightsBody({
   data,
   period,
@@ -170,6 +214,7 @@ function InsightsBody({
   metric,
   onMetricChange,
   refreshing,
+  series,
 }: {
   data: EventInsights;
   period: Period;
@@ -177,6 +222,7 @@ function InsightsBody({
   metric: TrendMetric;
   onMetricChange: (m: TrendMetric) => void;
   refreshing: boolean;
+  series: SeriesInsights | null;
 }) {
   const { totals, event } = data;
   const premium = data.tier === 'premium' && data.source === 'insights_rpc';
@@ -217,7 +263,7 @@ function InsightsBody({
         </View>
         {startDisplay ? (
           <Text style={styles.muted}>
-            {event.isRecurring ? 'Repeating series · first ' : ''}
+            {event.isRecurring ? `${series?.summary || 'Repeating series'} · first ` : ''}
             {startDisplay.primary}
             {startDisplay.secondary ? `\n${startDisplay.secondary}` : ''}
           </Text>
@@ -310,7 +356,7 @@ function InsightsBody({
 
       {/* Premium sections */}
       {premium ? (
-        <PremiumSections data={data} metric={metric} onMetricChange={onMetricChange} trendPoints={trendPoints} />
+        <PremiumSections data={data} metric={metric} onMetricChange={onMetricChange} trendPoints={trendPoints} series={series} />
       ) : data.source === 'overview_fallback' ? (
         <View style={[styles.card, styles.noticeCard]}>
           <Text style={styles.noticeTitle}>More insights are on the way</Text>
@@ -335,11 +381,13 @@ function PremiumSections({
   metric,
   onMetricChange,
   trendPoints,
+  series,
 }: {
   data: EventInsights;
   metric: TrendMetric;
   onMetricChange: (m: TrendMetric) => void;
   trendPoints: { date: string; value: number }[];
+  series: SeriesInsights | null;
 }) {
   const lead = data.leadTime;
   const leadSummary = lead && lead.available ? leadTimeSummary(lead) : null;
@@ -368,6 +416,29 @@ function PremiumSections({
               </View>
             ))}
             {leadSummary.total === 0 ? <Text style={styles.muted}>No one is going yet.</Text> : null}
+          </>
+        ) : series && series.dates.length > 0 ? (
+          <>
+            <Text style={styles.reading}>Going per upcoming date (series RSVPs minus opt-outs, plus date-only RSVPs).</Text>
+            {series.dates.map((o) => {
+              const n = series.counts?.[o.dateKey];
+              const max = Math.max(1, ...series.dates.map((d) => series.counts?.[d.dateKey] ?? 0));
+              return (
+                <View key={o.dateKey} style={styles.funnelRow}>
+                  <Text style={styles.funnelLabel}>
+                    {o.start.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
+                    {o.status === 'moved' ? ' (moved)' : ''}
+                  </Text>
+                  <View style={styles.funnelTrack}>
+                    <View style={[styles.funnelFill, { width: `${((n ?? 0) / max) * 100}%`, backgroundColor: Colors.success }]} />
+                  </View>
+                  <Text style={styles.funnelValue}>{n ?? '—'}</Text>
+                </View>
+              );
+            })}
+            {series.counts && Object.keys(series.counts).length === 0 ? (
+              <Text style={styles.muted}>Per-date counts need a database update that has not been applied yet.</Text>
+            ) : null}
           </>
         ) : (
           <Text style={styles.muted}>Not shown for repeating events: RSVPs cover the whole series, not one date.</Text>

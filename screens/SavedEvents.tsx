@@ -1,4 +1,6 @@
 import { memo, useCallback, useMemo, useState } from 'react';
+import { cadenceLabel } from '@/utils/recurrence';
+import { useEffectiveNextDates } from '@/hooks/useEffectiveNextDates';
 import { useInfiniteQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { queryKeys } from '@/hooks/queryKeys';
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
@@ -46,13 +48,16 @@ type SavedEventSection = { key: string; title: string | null; data: RankedEvent[
 const SavedEventRow = memo(function SavedEventRow({
   event,
   onUnsave,
+  nextIso,
 }: {
   event: RankedEvent;
   onUnsave: (event: RankedEvent) => void;
+  /** Effective next date for series (useEffectiveNextDates). */
+  nextIso?: string;
 }) {
   const cancelled = event.status === 'cancelled';
   const ended = !!event.has_ended;
-  const when = ended ? event.start_datetime : event.next_start_datetime || event.start_datetime;
+  const when = ended ? event.start_datetime : nextIso || event.next_start_datetime || event.start_datetime;
   // Event-zone time with a "your time" line when the viewer's clock differs
   // (rows carry `timezone` from 20261104130000; legacy rows render as before).
   const display = describeEventDateTime(when, event.timezone);
@@ -71,7 +76,7 @@ const SavedEventRow = memo(function SavedEventRow({
       <EventListItem
         title={event.title}
         subtitle={event.business_name}
-        dateLine={`${display.primary}${event.is_recurring && !ended ? ' · repeats' : ''}`}
+        dateLine={`${display.primary}${event.is_recurring && !ended ? ` · ${cadenceLabel(event.recurrence_pattern).toLowerCase() || 'repeats'}` : ''}`}
         thumbnailUrl={event.cover_image_url}
         dimmed={ended || cancelled}
         badge={
@@ -135,6 +140,7 @@ export default function SavedEvents() {
     hasData: query.data !== undefined,
     isEmpty: events.length === 0,
   });
+  const nextById = useEffectiveNextDates(events);
   const loading = screenState === 'loading';
   // Only the pull gesture drives the RefreshControl; background refetches
   // (focus, invalidation, foreground) must not animate the list.
@@ -217,8 +223,10 @@ export default function SavedEvents() {
   }, [events]);
 
   const renderItem = useCallback(
-    ({ item }: { item: RankedEvent }) => <SavedEventRow event={item} onUnsave={handleUnsave} />,
-    [handleUnsave]
+    ({ item }: { item: RankedEvent }) => (
+      <SavedEventRow event={item} onUnsave={handleUnsave} nextIso={nextById.get(item.id)} />
+    ),
+    [handleUnsave, nextById]
   );
 
   const renderSectionHeader = useCallback(

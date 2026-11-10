@@ -56,8 +56,8 @@ export function buildMapHtml(
     };
     window.gm_authFailure = function() { window.__mapUnavailable('auth'); };
     ${markerSvgScript()}
-    function getPinpointIcon(categorySlug, isActive) {
-      var svg = __markerSvg(categorySlug, isActive);
+    function getPinpointIcon(style, isActive) {
+      var svg = __markerSvg(style, isActive);
       return {
         url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
         scaledSize: new google.maps.Size(__markerSize, __markerSize),
@@ -83,7 +83,7 @@ export function buildMapHtml(
         if (!window.__markerData) return;
         window.__markerData.forEach(function(d) {
           var isActive = d.id && activeId === d.id;
-          d.marker.setIcon(getPinpointIcon(d.categorySlug, isActive));
+          d.marker.setIcon(getPinpointIcon(d.style, isActive));
         });
       };
       window.__updateMarkers = function(markersData, activeId) {
@@ -100,7 +100,26 @@ export function buildMapHtml(
         // Official @googlemaps/markerclusterer from CDN; if the script failed
         // to load, markers fall back to being added to the map directly.
         if (!window.__clusterer && window.markerClusterer && window.markerClusterer.MarkerClusterer) {
-          try { window.__clusterer = new window.markerClusterer.MarkerClusterer({ map: map }); } catch (e) { window.__clusterer = null; }
+          try {
+            window.__clusterer = new window.markerClusterer.MarkerClusterer({
+              map: map,
+              // Dominant category colour of the cluster (same rule as Leaflet).
+              renderer: {
+                render: function (c) {
+                  var color = __markerDominantColor((c.markers || []).map(function (mk) { return mk.__evmStyle || null; }));
+                  var label = c.count > 99 ? '99+' : String(c.count);
+                  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44"><circle cx="22" cy="22" r="18" fill="' + color + '" stroke="#ffffff" stroke-width="3"/></svg>';
+                  return new google.maps.Marker({
+                    position: c.position,
+                    icon: { url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg), scaledSize: new google.maps.Size(44, 44), anchor: new google.maps.Point(22, 22) },
+                    label: { text: label, color: '#ffffff', fontSize: '13px', fontWeight: '700' },
+                    title: c.count + ' events in this area',
+                    zIndex: 1000 + c.count
+                  });
+                }
+              }
+            });
+          } catch (e) { window.__clusterer = null; }
         }
         var useClusterer = !!window.__clusterer;
         var created = [];
@@ -109,16 +128,17 @@ export function buildMapHtml(
           var lng = typeof m.lng === 'number' ? m.lng : parseFloat(m.lng);
           if (isNaN(lat) || isNaN(lng)) return;
           var pos = { lat: lat, lng: lng };
-          var categorySlug = m.categorySlug || '';
+          var style = { categorySlug: m.categorySlug || '', categoryColor: m.categoryColor || '', categoryIconKey: m.categoryIconKey || '' };
           var isActive = m.id && activeId === m.id;
           var marker = new google.maps.Marker({
             position: pos,
             map: useClusterer ? null : map,
             title: m.title || '',
-            icon: getPinpointIcon(categorySlug, isActive)
+            icon: getPinpointIcon(style, isActive)
           });
+          marker.__evmStyle = style;
           created.push(marker);
-          window.__markerData.push({ marker: marker, id: m.id, categorySlug: categorySlug });
+          window.__markerData.push({ marker: marker, id: m.id, style: style });
           if (hasMarkerPress && m.id) {
             marker.addListener('click', function() {
               if (window.ReactNativeWebView) {

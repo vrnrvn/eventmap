@@ -3,8 +3,8 @@
  * generation. Kept free of React Native / Expo imports so it is unit-testable
  * under node (see vitest.config.mts) — the platform IO lives in eventShare.ts.
  */
-import type { RecurrencePattern } from '@/utils/recurrence';
-import { isValidTimeZone, utcToWallClock, wallClockToUtc as wallClockToUtcLocal } from '@/utils/timezone';
+import { normalizeWeekdays, weekOfMonthFor, type RecurrencePattern } from '@/utils/recurrence';
+import { instantToPickerDate, isValidTimeZone, utcToWallClock, wallClockToUtc as wallClockToUtcLocal } from '@/utils/timezone';
 
 /** "20261106T190000" — the wall clock of `iso` in `tz`, RFC 5545 local form. */
 function formatIcsLocal(iso: string, tz: string): string {
@@ -58,7 +58,9 @@ export function buildRecurrenceRule(
   pattern: RecurrencePattern | null | undefined,
   isRecurring?: boolean,
   /** Event zone: UNTIL becomes the end of that day in this zone (device zone when omitted). */
-  timezone?: string | null
+  timezone?: string | null,
+  /** Series start (ISO); needed for monthly nth-weekday rules. */
+  seriesStart?: string | null
 ): string | null {
   if (!isRecurring || !pattern) return null;
   const freq =
@@ -74,6 +76,25 @@ export function buildRecurrenceRule(
   const parts = [`FREQ=${freq}`];
   const interval = Number(pattern.interval);
   if (Number.isFinite(interval) && interval > 1) parts.push(`INTERVAL=${Math.floor(interval)}`);
+
+  // Weekly on several days / monthly "2nd Tuesday" (RFC 5545 BYDAY). The
+  // monthly weekday comes from DTSTART, so it needs the series start.
+  const ICS_DAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+  if (pattern.frequency === 'weekly') {
+    const days = normalizeWeekdays(pattern.byWeekday);
+    if (days) {
+      parts.push(`BYDAY=${days.map((d) => ICS_DAYS[d]).join(',')}`);
+      // Week numbering must match utils/recurrence (Monday-based weeks;
+      // MO is also the RFC 5545 default, stated for clarity).
+      if (Number.isFinite(interval) && interval > 1) parts.push('WKST=MO');
+    }
+  } else if (pattern.frequency === 'monthly' && pattern.monthly === 'nthWeekday' && seriesStart) {
+    const start = timezone && isValidTimeZone(timezone) ? instantToPickerDate(new Date(seriesStart), timezone) : new Date(seriesStart);
+    if (!Number.isNaN(start.getTime())) {
+      const week = weekOfMonthFor(start);
+      parts.push(`BYDAY=${week}${ICS_DAYS[start.getDay()]}`);
+    }
+  }
 
   const endDate = pattern.endDate;
   if (endDate && /^\d{4}-\d{2}-\d{2}/.test(endDate)) {
@@ -110,6 +131,17 @@ export type IcsEventInput = {
    * rules to the series. Without it, times are UTC instants (legacy events).
    */
   timezone?: string | null;
+  /**
+   * Per-date changes of a series (utils/occurrences). Cancelled dates become
+   * EXDATE; moved dates become EXDATE-free overrides: a second VEVENT with
+   * the same UID and RECURRENCE-ID = the original start.
+   */
+  exceptions?: readonly {
+    originalStartIso: string;
+    kind: 'cancelled' | 'rescheduled';
+    newStartIso?: string | null;
+    newEndIso?: string | null;
+  }[];
 };
 
 /** RFC 5545 TEXT escaping: backslash, semicolon, comma, newlines. */
@@ -182,10 +214,37 @@ function buildVEventLines(input: IcsEventInput, stamp: string): string[] {
     lines.push(`DTSTART:${padUtcGcal(start.toISOString())}`, `DTEND:${padUtcGcal(end.toISOString())}`);
   }
   lines.push(`SUMMARY:${escapeIcsText(input.title)}`);
-  if (input.recurrence) lines.push(input.recurrence);
-  if (input.description) lines.push(`DESCRIPTION:${escapeIcsText(input.description)}`);
-  if (input.address) lines.push(`LOCATION:${escapeIcsText(input.address)}`);
-  lines.push(`URL:${getEventWebUrl(input.id)}`, 'END:VEVENT');
+  const at = (iso: string, prop: string) =>
+    tz ? `${prop};TZID=${tz}:${formatIcsLocal(iso, tz)}` : `${prop}:${padUtcGcal(iso)}`;
+  const valid = (iso: string | null | undefined): iso is string => !!iso && !Number.isNaN(new Date(iso).getTime());
+  if (input.recurrence) {
+    lines.push(input.recurrence);
+    for (const x of input.exceptions ?? []) {
+      if (x.kind === 'cancelled' && valid(x.originalStartIso)) lines.push(at(x.originalStartIso, 'EXDATE'));
+    }
+  }
+  const tail: string[] = [];
+  if (input.description) tail.push(`DESCRIPTION:${escapeIcsText(input.description)}`);
+  if (input.address) tail.push(`LOCATION:${escapeIcsText(input.address)}`);
+  tail.push(`URL:${getEventWebUrl(input.id)}`);
+  lines.push(...tail, 'END:VEVENT');
+
+  if (input.recurrence) {
+    for (const x of input.exceptions ?? []) {
+      if (x.kind !== 'rescheduled' || !valid(x.originalStartIso) || !valid(x.newStartIso) || !valid(x.newEndIso)) continue;
+      lines.push(
+        'BEGIN:VEVENT',
+        `UID:event-${input.id}@eventmap.pro`,
+        `DTSTAMP:${stamp}`,
+        at(x.originalStartIso, 'RECURRENCE-ID'),
+        at(x.newStartIso, 'DTSTART'),
+        at(x.newEndIso, 'DTEND'),
+        `SUMMARY:${escapeIcsText(input.title)}`,
+        ...tail,
+        'END:VEVENT'
+      );
+    }
+  }
   return lines;
 }
 

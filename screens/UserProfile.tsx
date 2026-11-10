@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useEffectiveNextDates } from '@/hooks/useEffectiveNextDates';
 import { blockedOffline } from '@/utils/requireOnline';
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '@/hooks/queryKeys';
@@ -31,7 +32,7 @@ import { formatEventDate } from '@/utils/formatEventWhen';
 import { Avatar } from '@/components/Avatar';
 import { EventCardCarousel } from '@/components/EventCardCarousel';
 import { CategoryIcon } from '@/components/CategoryIcon';
-import { getCategoryIconColor } from '@/constants/categoryIcons';
+import { categoryTint, getCategoryColor } from '@/utils/categoryPresentation';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { FacebookIcon, InstagramIcon } from '@/components/icons/BrandIcons';
@@ -109,6 +110,7 @@ export default function UserProfile() {
   const isPrivate = page?.isPrivate ?? false;
   // Cached rows can be days old: drop events that have ended since.
   const upcomingEvents = useMemo(() => (page?.events ?? []).filter((e) => !hasEventEnded(e)), [page]);
+  const nextById = useEffectiveNextDates(upcomingEvents);
   const { state: screenState, freshness } = useScreenState(query, { hasData: page !== undefined, isEmpty: false });
   const loading = screenState === 'loading';
   const loadError = screenState === 'error' || screenState === 'offline';
@@ -397,7 +399,7 @@ export default function UserProfile() {
                   onPress={() => router.push(`/event/${event.id}` as any)}
                   activeOpacity={0.9}
                   accessibilityRole="button"
-                  accessibilityLabel={`${event.title}, ${formatDate(event.next_start_datetime || event.start_datetime)}`}
+                  accessibilityLabel={`${event.title}, ${formatDate(nextById.get(event.id) || event.next_start_datetime || event.start_datetime)}`}
                 >
                   <EventCardCarousel
                     imageUrls={event.cover_image_url ? [event.cover_image_url] : []}
@@ -410,12 +412,12 @@ export default function UserProfile() {
                     <View style={styles.eventMeta}>
                       <EventmapCalendar size={14} color={Colors.text.secondary} />
                       <Text style={styles.eventMetaText}>
-                        {formatDate(event.next_start_datetime || event.start_datetime)}
+                        {formatDate(nextById.get(event.id) || event.next_start_datetime || event.start_datetime)}
                       </Text>
                     </View>
-                    <View style={[styles.categoryBadge, { backgroundColor: `${getCategoryIconColor(event.category_slug)}18` }]}>
+                    <View style={[styles.categoryBadge, { backgroundColor: categoryTint(getCategoryColor(event.category_slug), 0.1) }]}>
                       <CategoryIcon category={event.category_slug} size="sm" variant="minimal" />
-                      <Text style={[styles.categoryText, { color: getCategoryIconColor(event.category_slug) }]}>
+                      <Text style={[styles.categoryText, { color: getCategoryColor(event.category_slug) }]}>
                         {event.category_label}
                       </Text>
                     </View>

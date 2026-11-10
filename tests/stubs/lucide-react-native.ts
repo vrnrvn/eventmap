@@ -1,7 +1,7 @@
 /**
  * Stub for `lucide-react-native` (see vitest.config.mts).
  *
- * Modules like `constants/categoryIcons.ts` import icons purely as component
+ * Modules like `constants/categoryIconRegistry.ts` import icons purely as component
  * references held in a config map. Tests read that map's *shape* (which slugs
  * exist, what colour each uses) and never render an icon, so a distinct inert
  * component per name is enough.
@@ -16,7 +16,7 @@ const icon = (name: string) => {
   return component;
 };
 
-// Used by constants/categoryIcons.ts
+// Used by constants/categoryIconRegistry.ts
 export const Disc3 = icon('Disc3');
 export const Flame = icon('Flame');
 export const Coffee = icon('Coffee');
@@ -28,3 +28,5 @@ export const UtensilsCrossed = icon('UtensilsCrossed');
 export const Trophy = icon('Trophy');
 export const Palette = icon('Palette');
 export const MapPin = icon('MapPin');
+export const Users = icon('Users');
+export const Baby = icon('Baby');

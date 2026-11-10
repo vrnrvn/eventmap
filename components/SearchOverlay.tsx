@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -28,6 +28,11 @@ import {
 } from '@/utils/datePresets';
 import { GooglePlacesAutocomplete, parseDescription } from './GooglePlacesAutocomplete';
 import type { AutocompletePrediction } from '@/services/places';
+import { useCategories } from '@/hooks/useCategories';
+import { CategoryIcon } from '@/components/CategoryIcon';
+import { matchCategorySuggestions } from '@/utils/categoryBrowse';
+import { presentCategory } from '@/utils/categoryPresentation';
+import type { Category } from '@/types/database';
 import { RegionGrid, type RegionItem } from './RegionGrid';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 import { a11yState } from '@/utils/accessibility';
@@ -48,11 +53,17 @@ type SearchOverlayProps = {
   ) => void;
   userLocation: { lat: number; lng: number } | null;
   initialKeyword?: string;
+  /**
+   * A "Category" suggestion was picked for the typed keyword: apply it as a
+   * category filter instead of a text search. Hidden when not provided.
+   */
+  onSelectCategory?: (category: Category) => void;
 };
 
 export function SearchOverlay({
   visible,
   onClose,
+  onSelectCategory,
   onSearch,
   userLocation,
   initialKeyword = '',
@@ -62,6 +73,11 @@ export function SearchOverlay({
   const [currentStep, setCurrentStep] = useState<SearchStep>('where');
   const [whereInput, setWhereInput] = useState('');
   const [keyword, setKeyword] = useState(initialKeyword);
+  const { categories } = useCategories();
+  const categorySuggestions = useMemo(
+    () => (onSelectCategory ? matchCategorySuggestions(keyword, categories) : []),
+    [keyword, categories, onSelectCategory]
+  );
   const [suggestions, setSuggestions] = useState<AutocompletePrediction[]>([]);
   // Dates are staged locally and committed on Search. Writing straight to
   // the context made every chip tap refetch Discover behind the modal.
@@ -230,6 +246,35 @@ export function SearchOverlay({
                     </TouchableOpacity>
                   ) : null}
                 </View>
+
+                {categorySuggestions.length > 0 ? (
+                  <View style={styles.categorySuggestions} accessibilityLabel="Category suggestions">
+                    {categorySuggestions.map(({ category, matched }) => {
+                      const { label } = presentCategory(category);
+                      return (
+                        <TouchableOpacity
+                          key={category.id}
+                          style={styles.categorySuggestion}
+                          onPress={() => {
+                            onSelectCategory?.(category);
+                            onClose();
+                          }}
+                          activeOpacity={0.7}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Show ${label} events`}
+                        >
+                          <CategoryIcon category={category} size="sm" />
+                          <View style={styles.categorySuggestionText}>
+                            <Text style={styles.categorySuggestionLabel}>{label}</Text>
+                            <Text style={styles.categorySuggestionMeta}>
+                              {matched ? `Category · matches “${matched}”` : 'Category'}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ) : null}
 
                 <View style={styles.searchInputContainer}>
                   <GooglePlacesAutocomplete
@@ -426,6 +471,30 @@ const styles = StyleSheet.create({
   },
   searchInputContainer: {
     marginBottom: Spacing.md,
+  },
+  categorySuggestions: {
+    marginTop: Spacing.sm,
+    gap: 2,
+  },
+  categorySuggestion: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.sm,
+    minHeight: 44,
+    borderRadius: BorderRadius.md,
+  },
+  categorySuggestionText: { flex: 1, minWidth: 0 },
+  categorySuggestionLabel: {
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.fontFamilies.semibold,
+    color: Colors.text.primary,
+  },
+  categorySuggestionMeta: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamilies.regular,
+    color: Colors.text.tertiary,
   },
   keywordInputShell: {
     flexDirection: 'row',

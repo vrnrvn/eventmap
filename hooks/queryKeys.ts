@@ -59,6 +59,14 @@ export const queryKeys = {
   chatRoomPrefix: () => ['chat', 'room'] as const,
   /** Active promo banners for one placement. */
   banners: (placement: string) => ['banners', placement] as const,
+  /** One category's browse list (screens/CategoryBrowse), per area/window/radius. */
+  categoryBrowse: (categoryId: string, lat: number, lng: number, preset: string, radiusKm: number) =>
+    ['category-browse', categoryId, lat.toFixed(2), lng.toFixed(2), preset, radiusKm] as const,
+  /** Per-date exceptions of one recurring series (services/occurrences). */
+  occurrenceExceptions: (eventId: string) => ['event', 'occurrence-exceptions', eventId] as const,
+  /** Viewer's per-date RSVP overrides and per-date going counts for a series. */
+  dateRsvps: (eventId: string, userId: string) => ['event', 'date-rsvps', eventId, userId] as const,
+  dateGoingCounts: (eventId: string, keys: string) => ['event', 'date-going', eventId, keys] as const,
   /** All event categories (hooks/useCategories). */
   categories: () => ['categories'] as const,
   /** Discover's last unfiltered area (utils/discoverSnapshot), kept on the device. */

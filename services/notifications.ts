@@ -12,6 +12,8 @@ export type NotificationType =
   | 'event_update'
   | 'rsvp'
   | 'nearby_event'
+  /** New event in a preferred category nearby (20261109170000, opt-in). */
+  | 'interest_event'
   | 'promotion'
   | 'chat_message'
   | 'chat_mention'

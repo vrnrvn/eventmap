@@ -86,7 +86,17 @@ import { EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIco
 import { GoogleMapView } from '@/components/GoogleMapView';
 import { DeferredMount } from '@/components/DeferredMount';
 import { complaintsService } from '@/services/complaints';
-import { getNextOccurrences, getRecurrenceLabel } from '@/utils/recurrence';
+import { describeRecurrence, getNextOccurrences } from '@/utils/recurrence';
+import {
+  dateAttendance,
+  exceptionsForIcs,
+  listOccurrences,
+  nextDateOverride,
+  nextEffectiveOccurrence,
+  type DateAttendance,
+} from '@/utils/occurrences';
+import { occurrenceErrorMessage, occurrencesService } from '@/services/occurrences';
+import { useOccurrenceExceptions } from '@/hooks/useOccurrenceExceptions';
 import { hasEventEnded, isEventInProgress } from '@/utils/eventStatus';
 import { describeEventTime, formatInZone, getDeviceTimeZone, isValidTimeZone, zoneAbbreviation } from '@/utils/timezone';
 import {
@@ -97,6 +107,8 @@ import {
   shareEventLink,
 } from '@/utils/eventShare';
 import * as Clipboard from 'expo-clipboard';
+import { categoryRoute } from '@/utils/categoryBrowse';
+import { presentCategory } from '@/utils/categoryPresentation';
 import { ReportReasonSheet } from '@/components/ReportReasonSheet';
 import { a11yState } from '@/utils/accessibility';
 
@@ -157,6 +169,42 @@ export default function EventDetail() {
   const [lastLoadFailed, setLastLoadFailed] = useState(false);
   const connectivity = useConnectivity();
   const [loading, setLoading] = useState(!initial.details);
+  // Skipped / moved dates of a series (empty for one-offs or pre-migration).
+  const { exceptions: occurrenceExceptions } = useOccurrenceExceptions(id, !!details?.event?.is_recurring);
+  // Per-date "Going" (Phase F): the viewer's overrides on top of the series RSVP.
+  const isSeries = !!details?.event?.is_recurring;
+  const dateRsvpsQuery = useQuery({
+    queryKey: queryKeys.dateRsvps(id ?? 'none', user?.id ?? 'anon'),
+    enabled: !!id && !!user?.id && isSeries,
+    queryFn: () => occurrencesService.listMyDateRsvps(id!, user!.id),
+    staleTime: 30 * 1000,
+  });
+  const [dateRsvpBusy, setDateRsvpBusy] = useState<string | null>(null);
+  const toggleDateRsvp = useCallback(
+    async (dateKey: string, current: DateAttendance) => {
+      if (!id || !user) return;
+      const next = nextDateOverride(details?.user_rsvp, current);
+      setDateRsvpBusy(dateKey);
+      try {
+        const result = await occurrencesService.setDateRsvp(id, dateKey, next);
+        await queryClient.invalidateQueries({ queryKey: queryKeys.dateRsvps(id, user.id) });
+        notify.success(
+          result?.status === 'waitlist'
+            ? "That date is full — you're on its waitlist."
+            : current === 'waitlist'
+              ? 'You left the waitlist for that date.'
+              : current === 'going'
+                ? "Got it — you're not going that date."
+                : "You're going that date."
+        );
+      } catch (e) {
+        notify.error(occurrenceErrorMessage(e) ?? "Couldn't update that date. Try again.");
+      } finally {
+        setDateRsvpBusy(null);
+      }
+    },
+    [id, user, details?.user_rsvp, queryClient]
+  );
   // First load failed (network / server). Kept apart from `details === null`,
   // which means the event really doesn't exist.
   const [loadError, setLoadError] = useState(false);
@@ -786,7 +834,8 @@ export default function EventDetail() {
       recurrence: buildRecurrenceRule(
         details.event.recurrence_pattern,
         details.event.is_recurring,
-        details.event.timezone ?? null
+        details.event.timezone ?? null,
+        details.event.start_datetime
       ),
       timezone: details.event.timezone ?? null,
     };
@@ -821,6 +870,7 @@ export default function EventDetail() {
         endIso: times.end,
         recurrence: times.recurrence,
         timezone: times.timezone,
+        exceptions: exceptionsForIcs(details.event, occurrenceExceptions),
         address: details.event.address,
         description: [
           details.event.description?.trim(),
@@ -1033,8 +1083,11 @@ export default function EventDetail() {
   // header; everything else shows the scheduled start.
   const displayStartIso = (() => {
     if (!event.is_recurring || eventEnded) return event.start_datetime;
-    if (new Date(event.start_datetime).getTime() > Date.now()) return event.start_datetime;
-    const next = getNextOccurrences(event, 1)[0];
+    if (occurrenceExceptions.length === 0 && new Date(event.start_datetime).getTime() > Date.now()) {
+      return event.start_datetime;
+    }
+    // Honour skipped dates and moved times; fall back to the plain walk.
+    const next = nextEffectiveOccurrence(event, occurrenceExceptions)?.start ?? getNextOccurrences(event, 1)[0];
     return next ? next.toISOString() : event.start_datetime;
   })();
 
@@ -1149,9 +1202,17 @@ export default function EventDetail() {
               </View>
             ) : null}
             {category.label ? (
-              <View style={styles.heroCategoryPill}>
-                <Text style={styles.heroCategoryText}>{category.label.toUpperCase()}</Text>
-              </View>
+              <TouchableOpacity
+                style={styles.heroCategoryPill}
+                onPress={() => category.slug && router.push(categoryRoute(category.slug) as never)}
+                disabled={!category.slug}
+                activeOpacity={0.8}
+                accessibilityRole="link"
+                accessibilityLabel={`See more ${presentCategory(category).label} events`}
+                hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+              >
+                <Text style={styles.heroCategoryText}>{presentCategory(category).label.toUpperCase()}</Text>
+              </TouchableOpacity>
             ) : null}
             <Text style={styles.heroTitle} accessibilityRole="header">{event.title}</Text>
           </View>
@@ -1569,14 +1630,52 @@ export default function EventDetail() {
               <View style={styles.recurrenceHeader}>
                 <Repeat size={18} color={Colors.primary} />
                 <Text style={styles.recurrenceSectionTitle}>
-                  {getRecurrenceLabel(event.recurrence_pattern)} – Happens again
+                  {describeRecurrence(event.recurrence_pattern, event.start_datetime, { withEnd: true })}
                 </Text>
               </View>
-              {getNextOccurrences(event, 5).map((d, i) => (
-                <Text key={i} style={styles.recurrenceDate}>
-                  {formatDateTime(d.toISOString())}
+              {listOccurrences(event, occurrenceExceptions, { count: 5 }).map((o) => {
+                const attendance = dateAttendance(details.user_rsvp, dateRsvpsQuery.data ?? [], o.dateKey);
+                const canToggle = !!user && !isOwner && o.status !== 'cancelled' && !eventEnded;
+                return (
+                <View key={o.dateKey} style={styles.recurrenceRow}>
+                <Text
+                  style={[styles.recurrenceDate, styles.recurrenceDateFlex, o.status === 'cancelled' && styles.recurrenceDateCancelled]}
+                  accessibilityLabel={
+                    o.status === 'cancelled'
+                      ? `${formatDateTime(o.start.toISOString())}, cancelled`
+                      : o.status === 'moved'
+                        ? `${formatDateTime(o.start.toISOString())}, moved from ${formatDateTime(o.originalStart.toISOString())}`
+                        : undefined
+                  }
+                >
+                  {formatDateTime(o.start.toISOString())}
+                  {o.status === 'cancelled' ? ' · cancelled' : o.status === 'moved' ? ' · moved' : ''}
+                  {o.note ? ` — ${o.note}` : ''}
                 </Text>
-              ))}
+                {canToggle ? (
+                  <TouchableOpacity
+                    onPress={() => void toggleDateRsvp(o.dateKey, attendance)}
+                    disabled={dateRsvpBusy === o.dateKey}
+                    style={[styles.dateRsvpChip, attendance === 'going' && styles.dateRsvpChipOn]}
+                    accessibilityRole="switch"
+                    accessibilityLabel={`Going on ${formatDateTime(o.start.toISOString())}`}
+                    {...a11yState({ checked: attendance === 'going', busy: dateRsvpBusy === o.dateKey })}
+                    hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                  >
+                    <Text style={[styles.dateRsvpText, attendance === 'going' && styles.dateRsvpTextOn]}>
+                      {attendance === 'going'
+                        ? 'Going'
+                        : attendance === 'waitlist'
+                          ? 'Waitlisted'
+                          : attendance === 'not_going'
+                            ? "Can't go"
+                            : 'Go'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                </View>
+                );
+              })}
             </View>
           )}
 
@@ -2487,6 +2586,29 @@ const styles = StyleSheet.create({
     color: Colors.text.secondary,
     marginTop: Spacing.xs,
     marginLeft: 26,
+  },
+  recurrenceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+  },
+  recurrenceDateFlex: { flex: 1 },
+  dateRsvpChip: {
+    marginTop: Spacing.xs,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    minWidth: 72,
+    alignItems: 'center',
+    borderRadius: BorderRadius.round,
+    borderWidth: 1,
+    borderColor: Colors.border.medium,
+  },
+  dateRsvpChipOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  dateRsvpText: { fontSize: Typography.sizes.xs, fontFamily: Typography.fontFamilies.semibold, color: Colors.text.primary },
+  dateRsvpTextOn: { color: '#FFFFFF' },
+  recurrenceDateCancelled: {
+    textDecorationLine: 'line-through',
+    color: Colors.text.tertiary,
   },
   linksSection: {
     marginBottom: Spacing.lg,

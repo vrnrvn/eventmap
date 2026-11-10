@@ -45,3 +45,17 @@ export function rpcSignatureKey(fn: string, args: Record<string, unknown>): stri
     .sort();
   return `${fn}(${names.join(',')})`;
 }
+
+/**
+ * Host-facing text for the server's recurrence validation
+ * (`invalid_recurrence: …`, trigger c_validate_event_recurrence). Null when
+ * the error is something else, so callers keep their own handling.
+ */
+export function recurrenceErrorMessage(error: unknown): string | null {
+  const raw = typeof error === 'string' ? error : (error as { message?: unknown } | null)?.message;
+  if (typeof raw !== 'string') return null;
+  const m = raw.match(/invalid_recurrence:\s*(.*)$/s);
+  if (!m) return null;
+  const detail = m[1].trim().replace(/\.$/, '');
+  return `This repeat setting isn't valid${detail ? ` (${detail})` : ''}. Open Repeat and adjust it.`;
+}
