@@ -2,12 +2,10 @@ import { Redirect, Tabs } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { Colors, Typography } from '@/constants/theme';
 import { Compass, PlusCircle, Bell, User } from '@/components/icons.generated';
-import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUnreadNotificationCount } from '@/hooks/useUnreadNotificationCount';
 
 export default function TabsLayout() {
-  const { hasBusiness, loading } = useApp();
   const {
     session,
     loading: authLoading,
@@ -15,7 +13,6 @@ export default function TabsLayout() {
     profileError,
     hasCompletedOnboarding,
   } = useAuth();
-  const hideCreateTab = loading || !hasBusiness;
   const unreadCount = useUnreadNotificationCount(session?.user?.id);
 
   // Auth guard: tabs must never render for signed-out or un-onboarded users
@@ -76,7 +73,6 @@ export default function TabsLayout() {
           tabBarIcon: ({ size, color }) => (
             <PlusCircle size={size} color={color} />
           ),
-          ...(hideCreateTab ? { href: null } : {}),
         }}
       />
       <Tabs.Screen

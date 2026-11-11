@@ -63,6 +63,10 @@ import {
   type HostAttendee,
   type HostAttendeeStatus,
 } from '@/services/hostTools';
+import { carryOverToDuplicate } from '@/services/eventPresetSettings';
+import { markChecklistSignal } from '@/utils/hostChecklistStore';
+import { HostTipCard } from '@/components/HostTipCard';
+import { useHostTip } from '@/hooks/useHostTip';
 import type { WaitlistMode } from '@/types/database';
 import { queryKeys } from '@/hooks/queryKeys';
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
@@ -306,6 +310,11 @@ export default function ManageEvent() {
   });
   const details = detailsQuery.data ?? null;
   const event = details?.event ?? null;
+  // Getting-started checklist: "Open Manage event" (owner only, not admins).
+  const ownsEvent = !!event && !!userBusiness && event.business_id === userBusiness.id;
+  useEffect(() => {
+    if (ownsEvent) markChecklistSignal(userBusiness?.id, 'openedManage');
+  }, [ownsEvent, userBusiness?.id]);
 
   const isOwner = !!(event && userBusiness && event.business_id === userBusiness.id);
   const isAdmin = !!profile?.is_admin;
@@ -317,6 +326,24 @@ export default function ManageEvent() {
     enabled: !!id && canManage,
   });
   const overview = overviewQuery.data ?? null;
+
+  /**
+   * One-time tips (Stage 5). Owner only: an admin looking at someone else's
+   * event must not burn that host's tips.
+   *
+   * Waits for the host overview to settle and uses only its counts: the
+   * public `rsvp_count` in details can differ, and deciding from whichever
+   * snapshot rendered first announced "your event is full" for an event that
+   * was not.
+   */
+  const { tip: hostTipId, dismiss: dismissHostTip } = useHostTip(
+    {
+      going: overview?.going ?? null,
+      maxAttendees: event?.max_attendees ?? null,
+      reportsWaiting: overview?.chat?.open_reports ?? null,
+    },
+    isOwner && !overviewQuery.isLoading && !!overview
+  );
 
   const chatStatusQuery = useQuery({
     queryKey: ['host', 'event', id, 'chat-status'],
@@ -862,12 +889,16 @@ export default function ManageEvent() {
     if (!ok) return;
     try {
       const newId = await hostToolsService.duplicateEvent(id);
-      notify.success('Draft created.');
+      const carried = await carryOverToDuplicate(newId, {
+        eventType: event.event_type ?? null,
+        chatMode: chatStatus?.chat_mode ?? null,
+      });
+      notify.success(carried ? 'Draft created.' : 'Draft created. Set the chat option again in Manage event.');
       router.push(`/business/edit-event/${newId}` as never);
     } catch (err) {
       notify.error(err instanceof HostToolsUnavailableError ? err.message : 'Could not duplicate. Please try again.');
     }
-  }, [id, event]);
+  }, [id, event, chatStatus?.chat_mode]);
 
   const handleToggleUnlisted = useCallback(
     async (unlisted: boolean) => {
@@ -898,6 +929,12 @@ export default function ManageEvent() {
     const limited = overview?.source === 'details_fallback';
     return (
       <View style={styles.tabBody}>
+        <HostTipCard
+          tip={hostTipId}
+          onDismiss={dismissHostTip}
+          onAction={(target) => setTab(target === 'chat' ? 'chat' : target === 'settings' ? 'settings' : 'attendees')}
+          style={styles.hostTip}
+        />
         {/* Hero */}
         <View style={styles.hero}>
           <View style={styles.heroTitleRow}>
@@ -1779,6 +1816,7 @@ export default function ManageEvent() {
 }
 
 const styles = StyleSheet.create({
+  hostTip: { marginBottom: 16 },
   screen: {
     flex: 1,
     backgroundColor: Colors.background.primary,

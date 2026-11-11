@@ -23,6 +23,9 @@ work; their current status and remaining effort need review.
   calendar, with conflict indicators and quick access to event details.
 - **Offline and poor-connection UX:** Cache recently viewed event details and
   make failed or pending actions, including joins and messages, clear to users.
+- **Host workflow UI review:** keep `scripts/fake-backend-e2e/suiteHostUi.mjs`
+  green as host screens change (labels, 44 px targets, 320 px layout,
+  host-type wording), and extend it to large widths, font scaling and native.
 - **Event collections:** Let users organize saved events into named lists, such
   as plans for a weekend or venues to explore.
 

@@ -37,6 +37,8 @@ import { socialService, BlockingUnavailableError } from '@/services/social';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsRestoring, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/hooks/queryKeys';
+import { HostTipCard } from '@/components/HostTipCard';
+import { useHostTip } from '@/hooks/useHostTip';
 import { getConnectivity, subscribeConnectivity } from '@/utils/connectivity';
 import { isConnectionError } from '@/utils/networkErrors';
 import {
@@ -213,6 +215,12 @@ export default function EventChatScreen() {
   const canChat = attendeeAccess || (postStatus?.can_read ?? false);
   const canPost = postStatus ? postStatus.can_post : attendeeAccess;
   const isModerator = Boolean(postStatus?.is_host || postStatus?.is_admin);
+  // Host only: an admin moderating someone else's chat must not burn the
+  // host's tip.
+  const { tip: hostTipId, dismiss: dismissHostTip } = useHostTip(
+    { chatOpened: true },
+    Boolean(postStatus?.is_host)
+  );
   const isMuted = postStatus?.muted ?? false;
 
   useEffect(() => {
@@ -1703,6 +1711,9 @@ export default function EventChatScreen() {
         </View>
       ) : null}
 
+      {/* One-time tip: what a host can do in their own event chat. */}
+      <HostTipCard tip={hostTipId} onDismiss={dismissHostTip} style={styles.hostTip} />
+
       {canChat && !loading && pinnedMessage ? (
         <View style={styles.pinnedBanner} accessibilityLabel="Pinned message">
           <Pin size={14} color={Colors.primary} />
@@ -1926,6 +1937,7 @@ export default function EventChatScreen() {
 }
 
 const styles = StyleSheet.create({
+  hostTip: { marginHorizontal: 12, marginTop: 8 },
   container: {
     flex: 1,
     backgroundColor: Colors.background.primary,

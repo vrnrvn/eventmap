@@ -54,11 +54,12 @@ import { connectionErrorMessage } from '@/utils/networkErrors';
 import { runOrQueueWithNotice } from '@/services/pendingWrites';
 import { usePendingWrite } from '@/hooks/usePendingWrite';
 import { a11yState } from '@/utils/accessibility';
+import { businessPin } from '@/utils/hostSetup';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 function buildGoogleSearchUrl(business: Business): string {
-  const query = encodeURIComponent(`${business.name} ${business.address}`);
+  const query = encodeURIComponent([business.name, business.address].filter(Boolean).join(' '));
   return `https://www.google.com/maps/search/?api=1&query=${query}`;
 }
 
@@ -242,9 +243,13 @@ export default function BusinessDetail() {
     );
   }
 
+  const pin = businessPin(business);
   const allLinks: Array<{ id: string; label: string | null; url: string }> = [
     ...links,
-    { id: 'google-maps', label: 'View on Google Maps', url: buildGoogleSearchUrl(business) },
+    // Only venues have a place worth searching for on Google Maps.
+    ...((business.location_kind ?? 'fixed') === 'fixed' && business.address
+      ? [{ id: 'google-maps', label: 'View on Google Maps', url: buildGoogleSearchUrl(business) }]
+      : []),
     ...(business.google_reviews_url?.trim()
       ? [{ id: 'google-reviews', label: 'Google Reviews', url: business.google_reviews_url.trim() }]
       : []),
@@ -408,35 +413,46 @@ export default function BusinessDetail() {
           </View>
         )}
 
-        {/* Location */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Location</Text>
-          <View style={styles.addressRow}>
-            <MapPin size={18} color={Colors.text.secondary} />
-            <Text style={styles.addressText}>{business.address}</Text>
+        {/* Location: a map only for fixed venues. A home area is shown as text
+            (no precise pin for organisers/individuals); 'none' shows nothing. */}
+        {pin && (business.location_kind ?? 'fixed') === 'fixed' ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Location</Text>
+            <View style={styles.addressRow}>
+              <MapPin size={18} color={Colors.text.secondary} />
+              <Text style={styles.addressText}>{pin.address}</Text>
+            </View>
+            <View style={styles.mapContainer}>
+              {/* Below the fold — don't build the map WebView mid-transition. */}
+              <DeferredMount style={styles.mapFill}>
+                <GoogleMapView
+                  center={{ lat: pin.lat, lng: pin.lng }}
+                  zoom={15}
+                  mapGesturesEnabled={false}
+                  webViewScrollEnabled={false}
+                  nestedScrollEnabled={false}
+                  markers={[
+                    {
+                      id: business.id,
+                      lat: pin.lat,
+                      lng: pin.lng,
+                      title: business.name,
+                      categorySlug: business.category,
+                    },
+                  ]}
+                />
+              </DeferredMount>
+            </View>
           </View>
-          <View style={styles.mapContainer}>
-            {/* Below the fold — don't build the map WebView mid-transition. */}
-            <DeferredMount style={styles.mapFill}>
-              <GoogleMapView
-                center={{ lat: business.lat, lng: business.lng }}
-                zoom={15}
-                mapGesturesEnabled={false}
-                webViewScrollEnabled={false}
-                nestedScrollEnabled={false}
-                markers={[
-                  {
-                    id: business.id,
-                    lat: business.lat,
-                    lng: business.lng,
-                    title: business.name,
-                    categorySlug: business.category,
-                  },
-                ]}
-              />
-            </DeferredMount>
+        ) : business.location_kind === 'area' && business.address ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Based in</Text>
+            <View style={styles.addressRow}>
+              <MapPin size={18} color={Colors.text.secondary} />
+              <Text style={styles.addressText}>{business.address}</Text>
+            </View>
           </View>
-        </View>
+        ) : null}
 
         {/* Contact */}
         {business.contact_email ? (

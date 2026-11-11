@@ -1,3 +1,10 @@
+// HAND-EDITED 2026-11-10 (host onboarding Stages 1–2): businesses host columns,
+// nullable location, profiles.intent, get_user_business SETOF, and
+// host_terms_current_version from the unapplied migrations 20261110100000 and
+// 20261110110000; events.event_type (20261110120000) and
+// get_host_onboarding_status (20261110130000); standing, verification
+// requests and their RPCs (20261110140000); archived_at + archive/reopen
+// (20261110170000). Regenerate with `npm run backend:types` once they are applied.
 export type Json =
   | string
   | number
@@ -190,64 +197,91 @@ export type Database = {
       }
       businesses: {
         Row: {
-          address: string
+          address: string | null
+          archived_at: string | null
           category: string
           contact_email: string | null
           created_at: string
           description: string
           events_created_this_month: number
           google_reviews_url: string | null
+          host_terms_accepted_at: string | null
+          host_terms_version: number | null
+          host_type: string
           id: string
           last_reset_date: string
-          lat: number
-          lng: number
+          location_kind: string
+          lat: number | null
+          lng: number | null
           logo_url: string | null
           name: string
           notifications_enabled: boolean | null
+          onboarding_completed_at: string | null
           owner_id: string
           social_handles: Json | null
+          standing: string
+          standing_reason: string | null
+          standing_updated_at: string | null
           subscription_expires_at: string | null
           subscription_tier: string
           verified: boolean
         }
         Insert: {
-          address: string
+          address?: string | null
+          archived_at?: string | null
           category: string
           contact_email?: string | null
           created_at?: string
           description?: string
           events_created_this_month?: number
           google_reviews_url?: string | null
+          host_terms_accepted_at?: string | null
+          host_terms_version?: number | null
+          host_type?: string
           id?: string
           last_reset_date?: string
-          lat: number
-          lng: number
+          location_kind?: string
+          lat?: number | null
+          lng?: number | null
           logo_url?: string | null
           name: string
           notifications_enabled?: boolean | null
+          onboarding_completed_at?: string | null
           owner_id: string
           social_handles?: Json | null
+          standing?: string
+          standing_reason?: string | null
+          standing_updated_at?: string | null
           subscription_expires_at?: string | null
           subscription_tier?: string
           verified?: boolean
         }
         Update: {
-          address?: string
+          address?: string | null
+          archived_at?: string | null
           category?: string
           contact_email?: string | null
           created_at?: string
           description?: string
           events_created_this_month?: number
           google_reviews_url?: string | null
+          host_terms_accepted_at?: string | null
+          host_terms_version?: number | null
+          host_type?: string
           id?: string
           last_reset_date?: string
-          lat?: number
-          lng?: number
+          location_kind?: string
+          lat?: number | null
+          lng?: number | null
           logo_url?: string | null
           name?: string
           notifications_enabled?: boolean | null
+          onboarding_completed_at?: string | null
           owner_id?: string
           social_handles?: Json | null
+          standing?: string
+          standing_reason?: string | null
+          standing_updated_at?: string | null
           subscription_expires_at?: string | null
           subscription_tier?: string
           verified?: boolean
@@ -925,6 +959,7 @@ export type Database = {
           created_at: string
           description: string
           end_datetime: string
+          event_type: string | null
           id: string
           is_recurring: boolean
           lat: number
@@ -956,6 +991,7 @@ export type Database = {
           created_at?: string
           description?: string
           end_datetime: string
+          event_type?: string | null
           id?: string
           is_recurring?: boolean
           lat: number
@@ -987,6 +1023,7 @@ export type Database = {
           created_at?: string
           description?: string
           end_datetime?: string
+          event_type?: string | null
           id?: string
           is_recurring?: boolean
           lat?: number
@@ -1106,6 +1143,45 @@ export type Database = {
           },
         ]
       }
+      host_verification_requests: {
+        Row: {
+          business_id: string
+          created_at: string
+          evidence_url: string
+          id: string
+          note: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          reviewer_note: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          business_id: string
+          created_at?: string
+          evidence_url: string
+          id?: string
+          note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          reviewer_note?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          business_id?: string
+          created_at?: string
+          evidence_url?: string
+          id?: string
+          note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          reviewer_note?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       notifications: {
         Row: {
           body: string | null
@@ -1178,6 +1254,7 @@ export type Database = {
           has_completed_onboarding: boolean | null
           hobbies: string | null
           id: string
+          intent: string | null
           is_admin: boolean
           is_profile_private: boolean | null
           lat: number | null
@@ -1199,6 +1276,7 @@ export type Database = {
           has_completed_onboarding?: boolean | null
           hobbies?: string | null
           id: string
+          intent?: string | null
           is_admin?: boolean
           is_profile_private?: boolean | null
           lat?: number | null
@@ -1220,6 +1298,7 @@ export type Database = {
           has_completed_onboarding?: boolean | null
           hobbies?: string | null
           id?: string
+          intent?: string | null
           is_admin?: boolean
           is_profile_private?: boolean | null
           lat?: number | null
@@ -1679,6 +1758,15 @@ export type Database = {
         Args: { p_business_id: string; p_verified: boolean }
         Returns: undefined
       }
+      archive_business: { Args: never; Returns: number }
+      admin_review_verification: {
+        Args: { p_decision: string; p_note?: string; p_request_id: string }
+        Returns: undefined
+      }
+      admin_set_host_standing: {
+        Args: { p_business_id: string; p_reason?: string; p_standing: string }
+        Returns: undefined
+      }
       admin_unban_user: { Args: { p_user_id: string }; Returns: undefined }
       block_event_chat_user: {
         Args: {
@@ -1911,6 +1999,7 @@ export type Database = {
         Returns: Json
       }
       get_host_events_counts: { Args: { p_event_ids: string[] }; Returns: Json }
+      get_host_onboarding_status: { Args: never; Returns: Json }
       get_profiles_display: { Args: { user_ids: string[] }; Returns: Json }
       get_public_profile: { Args: { user_id_param: string }; Returns: Json }
       get_ranked_events: {
@@ -1961,26 +2050,7 @@ export type Database = {
       }
       get_user_business: {
         Args: never
-        Returns: {
-          address: string
-          category: string
-          contact_email: string
-          created_at: string
-          description: string
-          events_created_this_month: number
-          google_reviews_url: string
-          id: string
-          last_reset_date: string
-          lat: number
-          lng: number
-          logo_url: string
-          name: string
-          owner_id: string
-          social_handles: Json
-          subscription_expires_at: string
-          subscription_tier: string
-          verified: boolean
-        }[]
+        Returns: Database["public"]["Tables"]["businesses"]["Row"][]
       }
       get_user_calendar: {
         Args: {
@@ -2058,6 +2128,7 @@ export type Database = {
         }
         Returns: Json
       }
+      host_terms_current_version: { Args: never; Returns: number }
       host_unban_attendee: {
         Args: { p_event_id: string; p_user_id: string }
         Returns: undefined
@@ -2092,6 +2163,7 @@ export type Database = {
         Args: { p_event_id: string }
         Returns: undefined
       }
+      reopen_business: { Args: never; Returns: undefined }
       reschedule_event: {
         Args: {
           p_address?: string
@@ -2120,6 +2192,10 @@ export type Database = {
       send_promotional_notification: {
         Args: { p_promotion_id: string }
         Returns: number
+      }
+      submit_verification_request: {
+        Args: { p_evidence_url: string; p_note?: string }
+        Returns: string
       }
       set_event_chat_mode: {
         Args: {

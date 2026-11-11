@@ -40,6 +40,7 @@ import {
   Eye,
   Sparkles,
   AtSign,
+  CalendarPlus,
 } from '@/components/icons.generated';
 import { useAuth } from '@/contexts/AuthContext';
 import { categoriesService } from '@/services/categories';
@@ -54,7 +55,15 @@ import { AvatarRing } from '@/components/AvatarRing';
 import { CategoryPicker } from '@/components/CategoryPicker';
 import { Button } from '@/components/ui/Button';
 import { TextField } from '@/components/ui/TextField';
-import { a11yState } from '@/utils/accessibility';
+import { a11yState, choiceA11y } from '@/utils/accessibility';
+import {
+  UserIntent,
+  consumePendingHostIntent,
+  parseUserIntent,
+  readLocalIntent,
+  saveUserIntent,
+  wantsToHost,
+} from '@/utils/hostIntent';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -114,6 +123,7 @@ type Draft = {
   cityArea: string;
   cityAreaLat: number | null;
   cityAreaLng: number | null;
+  intent: UserIntent | null;
 };
 
 export default function OnboardingScreen() {
@@ -134,6 +144,7 @@ export default function OnboardingScreen() {
   const [hobbies, setHobbies] = useState('');
   const [instagram, setInstagram] = useState('');
   const [facebook, setFacebook] = useState('');
+  const [intent, setIntent] = useState<UserIntent | null>(null);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [locationGranted, setLocationGranted] = useState(false);
@@ -215,6 +226,9 @@ export default function OnboardingScreen() {
       } else {
         setName(signupName);
       }
+      // Intent: server column (if migrated) → local copy → pre-auth host link.
+      let hydratedIntent: UserIntent | null =
+        parseUserIntent(p?.intent) ?? (await readLocalIntent(user.id));
       try {
         const raw = await AsyncStorage.getItem(draftKey(user.id));
         if (raw && !cancelled) {
@@ -231,6 +245,7 @@ export default function OnboardingScreen() {
           if (typeof d.cityArea === 'string') setCityArea(d.cityArea);
           if (typeof d.cityAreaLat === 'number') setCityAreaLat(d.cityAreaLat);
           if (typeof d.cityAreaLng === 'number') setCityAreaLng(d.cityAreaLng);
+          hydratedIntent = parseUserIntent(d.intent) ?? hydratedIntent;
           if (typeof d.page === 'number' && d.page > 0 && d.page < TOTAL_PAGES) {
             setCurrentPage(d.page);
           }
@@ -238,6 +253,8 @@ export default function OnboardingScreen() {
       } catch {
         // Corrupt or missing draft: start from the server values.
       }
+      if (await consumePendingHostIntent()) hydratedIntent = hydratedIntent ?? 'host';
+      if (!cancelled) setIntent(hydratedIntent);
       // Reflect permissions the OS already granted (e.g. after a reload mid-flow).
       try {
         const loc = await Location.getForegroundPermissionsAsync();
@@ -276,8 +293,9 @@ export default function OnboardingScreen() {
       cityArea,
       cityAreaLat,
       cityAreaLng,
+      intent,
     }),
-    [currentPage, name, bio, hobbies, instagram, facebook, selectedCategories, showProfileToOthers, showAttendancePublicly, showFutureEvents, cityArea, cityAreaLat, cityAreaLng]
+    [currentPage, name, bio, hobbies, instagram, facebook, selectedCategories, showProfileToOthers, showAttendancePublicly, showFutureEvents, cityArea, cityAreaLat, cityAreaLng, intent]
   );
   useEffect(() => {
     if (!user || !hydrated) return;
@@ -295,6 +313,17 @@ export default function OnboardingScreen() {
   }, []);
   const goNext = useCallback(() => goToPage(currentPage + 1), [currentPage, goToPage]);
   const goBack = useCallback(() => goToPage(currentPage - 1), [currentPage, goToPage]);
+
+  // Welcome → Profile. The intent answer is optional and non-blocking: it is
+  // stored locally at once and on the server when profiles.intent exists.
+  const handleWelcomeContinue = useCallback(() => {
+    if (user && intent) {
+      saveUserIntent(user.id, intent, (value) =>
+        profilesService.updateProfile(user.id, { intent: value })
+      ).catch(() => {});
+    }
+    goNext();
+  }, [user, intent, goNext]);
 
   // Prefill the city page from the reverse-geocoded location once it arrives.
   useEffect(() => {
@@ -467,7 +496,7 @@ export default function OnboardingScreen() {
 
   // Final write repeats every field so a skipped step still lands with sane
   // values, then clears the local draft.
-  const handleComplete = async () => {
+  const handleComplete = async (destination: 'discover' | 'host' = 'discover') => {
     if (!user) return;
     setCompleting(true);
     try {
@@ -496,6 +525,8 @@ export default function OnboardingScreen() {
       await refreshProfile();
       successHaptic();
       router.replace('/(tabs)/discover');
+      // Host setup sits on top of Discover so its back button lands there.
+      if (destination === 'host') router.push('/business/onboarding' as never);
     } catch (err: unknown) {
       notify.error(err instanceof Error ? err.message : 'Failed to save preferences');
     } finally {
@@ -515,7 +546,18 @@ export default function OnboardingScreen() {
   const renderPageContent = (item: number) => {
     switch (item) {
       case PAGE.WELCOME:
-        return <WelcomePage insets={insets} pageHeight={pageHeight} onNext={goNext} />;
+        return (
+          <WelcomePage
+            insets={insets}
+            pageHeight={pageHeight}
+            intent={intent}
+            onSelectIntent={(value) => {
+              selectionHaptic();
+              setIntent(value);
+            }}
+            onNext={handleWelcomeContinue}
+          />
+        );
       case PAGE.PROFILE:
         return (
           <ProfilePage
@@ -602,7 +644,8 @@ export default function OnboardingScreen() {
         return (
           <TutorialPage
             {...shellProps}
-            onComplete={handleComplete}
+            onComplete={() => handleComplete('discover')}
+            onSetUpHosting={wantsToHost(intent) ? () => handleComplete('host') : undefined}
             completing={completing}
           />
         );
@@ -767,13 +810,23 @@ function PageShell({
 
 /* ─── Page 0: Welcome ─── */
 
+const INTENT_OPTIONS: { value: UserIntent; label: string }[] = [
+  { value: 'attend', label: 'Find events' },
+  { value: 'host', label: 'Host events' },
+  { value: 'both', label: 'Both' },
+];
+
 function WelcomePage({
   insets,
   pageHeight,
+  intent,
+  onSelectIntent,
   onNext,
 }: {
   insets: Insets;
   pageHeight: number;
+  intent: UserIntent | null;
+  onSelectIntent: (value: UserIntent) => void;
   onNext: () => void;
 }) {
   return (
@@ -819,6 +872,28 @@ function WelcomePage({
       </LinearGradient>
 
       <View style={[styles.welcomeActions, { paddingBottom: insets.bottom + 20 }]}>
+        <Text style={styles.intentQuestion} nativeID="intent-question">
+          What brings you here?
+        </Text>
+        <View style={styles.intentRow} accessibilityRole="radiogroup" aria-labelledby="intent-question">
+          {INTENT_OPTIONS.map((opt) => {
+            const selected = intent === opt.value;
+            return (
+              <TouchableOpacity
+                key={opt.value}
+                style={[styles.intentChip, selected && styles.intentChipSelected]}
+                onPress={() => onSelectIntent(opt.value)}
+                activeOpacity={0.8}
+                {...choiceA11y(selected, opt.label)}
+              >
+                {selected ? <Check size={14} color={Colors.primary} /> : null}
+                <Text style={[styles.intentChipText, selected && styles.intentChipTextSelected]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
         <Button label="Let's Get Started" onPress={onNext} variant="primary" gradient size="lg" fullWidth />
         <Text style={styles.welcomeHint}>You can skip any step and change everything later.</Text>
       </View>
@@ -1406,10 +1481,13 @@ function PrivacyRow({
 
 function TutorialPage({
   onComplete,
+  onSetUpHosting,
   completing,
   ...shell
 }: ShellProps & {
   onComplete: () => void;
+  /** Present when the user said they want to host. */
+  onSetUpHosting?: () => void;
   completing: boolean;
 }) {
   return (
@@ -1418,16 +1496,39 @@ function TutorialPage({
       title="You're all set"
       subtitle="Three gestures are all you need on the map."
       footer={
-        <Button
-          label="Start Exploring"
-          onPress={onComplete}
-          loading={completing}
-          icon={<Compass size={20} color={Colors.white} />}
-          variant="primary"
-          gradient
-          size="lg"
-          fullWidth
-        />
+        onSetUpHosting ? (
+          <View style={styles.tutorialFooterStack}>
+            <Button
+              label="Set Up Hosting"
+              onPress={onSetUpHosting}
+              loading={completing}
+              icon={<CalendarPlus size={20} color={Colors.white} />}
+              variant="primary"
+              gradient
+              size="lg"
+              fullWidth
+            />
+            <Button
+              label="Later, Start Exploring"
+              onPress={onComplete}
+              disabled={completing}
+              variant="secondary"
+              size="lg"
+              fullWidth
+            />
+          </View>
+        ) : (
+          <Button
+            label="Start Exploring"
+            onPress={onComplete}
+            loading={completing}
+            icon={<Compass size={20} color={Colors.white} />}
+            variant="primary"
+            gradient
+            size="lg"
+            fullWidth
+          />
+        )
       }
     >
       <View style={styles.tutorialCards}>
@@ -1446,6 +1547,14 @@ function TutorialPage({
           title="Pull up the list"
           description="Drag the bottom panel up to browse everything in view."
         />
+        {onSetUpHosting ? (
+          <View style={styles.finishNote}>
+            <CalendarPlus size={16} color={Colors.primary} />
+            <Text style={styles.finishNoteText}>
+              Hosting takes about two minutes to set up. If you skip it now, use the Create tab whenever you&apos;re ready.
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.finishNote}>
           <Sparkles size={16} color={Colors.primary} />
           <Text style={styles.finishNoteText}>
@@ -1688,6 +1797,46 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 24,
     backgroundColor: Palette.surfaceMuted,
+  },
+  intentQuestion: {
+    textAlign: 'center',
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.labelFontFamilies.medium,
+    color: Colors.text.secondary,
+    marginBottom: 10,
+  },
+  intentRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
+  intentChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 44,
+    paddingHorizontal: 16,
+    borderRadius: BorderRadius.round,
+    borderWidth: 1.5,
+    borderColor: Palette.separator,
+    backgroundColor: Palette.cardBg,
+  },
+  intentChipSelected: {
+    borderColor: Colors.primary,
+    backgroundColor: Palette.accentSoft,
+  },
+  intentChipText: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.labelFontFamilies.medium,
+    color: Colors.text.primary,
+  },
+  intentChipTextSelected: {
+    color: Colors.primary,
+  },
+  tutorialFooterStack: {
+    gap: 10,
   },
   welcomeHint: {
     marginTop: 14,

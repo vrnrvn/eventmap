@@ -73,4 +73,9 @@ export const queryKeys = {
   discoverLastArea: () => ['discover', 'last-area'] as const,
   profileOverview: (userId: string | undefined, businessId: string | undefined) =>
     ['events', 'profile', userId ?? 'anon', businessId ?? 'none'] as const,
+  /**
+   * Getting-started checklist facts for one host profile. Under the 'events'
+   * prefix so publishing or editing an event refreshes it too.
+   */
+  hostChecklist: (businessId: string | undefined) => ['events', 'host-checklist', businessId ?? 'none'] as const,
 };

@@ -202,7 +202,9 @@ const styles = StyleSheet.create({
     fontFamily: Typography.labelFontFamilies.semibold,
   },
   badgeDark: {
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    // 0.45 gave white text ~3.4:1 on the light card (axe, WCAG 1.4.3 needs
+    // 4.5:1 at this size); 0.62 is ~5.5:1 and keeps the same look.
+    backgroundColor: 'rgba(0,0,0,0.62)',
     paddingHorizontal: Spacing.md - 2,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.round,

@@ -3,6 +3,13 @@ import { imageCleanupMayRun, releaseEventImages } from './storageCleanup';
 import { sameUtcMonth } from '@/utils/premiumState';
 import { profilesService } from './profiles';
 import { Business, BusinessLink, BusinessPhoto } from '@/types/database';
+import { HOST_TERMS_VERSION, HostInsert, buildHostShapeUpdate, legacyHostInsert } from '@/utils/hostSetup';
+import { isMissingColumnError } from '@/utils/hostIntent';
+
+/** The backend cannot store this host shape yet (migration not applied). */
+export class HostSetupUnsupportedError extends Error {
+  readonly code = 'host_setup_unsupported';
+}
 
 export const businessesService = {
   async getUserBusiness(): Promise<Business | null> {
@@ -56,6 +63,40 @@ export const businessesService = {
 
     if (error) throw error;
     return data as Business;
+  },
+
+  /**
+   * Host setup insert (HOST_ONBOARDING_PLAN.md Stage 2). Sends the new host
+   * columns; on a backend without 20261110110000 (missing column) it retries
+   * with the original columns, which only works when the host has a pin.
+   * Returns which schema was used so the UI can say what was not saved.
+   */
+  async createHost(insert: HostInsert & { logo_url: string | null }): Promise<{ business: Business; schema: 'host' | 'legacy' }> {
+    const user = await getSessionUser();
+    if (!user) throw new Error('Not authenticated');
+    await profilesService.ensureProfileExists(user.id, user.user_metadata?.name ?? user.email ?? '');
+
+    const first = await supabase
+      .from('businesses')
+      .insert({ ...insert, owner_id: user.id })
+      .select()
+      .single();
+    if (!first.error) return { business: first.data as Business, schema: 'host' };
+    if (!isMissingColumnError(first.error)) throw first.error;
+
+    const legacy = legacyHostInsert(insert);
+    if (!legacy) {
+      throw new HostSetupUnsupportedError(
+        'Hosting without a location is not available yet. Add a home area to continue.'
+      );
+    }
+    const second = await supabase
+      .from('businesses')
+      .insert({ ...legacy, logo_url: insert.logo_url, owner_id: user.id })
+      .select()
+      .single();
+    if (second.error) throw second.error;
+    return { business: second.data as Business, schema: 'legacy' };
   },
 
   async updateBusiness(
@@ -160,6 +201,33 @@ export const businessesService = {
       created_at: row.created_at,
       profile: profiles.get(row.user_id) || { name: 'User', avatar_url: null },
     }));
+  },
+
+  /** Host type / location change from Settings → Host profile. */
+  async updateHostShape(businessId: string, patch: ReturnType<typeof buildHostShapeUpdate>): Promise<void> {
+    const { error } = await supabase.from('businesses').update(patch).eq('id', businessId);
+    if (error) throw error;
+  },
+
+  /** Accept the current host guidelines; the server stamps the time. */
+  async acceptHostTerms(businessId: string): Promise<void> {
+    const { error } = await supabase
+      .from('businesses')
+      .update({ host_terms_version: HOST_TERMS_VERSION })
+      .eq('id', businessId);
+    if (error) throw error;
+  },
+
+  async deleteBusinessLink(linkId: string): Promise<void> {
+    const { error } = await supabase.from('business_links').delete().eq('id', linkId);
+    if (error) throw error;
+  },
+
+  async addBusinessLink(businessId: string, url: string, label: string | null = null, sortOrder = 0): Promise<void> {
+    const { error } = await supabase
+      .from('business_links')
+      .insert({ business_id: businessId, url, label, sort_order: sortOrder });
+    if (error) throw error;
   },
 
   async getBusinessLinks(businessId: string): Promise<BusinessLink[]> {

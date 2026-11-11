@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,7 +8,8 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
+import { isHostIntentParam, markPendingHostIntent } from '@/utils/hostIntent';
 import { Button } from '@/components/ui/Button';
 import { alpha, Colors, Shadows, Typography } from '@/constants/theme';
 import {
@@ -34,6 +36,11 @@ const Palette = {
 
 export default function WelcomeScreen() {
   const insets = useSafeAreaInsets();
+  const { intent } = useLocalSearchParams<{ intent?: string }>();
+  const hostIntent = isHostIntentParam(intent);
+  useEffect(() => {
+    if (hostIntent) markPendingHostIntent();
+  }, [hostIntent]);
 
   return (
     <View style={styles.root}>
@@ -103,10 +110,16 @@ export default function WelcomeScreen() {
           <FeatureRow
             icon={<Building2 size={20} color={Palette.featureBizIcon} />}
             iconBg={Palette.featureBiz}
-            title="For Businesses"
-            description="Post and promote your own events"
+            title="Host Events"
+            description="Venues, clubs and individuals can post and promote events"
           />
         </View>
+
+        <Text style={styles.hostHint}>
+          {hostIntent
+            ? "Let's get you hosting. Create an account and we'll set it up next."
+            : 'Hosting events? You can set that up right after signing up.'}
+        </Text>
 
         {/* Spacer */}
         <View style={styles.spacer} />
@@ -167,6 +180,14 @@ function FeatureRow({
 /* ────────────────────────── STYLES ────────────────────────── */
 
 const styles = StyleSheet.create({
+  hostHint: {
+    marginTop: 14,
+    textAlign: 'center',
+    fontFamily: Typography.fontFamily,
+    fontSize: Typography.sizes.sm,
+    color: Colors.text.secondary,
+    paddingHorizontal: 12,
+  },
   root: {
     flex: 1,
     backgroundColor: Palette.surfaceMuted,

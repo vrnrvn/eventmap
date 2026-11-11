@@ -971,33 +971,42 @@ Known limitations carried forward: server ranking by effective next date
 (E-R1 server half), approvals stay series-level, device/browser testing,
 and reconciliation with the sibling session before any migration is applied.
 
-## 8. Status against the phase plan (2026-11-09)
+## 8. Status against the phase plan (updated 2026-11-10)
+
+The eight migrations listed below were applied in order to the local Supabase
+database in one transaction on 2026-11-10 and recorded in migration history.
+Key tables and migration records were checked, and a PostgREST schema reload
+was requested. Hosted databases have not been checked or changed. Earlier
+dated pass notes describe the state at the time of those passes.
 
 | Phase | Status |
 | --- | --- |
-| A. Categories foundation | Done (client); migration prepared, unapplied |
-| B. Category browsing | Done (client); migration prepared, unapplied; last-used category default added |
-| C. Admin categories page | Done (UI + migration prepared, unapplied); read-only until applied |
-| D. Recurrence patterns v2 | Done (client + export + Repeat sheet); migration prepared, unapplied; decision D1 open |
-| E. Exceptions and series management | Done; only the server half of E-R1 remains (migration); migration prepared, unapplied |
-| F. Follow-ups | Done except F-R1 (reconcile, later); per-date capacity, waitlist and attendee list in; 3 migrations prepared, unapplied |
+| A. Categories foundation | Done (client); migration applied locally |
+| B. Category browsing | Done (client); migration applied locally; last-used category default added |
+| C. Admin categories page | Done (UI); migration applied locally |
+| D. Recurrence patterns v2 | Done (client + export + Repeat sheet); migration applied locally; decision D1 open |
+| E. Exceptions and series management | Done; server half of E-R1 remains; migration applied locally |
+| F. Follow-ups | Per-date capacity, waitlist and attendee list in; migrations applied locally |
 
-Migrations, all unapplied, deliberately low priority per the owner:
+Migrations applied locally:
 `20261109100000` → `20261109110000` → `20261109120000` (category chain,
 in order) and `20261109130000` → `20261109140000` → `20261109150000` → `20261109160000`
-(recurrence chain) and `20261109170000` (after the taxonomy file). Before applying: reconcile
-with the other session's objects/files (G1). After: `npm run backend:types`.
+(recurrence chain) and `20261109170000` (after the taxonomy file). The owner
+confirmed the trajectories were unified and authorized the local apply.
+Regenerating types with `npm run backend:types` remains to be done.
 
 ### Gaps and opportunities found (added 2026-11-09)
 
 Ordered by impact. None block the client; most are small.
 
-- **G1 Parallel work on the same objects.** A sibling session is building
+- **G1 Parallel work on the same objects (historical).** A sibling session was building
   overlapping migrations (admin categories, recurrence v2, per-date RSVPs,
   series split) in its own worktree, including a file sharing this branch's
   `20261109120000` timestamp. *Correction:* its objects were never on the
   shared DB — both sessions wrote to the same scratch name (see ISSUES).
-  Pick one owner per object and one timestamp before anything is applied.
+  The owner confirmed the trajectories were unified; the selected eight
+  migration files were applied locally on 2026-11-10. Check any other
+  environment independently before applying.
 - **G2 "Next" can name a date that already passed today.**
   `getNextOccurrences` walks from midnight, so at 21:00 a 19:00 weekly
   event shows today as "Next" (Discover cards, Manage Event, Event Detail

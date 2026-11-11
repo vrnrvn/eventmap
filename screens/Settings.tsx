@@ -16,6 +16,8 @@ import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { HostProfileSection } from '@/components/HostProfileSection';
+import { hostCopy } from '@/utils/hostCopy';
 import { useApp } from '@/contexts/AppContext';
 import { usePremium } from '@/contexts/PremiumContext';
 import { profilesService } from '@/services/profiles';
@@ -334,6 +336,9 @@ export default function SettingsScreen() {
     }
   };
 
+  const hostHasFixedLocation = (userBusiness?.location_kind ?? 'fixed') === 'fixed';
+  const copy = hostCopy(userBusiness);
+
   const handleSaveBusiness = async () => {
     if (!userBusiness || !validateBusiness()) return;
     setSaving('business');
@@ -343,9 +348,15 @@ export default function SettingsScreen() {
         description: businessForm.description.trim(),
         category: businessForm.category,
         contact_email: businessForm.contactEmail.trim() || null,
-        address: businessForm.address.trim(),
-        lat: businessForm.lat,
-        lng: businessForm.lng,
+        // Organisers/individuals without a street address keep their saved
+        // location: the 0,0 form placeholder must never be written.
+        ...(hostHasFixedLocation
+          ? {
+              address: businessForm.address.trim(),
+              lat: businessForm.lat,
+              lng: businessForm.lng,
+            }
+          : {}),
         google_reviews_url: businessForm.googleReviewsUrl.trim() || null,
         social_handles: {
           instagram: businessForm.instagram.trim() || undefined,
@@ -646,7 +657,7 @@ export default function SettingsScreen() {
     <View style={[styles.root, { paddingTop: insets.top }]}>
       {/* ── Header ── */}
       <ScreenHeader
-        title={isBizMode ? 'Business Settings' : 'Settings'}
+        title={isBizMode ? copy.settingsTitle : 'Settings'}
         onBack={handleBack}
         safeArea={false}
         backgroundColor={Palette.cardBg}
@@ -723,7 +734,7 @@ export default function SettingsScreen() {
             <>
               {/* ── Business Profile Section ── */}
               <View style={styles.sectionLabelRow}>
-                <Text style={styles.sectionLabel}>Business Profile</Text>
+                <Text style={styles.sectionLabel}>{copy.profileSectionLabel}</Text>
                 {savedSection === 'business' && (
                   <View style={styles.savedBadge}>
                     <Check size={12} color={Palette.successDot} />
@@ -740,7 +751,7 @@ export default function SettingsScreen() {
                   </View>
                   <View style={styles.fieldContent}>
                     <Input
-                      label="Business Name"
+                      label={copy.nameLabel}
                       value={businessForm.name}
                       onChangeText={(t) =>
                         setBusinessForm((p) => ({ ...p, name: t }))
@@ -766,7 +777,7 @@ export default function SettingsScreen() {
                       onChangeText={(t) =>
                         setBusinessForm((p) => ({ ...p, description: t }))
                       }
-                      placeholder="Tell people about your business"
+                      placeholder={copy.descriptionPlaceholder}
                       maxLength={500}
                       multiline
                       numberOfLines={4}
@@ -914,13 +925,18 @@ export default function SettingsScreen() {
 
                 <View style={styles.fieldSeparator} />
 
+                {/* Business Address: street-address hosts only. Home area
+                    editing for organisers/individuals comes with the Host
+                    profile screen (HOST_ONBOARDING_PLAN.md Stage 2). */}
+                {hostHasFixedLocation ? (
+                  <>
                 {/* Business Address */}
                 <View style={styles.fieldRow}>
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
                     <Navigation size={16} color={accentColor} />
                   </View>
                   <View style={styles.fieldContent}>
-                    <Text style={styles.addressLabel}>Business Location</Text>
+                    <Text style={styles.addressLabel}>Venue Location</Text>
                     <TouchableOpacity
                       style={styles.addressTouchable}
                       onPress={() =>
@@ -963,6 +979,8 @@ export default function SettingsScreen() {
                 </View>
 
                 <View style={styles.fieldSeparator} />
+                  </>
+                ) : null}
 
                 {/* Venue Photos */}
                 <View style={styles.fieldRowNoPad}>
@@ -972,7 +990,7 @@ export default function SettingsScreen() {
                   <View style={styles.fieldContent}>
                     <Text style={styles.venuePhotosLabel}>Venue Photos</Text>
                     <Text style={styles.venuePhotosHint}>
-                      Add photos of your venue, gym, or place. Shown on your business page.
+                      {copy.photosHint}
                     </Text>
                     <ImagePickerButton
                       images={businessForm.venuePhotos}
@@ -984,6 +1002,8 @@ export default function SettingsScreen() {
                   </View>
                 </View>
               </View>
+
+              <HostProfileSection business={userBusiness} onChanged={refreshBusiness} />
 
               {/* ── Business Notifications ── */}
               <View style={[styles.sectionLabelRow, { marginTop: 32 }]}>

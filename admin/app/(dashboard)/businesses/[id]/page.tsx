@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { BusinessActions } from './BusinessActions';
+import { StandingControl } from './StandingControl';
 
 export default async function BusinessDetailPage({
   params,
@@ -65,9 +66,17 @@ export default async function BusinessDetailPage({
           </div>
           <div>
             <dt className="text-sm text-zinc-500">Address</dt>
-            <dd>{business.address}</dd>
+            <dd>{business.address ?? '—'}</dd>
           </div>
         </dl>
+        {/* Present once 20261110140000 is applied (select * returns it). */}
+        {typeof business.standing === 'string' ? (
+          <StandingControl
+            businessId={business.id}
+            standing={business.standing as 'good' | 'warning' | 'restricted'}
+            reason={(business.standing_reason as string | null) ?? null}
+          />
+        ) : null}
       </div>
     </div>
   );

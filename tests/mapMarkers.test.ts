@@ -71,7 +71,7 @@ describe('markerStateKey', () => {
 
 describe('injection behaviour', () => {
   it('re-injects a fixed-id marker that moves (location pickers)', () => {
-    // AddressMapPicker / business-location / BusinessOnboarding all keep the id
+    // AddressMapPicker / business-location / HostSetup all keep the id
     // constant and change lat/lng. The old id-only key produced
     // ['full','none','none'] here — the pin stayed at the first position while
     // the map panned away.

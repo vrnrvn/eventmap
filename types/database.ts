@@ -27,6 +27,8 @@ export type Profile = {
   hobbies: string | null;
   has_completed_onboarding?: boolean;
   preferred_categories?: string[];
+  /** Onboarding answer; column from 20261110100000 (may be unapplied). */
+  intent?: 'attend' | 'host' | 'both' | null;
   is_admin?: boolean;
   is_profile_private?: boolean;
   show_attendance_publicly?: boolean;
@@ -65,9 +67,10 @@ export type Business = {
   name: string;
   description: string;
   category: string;
-  address: string;
-  lat: number;
-  lng: number;
+  /** NULL for hosts without a street address (location_kind 'area' | 'none'). */
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
   logo_url: string | null;
   contact_email: string | null;
   google_reviews_url: string | null;
@@ -78,8 +81,37 @@ export type Business = {
   events_created_this_month: number;
   last_reset_date: string;
   notifications_enabled?: boolean;
+  /** Columns from 20261110110000 (may be unapplied: then undefined → treat as venue/fixed). */
+  host_type?: HostType;
+  location_kind?: HostLocationKind;
+  host_terms_version?: number | null;
+  host_terms_accepted_at?: string | null;
+  onboarding_completed_at?: string | null;
+  /** Columns from 20261110140000 (may be unapplied: then undefined → treat as good). */
+  standing?: HostStanding;
+  standing_reason?: string | null;
+  standing_updated_at?: string | null;
+  /** Set when the owner stopped hosting (20261110170000). */
+  archived_at?: string | null;
   created_at: string;
 };
+
+export type HostStanding = 'good' | 'warning' | 'restricted';
+export type VerificationStatus = 'pending' | 'needs_info' | 'approved' | 'rejected';
+export type HostVerificationRequest = {
+  id: string;
+  business_id: string;
+  status: VerificationStatus;
+  evidence_url: string;
+  note: string | null;
+  reviewer_note: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type HostType = 'venue' | 'organiser' | 'individual';
+export type HostLocationKind = 'fixed' | 'area' | 'none';
 
 export type Category = {
   id: string;
@@ -141,6 +173,8 @@ export type Event = {
   age_restriction?: AgeRestriction;
   accessibility_notes?: string | null;
   what_to_bring?: string | null;
+  /** Size preset used at creation (20261110120000); analytics only. */
+  event_type?: EventPresetId | null;
   /** Host's note for a postponed event. */
   status_note?: string | null;
   created_at: string;
@@ -255,6 +289,8 @@ export type EventChatMessageWithSender = EventChatMessage & {
   /** Display names for `mentions`, used to highlight @Name spans. */
   mention_names: Record<string, string>;
 };
+
+export type EventPresetId = 'casual' | 'class' | 'venue_show' | 'large';
 
 export type RankedEvent = Omit<Event, 'updated_at'> & {
   updated_at?: string;
