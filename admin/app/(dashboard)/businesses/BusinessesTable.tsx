@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 
-type Business = {
+export type Business = {
   id: string;
   name: string;
   category: string;
@@ -14,7 +14,14 @@ type Business = {
   last_reset_date: string;
   created_at: string;
   profiles: { name: string } | { name: string }[] | null;
+  /** Undefined when migration 20261110110000 is not applied. */
+  host_type?: 'venue' | 'organiser' | 'individual';
+  location_kind?: 'fixed' | 'area' | 'none';
+  host_terms_version?: number | null;
+  host_terms_accepted_at?: string | null;
 };
+
+const LOCATION_LABEL = { fixed: 'address', area: 'home area', none: 'no location' } as const;
 
 export function BusinessesTable({ businesses }: { businesses: Business[] }) {
   const [tiers, setTiers] = useState<Record<string, string>>(
@@ -100,6 +107,8 @@ export function BusinessesTable({ businesses }: { businesses: Business[] }) {
             <tr>
               <th className="px-4 py-3 text-left font-medium text-zinc-700">Name</th>
               <th className="px-4 py-3 text-left font-medium text-zinc-700">Owner</th>
+              <th className="px-4 py-3 text-left font-medium text-zinc-700">Host type</th>
+              <th className="px-4 py-3 text-left font-medium text-zinc-700">Guidelines</th>
               <th className="px-4 py-3 text-left font-medium text-zinc-700">Tier</th>
               <th className="px-4 py-3 text-left font-medium text-zinc-700">Verified</th>
               <th className="px-4 py-3 text-left font-medium text-zinc-700">Events This Month</th>
@@ -116,6 +125,28 @@ export function BusinessesTable({ businesses }: { businesses: Business[] }) {
                 </td>
                 <td className="px-4 py-3 text-zinc-600">
                   {Array.isArray(b.profiles) ? b.profiles[0]?.name : (b.profiles as { name: string })?.name ?? '—'}
+                </td>
+                <td className="px-4 py-3 text-zinc-600">
+                  {b.host_type ? (
+                    <>
+                      <span className="capitalize">{b.host_type}</span>
+                      <span className="block text-xs text-zinc-400">{LOCATION_LABEL[b.location_kind ?? 'fixed']}</span>
+                    </>
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  {b.host_terms_version ? (
+                    <span
+                      className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800"
+                      title={b.host_terms_accepted_at ? new Date(b.host_terms_accepted_at).toLocaleString() : undefined}
+                    >
+                      v{b.host_terms_version}
+                    </span>
+                  ) : (
+                    <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs text-zinc-500">{b.host_type ? 'not accepted' : '—'}</span>
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   <span

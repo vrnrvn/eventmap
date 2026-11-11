@@ -1,1 +1,1 @@
-export { default } from '@/screens/BusinessOnboarding';
+export { default } from '@/screens/HostSetup';

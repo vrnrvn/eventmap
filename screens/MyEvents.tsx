@@ -5,6 +5,7 @@ import { queryKeys } from '@/hooks/queryKeys';
 import { useConnectivity } from '@/services/connectivity';
 import { freshnessNote } from '@/utils/screenState';
 import { FreshnessNote, OfflineState } from '@/components/ui/QueryStates';
+import { HostChecklistCard } from '@/components/HostChecklistCard';
 import {
   View,
   Text,
@@ -405,6 +406,7 @@ export default function MyEvents() {
       hasBusiness ? (
         <>
         <FreshnessNote text={freshness} />
+        <HostChecklistCard style={styles.checklistWrap} />
         <TouchableOpacity
           style={styles.createCardWrap}
           onPress={() => router.push('/(tabs)/create' as never)}
@@ -640,6 +642,7 @@ export default function MyEvents() {
 /* ────────────────────────── STYLES ────────────────────────── */
 
 const styles = StyleSheet.create({
+  checklistWrap: { marginBottom: 16 },
   root: {
     flex: 1,
     backgroundColor: Colors.background.primary,
@@ -657,8 +660,8 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border.light,
   },
   backBtn: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: BorderRadius.md,
     backgroundColor: Colors.background.primary,
     alignItems: 'center',

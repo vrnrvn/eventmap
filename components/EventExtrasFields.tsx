@@ -2,44 +2,17 @@ import React from 'react';
 import { StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Input } from '@/components/Input';
 import { alpha, BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
-import type { AgeRestriction, EventVisibility } from '@/types/database';
+import { AGE_OPTIONS, type EventExtrasDraft } from '@/utils/eventExtras';
 import { a11yState } from '@/utils/accessibility';
 
-export type EventExtrasDraft = {
-  visibility: EventVisibility;
-  ticketUrl: string;
-  priceLabel: string;
-  ageRestriction: AgeRestriction;
-  accessibilityNotes: string;
-  whatToBring: string;
-};
-
-export const EMPTY_EXTRAS: EventExtrasDraft = {
-  visibility: 'public',
-  ticketUrl: '',
-  priceLabel: '',
-  ageRestriction: 'none',
-  accessibilityNotes: '',
-  whatToBring: '',
-};
-
-export const AGE_OPTIONS: { value: AgeRestriction; label: string }[] = [
-  { value: 'none', label: 'All ages' },
-  { value: '18+', label: '18+' },
-  { value: '21+', label: '21+' },
-];
-
-/** Validation shared by create and edit. Returns field → message. */
-export function validateExtras(e: EventExtrasDraft): Partial<Record<keyof EventExtrasDraft, string>> {
-  const errors: Partial<Record<keyof EventExtrasDraft, string>> = {};
-  const ticket = e.ticketUrl.trim();
-  if (ticket && !/^https?:\/\/\S+$/i.test(ticket)) errors.ticketUrl = 'Enter a full link starting with http:// or https://';
-  if (ticket.length > 500) errors.ticketUrl = 'Link is too long';
-  if (e.priceLabel.trim().length > 60) errors.priceLabel = 'Keep the price under 60 characters';
-  if (e.accessibilityNotes.trim().length > 500) errors.accessibilityNotes = 'Keep notes under 500 characters';
-  if (e.whatToBring.trim().length > 500) errors.whatToBring = 'Keep this under 500 characters';
-  return errors;
-}
+// Pure data and validation live in utils/eventExtras.ts (renderer-free so the
+// create preview and unit tests can use them); re-exported for existing callers.
+export {
+  EMPTY_EXTRAS,
+  AGE_OPTIONS,
+  validateExtras,
+  type EventExtrasDraft,
+} from '@/utils/eventExtras';
 
 type Props = {
   value: EventExtrasDraft;

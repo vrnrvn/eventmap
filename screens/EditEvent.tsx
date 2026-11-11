@@ -31,6 +31,10 @@ import { useApp } from '@/contexts/AppContext';
 import { usePremium } from '@/contexts/PremiumContext';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/ui/Button';
+import { businessPin } from '@/utils/hostSetup';
+import { hostCopy } from '@/utils/hostCopy';
+import { HostTipCard } from '@/components/HostTipCard';
+import { useHostTip } from '@/hooks/useHostTip';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import { WebDateTimeInput } from '@/components/WebDateTimeInput';
@@ -131,9 +135,13 @@ export default function EditEvent() {
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
 
-  const businessLocation = userBusiness
-    ? { lat: userBusiness.lat, lng: userBusiness.lng, address: userBusiness.address }
-    : null;
+  // Null for hosts without a home location (organisers/individuals).
+  // Only a venue's street address is a sensible fallback place; a home area
+  // is not, so other hosts keep the event's own pin when the address is cleared.
+  const businessLocation =
+    (userBusiness?.location_kind ?? 'fixed') === 'fixed' ? businessPin(userBusiness) : null;
+  const copy = hostCopy(userBusiness);
+
 
   const [formData, setFormData] = useState({
     title: '',
@@ -166,6 +174,25 @@ export default function EditEvent() {
   const originalEvent = useRef<Event | null>(null);
   /** Current "going" count, to warn before edits that notify attendees. */
   const goingCount = useRef(0);
+  /**
+   * One-time tip: the host is changing the time or place of an event people
+   * are already going to. Saving notifies them (the server routes this
+   * through reschedule_event), so say it before the confirm dialog does.
+   */
+  const timeOrPlaceEdited = (() => {
+    const original = originalEvent.current;
+    if (!original) return false;
+    // A legacy event without a zone is compared in the viewer's zone, which
+    // is what the pickers are editing in that case anyway.
+    const tz = effectiveZone(formData);
+    const startChanged = pickerDateToInstant(formData.startDatetime, tz).toISOString() !== original.start_datetime;
+    const endChanged = pickerDateToInstant(formData.endDatetime, tz).toISOString() !== original.end_datetime;
+    return startChanged || endChanged || formData.address.trim() !== (original.address ?? '').trim();
+  })();
+  const { tip: hostTipId, dismiss: dismissHostTip } = useHostTip(
+    { going: goingCount.current, editingWithAttendees: timeOrPlaceEdited },
+    originalEvent.current?.publish_state !== 'draft'
+  );
   const isPremiumBusiness = userBusiness?.subscription_tier === 'premium';
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -751,6 +778,8 @@ export default function EditEvent() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
+        <HostTipCard tip={hostTipId} onDismiss={dismissHostTip} style={styles.hostTip} />
+
         <Input
           label="Title"
           value={formData.title}
@@ -931,7 +960,7 @@ export default function EditEvent() {
               notifyConfirm({
                 title: 'Premium Feature',
                 message:
-                  'Recurring events are only available for Premium businesses. Upgrade to create recurring events.',
+                  copy.recurringPremium,
                 cancelLabel: 'OK',
                 confirmLabel: 'Upgrade',
                 onConfirm: () => router.push('/premium/plans' as never),
@@ -1039,7 +1068,9 @@ export default function EditEvent() {
           maxImages={currentPlan?.max_photos_per_event ?? 5}
         />
 
-        <Text style={styles.label}>Location (optional – defaults to business address)</Text>
+        <Text style={styles.label}>
+          {businessLocation ? 'Location (optional – defaults to your venue address)' : 'Location'}
+        </Text>
         <Text style={styles.tapHint}>
           Pick the address from suggestions or tap the map
         </Text>
@@ -1071,7 +1102,7 @@ export default function EditEvent() {
             >
               {formData.address?.trim()
                 ? formData.address
-                : 'Tap to set venue on map'}
+                : copy.locationPlaceholder}
             </Text>
           </View>
         </TouchableOpacity>
@@ -1122,6 +1153,7 @@ export default function EditEvent() {
 }
 
 const styles = StyleSheet.create({
+  hostTip: { marginBottom: 16 },
   seriesScopeLink: {
     color: Colors.primary,
     fontFamily: Typography.fontFamilies.semibold,

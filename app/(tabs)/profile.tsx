@@ -20,6 +20,7 @@ import { eventChatService } from '@/services/eventChat';
 import { profilesService } from '@/services/profiles';
 import { notify } from '@/utils/notify';
 import { businessesService } from '@/services/businesses';
+import { HostChecklistCard } from '@/components/HostChecklistCard';
 import { eventsService } from '@/services/events';
 import { socialService } from '@/services/social';
 import { useFocusEffect, router } from 'expo-router';
@@ -97,6 +98,11 @@ export default function ProfileScreen() {
   const [chatUnread, setChatUnread] = useState<Record<string, number>>({});
 
   const isBizMode = hasBusiness && userMode === 'business';
+  // Only venues have a venue to post for.
+  const hostCreateSubtitle =
+    (userBusiness?.location_kind ?? 'fixed') === 'fixed' && (userBusiness?.host_type ?? 'venue') === 'venue'
+      ? 'Post a new event for your venue'
+      : 'Post a new event for your community';
   const businessId = hasBusiness ? userBusiness?.id : undefined;
   const userId = user?.id;
 
@@ -437,6 +443,7 @@ export default function ProfileScreen() {
         ) : (
         <>
         <FreshnessNote text={freshness} style={styles.freshness} />
+        {!appLoading && isBizMode && <HostChecklistCard style={styles.checklistWrap} />}
         {!appLoading && hasBusiness && (
           <TouchableOpacity
             style={styles.createEventWrap}
@@ -456,7 +463,7 @@ export default function ProfileScreen() {
               </View>
               <View style={styles.createEventTextCol}>
                 <Text style={styles.createEventTitle}>Create event</Text>
-                <Text style={styles.createEventSub}>Post a new event for your venue</Text>
+                <Text style={styles.createEventSub}>{hostCreateSubtitle}</Text>
               </View>
               <ChevronRight size={20} color="rgba(255,255,255,0.75)" />
             </LinearGradient>
@@ -747,6 +754,7 @@ const formatEventDayLabel = (value: string) =>
   (formatEventDayLabelShared(value) || 'UPCOMING').toUpperCase();
 
 const styles = StyleSheet.create({
+  checklistWrap: { marginBottom: 16 },
   root: {
     flex: 1,
     backgroundColor: Palette.surface,

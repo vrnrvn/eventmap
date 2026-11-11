@@ -14,8 +14,8 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  ActivityIndicator,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePicker, {
   DateTimePickerAndroid,
@@ -31,6 +31,31 @@ import { usePremium } from '@/contexts/PremiumContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { Input } from '@/components/Input';
 import { Button } from '@/components/ui/Button';
+import { HOST_GUIDELINES, businessPin, effectiveHostType } from '@/utils/hostSetup';
+import {
+  applyPreset,
+  defaultPresetForHostType,
+  eventPreset,
+  type EventPresetId,
+  type PresetApplication,
+} from '@/utils/eventPresets';
+import { applyPresetSettings } from '@/services/eventPresetSettings';
+import { eventNeedsExplicitPlace, hostCopy } from '@/utils/hostCopy';
+import { effectiveStanding, standingNotice, trustErrorKind, trustErrorMessage } from '@/utils/hostTrust';
+import { HostTipCard } from '@/components/HostTipCard';
+import { useHostTip } from '@/hooks/useHostTip';
+import { EventPreviewSheet } from '@/components/EventPreviewSheet';
+import { EventPublishedSheet, type PublishedEventInfo } from '@/components/EventPublishedSheet';
+import { formToPreviewEvent, previewGaps } from '@/utils/eventFormPreview';
+import {
+  FIRST_EVENT_STEPS,
+  dismissFirstEventGuide,
+  initialEventLocation,
+  readFirstEventGuideDismissed,
+  shouldShowFirstEventGuide,
+} from '@/utils/firstEventGuide';
+import { StartHostingLanding } from '@/components/StartHostingLanding';
+import { EventPresetPicker } from '@/components/EventPresetPicker';
 import { CategorySelectGrid } from '@/components/CategorySelectGrid';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import { WebDateTimeInput } from '@/components/WebDateTimeInput';
@@ -80,6 +105,7 @@ const FIELD_SECTION: Record<string, string> = {
   maxAttendees: 'capacity',
   links: 'links',
   recurrenceEnd: 'datetime',
+  location: 'location',
 };
 
 const TITLE_MAX = 100;
@@ -97,7 +123,7 @@ const Palette = {
 
 export default function CreateScreen() {
   const insets = useSafeAreaInsets();
-  const { hasBusiness, userBusiness } = useApp();
+  const { hasBusiness, userBusiness, refreshBusiness, loading: appLoading } = useApp();
   const {
     currentPlan,
     eventCount,
@@ -123,9 +149,19 @@ export default function CreateScreen() {
   // Publish must create (or find) a published event, not return the draft.
   const requestKeyRef = useRef({ draft: uuidv4(), published: uuidv4() });
 
-  const businessLocation = userBusiness
-    ? { lat: userBusiness.lat, lng: userBusiness.lng, address: userBusiness.address }
-    : null;
+  /**
+   * Where the form starts. A venue prefills its street address; a host with
+   * only a home area gets the map centred there but no address, because an
+   * area is not an event address (utils/firstEventGuide).
+   */
+  const hostStartLocation = initialEventLocation(userBusiness);
+  const copy = hostCopy(userBusiness);
+  // Host standing (Stage 6). The server refuses publishing when restricted;
+  // the client says so up front and keeps Save as draft available.
+  const standing = standingNotice(userBusiness);
+  const publishingPaused =
+    effectiveStanding(userBusiness) === 'restricted' || !!userBusiness?.archived_at;
+  const businessLocation = businessPin(userBusiness);
 
   const [formData, setFormData] = useState({
     title: '',
@@ -162,6 +198,9 @@ export default function CreateScreen() {
 
   const resetForm = () => {
     clearDraft();
+    setPresetId(null);
+    setPresetApplication(null);
+    setPresetKept(null);
     requestKeyRef.current = { draft: uuidv4(), published: uuidv4() };
     venueChosenRef.current = false;
     setFormData({
@@ -171,9 +210,9 @@ export default function CreateScreen() {
       startDatetime: new Date(Date.now() + 60 * 60 * 1000),
       endDatetime: new Date(Date.now() + 3 * 60 * 60 * 1000),
       recurrence: null,
-      address: businessLocation?.address ?? '',
-      lat: businessLocation?.lat ?? DEFAULT_LOCATION.lat,
-      lng: businessLocation?.lng ?? DEFAULT_LOCATION.lng,
+      address: hostStartLocation.address,
+      lat: hostStartLocation.lat ?? DEFAULT_LOCATION.lat,
+      lng: hostStartLocation.lng ?? DEFAULT_LOCATION.lng,
       images: [],
       maxAttendees: '',
       links: [],
@@ -208,9 +247,124 @@ export default function CreateScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftKey]);
 
+  /**
+   * Event size preset (prefill only). `presetApplication` remembers what the
+   * preset wrote so switching presets replaces its own values but never the
+   * host's; `presetKept` explains a value that was left alone.
+   *
+   * Nothing is applied automatically: the host type only *suggests* a chip.
+   * Auto-applying would silently cap a venue's first event at the preset
+   * number, which is exactly the surprise presets are meant to avoid.
+   */
+  const [presetId, setPresetId] = useState<EventPresetId | null>(null);
+  const [presetApplication, setPresetApplication] = useState<PresetApplication | null>(null);
+  const [presetKept, setPresetKept] = useState<string | null>(null);
+  const suggestedPreset = defaultPresetForHostType(effectiveHostType(userBusiness));
+
+  /**
+   * Guided first event: shown only to a host who has never created one.
+   * `null` while the count is loading, so the card never flashes at a host
+   * with a full back catalogue.
+   */
+  const [totalEvents, setTotalEvents] = useState<number | null>(null);
+  const [guideDismissed, setGuideDismissed] = useState(false);
+  const showGuide = shouldShowFirstEventGuide({ totalEvents, dismissed: guideDismissed });
+  const businessIdForGuide = userBusiness?.id;
+  useEffect(() => {
+    if (!businessIdForGuide) return;
+    let cancelled = false;
+    void (async () => {
+      const dismissed = await readFirstEventGuideDismissed(businessIdForGuide);
+      if (cancelled) return;
+      setGuideDismissed(dismissed);
+      if (dismissed) return;
+      try {
+        const count = await eventsService.getBusinessEventsCount(businessIdForGuide, { scope: 'all' });
+        if (!cancelled) setTotalEvents(count);
+      } catch {
+        // Unknown count: leave the guide hidden rather than guess.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [businessIdForGuide]);
+
+  /** Preview sheet: built from the unsaved form on demand. */
+  const [previewOpen, setPreviewOpen] = useState(false);
+  /**
+   * Post-publish sheet. It stays on Create until dismissed, then navigates to
+   * the event — a Modal owned by this screen cannot reliably sit above a
+   * screen pushed on top of it.
+   */
+  const [publishedEvent, setPublishedEvent] = useState<PublishedEventInfo | null>(null);
+  const [publishedFollowers, setPublishedFollowers] = useState<number | null>(null);
+  const [publishedIsFirst, setPublishedIsFirst] = useState(false);
+
+  /**
+   * In guided mode Publish opens the preview first (validation runs, so the
+   * host never previews a form that cannot be published). Outside guided mode
+   * the Preview button is there for anyone who wants it.
+   */
+  // Deliberately not memoised: it must see the current form. A useCallback
+  // here once captured the first render's empty form, so guided Publish
+  // always failed validation.
+  const handlePublishPress = () => {
+    if (!showGuide) {
+      void handleSubmit('publish');
+      return;
+    }
+    if (validate().length > 0) {
+      void handleSubmit('publish'); // reuses the scroll-to-error reporting
+      return;
+    }
+    setPreviewOpen(true);
+  };
+
+  /**
+   * One-time tip: a free host with one publish left this month. Shown only
+   * while a slot remains — at zero the existing limit banner takes over.
+   */
+  const { tip: hostTipId, dismiss: dismissHostTip } = useHostTip(
+    {
+      eventsUsed: premiumLoading ? null : eventCount,
+      eventsAllowed: premiumLoading ? null : eventLimit,
+      isPremium: isPremiumBusiness,
+    },
+    // One piece of guidance at a time: a brand-new host is already reading
+    // the first-event card, and the quota pill shows the count anyway.
+    !premiumLoading && !atEventLimit && !showGuide
+  );
+
+  const handleDismissGuide = useCallback(() => {
+    setGuideDismissed(true);
+    if (businessIdForGuide) void dismissFirstEventGuide(businessIdForGuide);
+  }, [businessIdForGuide]);
+
   const [linkErrors, setLinkErrors] = useState<Record<number, string>>({});
   const [extrasErrors, setExtrasErrors] = useState<Partial<Record<keyof EventExtrasDraft, string>>>({});
   const [showExtras, setShowExtras] = useState(false);
+
+  const handleSelectPreset = useCallback(
+    (id: EventPresetId) => {
+      const { values, application, kept } = applyPreset(
+        { maxAttendees: formData.maxAttendees },
+        id,
+        presetApplication
+      );
+      setPresetId(id);
+      setPresetApplication(application);
+      setPresetKept(
+        kept.includes('maxAttendees')
+          ? 'Your attendee limit was kept. Clear it to use the preset\u2019s suggestion.'
+          : null
+      );
+      setFormData((f) => ({ ...f, maxAttendees: values.maxAttendees }));
+      if (eventPreset(id).expandExtras) setShowExtras(true);
+    },
+    [formData.maxAttendees, presetApplication]
+  );
+
   const [savingDraft, setSavingDraft] = useState(false);
   const [tzPickerOpen, setTzPickerOpen] = useState(false);
   const recurrencePickerRef = useRef<RecurrencePickerHandle>(null);
@@ -229,16 +383,15 @@ export default function CreateScreen() {
   );
 
   useEffect(() => {
-    if (businessLocation && !venueChosenRef.current) {
-      setFormData((f) => ({
-        ...f,
-        address: businessLocation.address,
-        lat: businessLocation.lat,
-        lng: businessLocation.lng,
-      }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [businessLocation?.lat, businessLocation?.lng, businessLocation?.address]);
+    if (hostStartLocation.lat == null || hostStartLocation.lng == null) return;
+    if (venueChosenRef.current) return;
+    setFormData((f) => ({
+      ...f,
+      address: hostStartLocation.address,
+      lat: hostStartLocation.lat as number,
+      lng: hostStartLocation.lng as number,
+    }));
+  }, [hostStartLocation.lat, hostStartLocation.lng, hostStartLocation.address]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showStartPicker, setShowStartPicker] = useState(false);
@@ -330,6 +483,11 @@ export default function CreateScreen() {
     if (!formData.title.trim()) e.title = 'Title is required';
     if (!formData.description.trim()) e.description = 'Description is required';
     if (!formData.categoryId) e.categoryId = 'Select a category';
+    // Hosts without a street address have nothing to fall back to: without
+    // this the event would publish at the map's default pin.
+    if (eventNeedsExplicitPlace(userBusiness, { address: formData.address, placeChosen: venueChosenRef.current })) {
+      e.location = 'Set where this event happens';
+    }
     if (pickerDateToInstant(formData.startDatetime, formData.timezone).getTime() <= Date.now()) {
       e.startDatetime = 'Start must be in the future';
     }
@@ -392,7 +550,7 @@ export default function CreateScreen() {
       return;
     }
     if (!userBusiness) {
-      notify.error('Your business profile is still loading. Try again in a moment.');
+      notify.error(copy.profileLoading);
       return;
     }
     if (isBanned) {
@@ -511,6 +669,26 @@ export default function CreateScreen() {
         }
       }
 
+      // Captured before resetForm() clears the form, for the published sheet.
+      const publishedInfo: PublishedEventInfo = {
+        id: eventId,
+        title: formData.title.trim(),
+        startIso: pickerDateToInstant(formData.startDatetime, formData.timezone).toISOString(),
+        endIso: pickerDateToInstant(formData.endDatetime, formData.timezone).toISOString(),
+        address,
+        description: formData.description.trim(),
+        timezone: formData.timezone,
+      };
+      const wasFirstEvent = totalEvents === 0;
+
+      // Preset settings (waitlist / chat) need the event row, so they are
+      // applied last and never block publishing.
+      let presetSettingsFailed: string[] = [];
+      if (presetId) {
+        const result = await applyPresetSettings(eventId, presetId);
+        presetSettingsFailed = result.failed;
+      }
+
       // Reset the form so re-tapping Publish can't create a duplicate event.
       resetForm();
       setErrors({});
@@ -533,31 +711,76 @@ export default function CreateScreen() {
       if (!timezoneApplied) {
         warnings.push('the time zone could not be saved yet — times will show in each viewer\'s own zone.');
       }
+      if (presetSettingsFailed.length > 0) {
+        warnings.push(
+          `${presetSettingsFailed.join(' and ')} from the preset could not be saved — set them in Manage event.`
+        );
+      }
       if (!extrasApplied) {
         warnings.push('the extra details (tickets, age, accessibility) could not be saved yet — add them by editing the event.');
       }
-      notify.success(
-        warnings.length > 0
-          ? `${mode === 'draft' ? 'Draft saved' : 'Event published'}, but ${warnings.join(' Also, ')}`
-          : mode === 'draft'
-            ? 'Draft saved. Publish it from Manage event when ready.'
-            : recovered
-              ? 'Event created. Your earlier attempt had already gone through.'
-              : 'Event created!'
-      );
+      // A clean publish says nothing here: the published sheet opens and
+      // already announces it. Warnings and the retry case still toast.
+      if (warnings.length > 0 || mode === 'draft' || recovered) {
+        notify.success(
+          warnings.length > 0
+            ? `${mode === 'draft' ? 'Draft saved' : 'Event published'}, but ${warnings.join(' Also, ')}`
+            : mode === 'draft'
+              ? 'Draft saved. Publish it from Manage event when ready.'
+              : 'Event created. Your earlier attempt had already gone through.'
+        );
+      }
       // Keep the quota pill current for the next event.
       void refreshSubscription();
       rememberLastCategory(userBusiness?.id, formData.categoryId);
-      // Land on the new event (owner view with Edit / Insights) so the host
-      // sees exactly what they published.
-      router.push((mode === 'draft' ? `/business/manage-event/${eventId}` : `/event/${eventId}`) as never);
+      if (mode === 'draft') {
+        // Drafts go straight to the hub, where Publish lives.
+        router.push(`/business/manage-event/${eventId}` as never);
+      } else {
+        // Published: offer share / notify / calendar / manage first; the
+        // sheet navigates to the event when it closes.
+        setPublishedIsFirst(wasFirstEvent);
+        setPublishedFollowers(null);
+        setPublishedEvent(publishedInfo);
+        setTotalEvents((n) => (n == null ? n : n + 1));
+        if (userBusiness) {
+          void businessesService
+            .getFollowerCount(userBusiness.id)
+            .then((count) => setPublishedFollowers(count))
+            .catch(() => setPublishedFollowers(null));
+        }
+      }
     } catch (err: unknown) {
       const message =
         err instanceof Error
           ? err.message
           : (err as { message?: string })?.message ?? 'Failed to create event';
       if (__DEV__) console.error('[CreateEvent]', err);
-      notify.error(recurrenceErrorMessage(err) ?? message);
+      const trust = trustErrorKind(err);
+      if (trust === 'guidelines_required' && userBusiness) {
+        // Nothing was created (the guard rejects the insert), so the same
+        // request key is safe to retry after accepting.
+        notifyConfirm({
+          title: 'Accept the host guidelines',
+          message: `${HOST_GUIDELINES.map((g, i) => `${i + 1}. ${g}`).join('\n')}\n\nYour event is kept; it publishes once you accept.`,
+          cancelLabel: 'Not now',
+          confirmLabel: 'Accept and publish',
+          onConfirm: async () => {
+            try {
+              await businessesService.acceptHostTerms(userBusiness.id);
+              await refreshBusiness();
+              void handleSubmit(mode);
+            } catch {
+              notify.error('Could not save your acceptance. Please try again.');
+            }
+          },
+        });
+      } else if (trust === 'host_restricted' || trust === 'host_archived') {
+        notify.error(trustErrorMessage(trust));
+        void refreshBusiness();
+      } else {
+        notify.error(recurrenceErrorMessage(err) ?? message);
+      }
     } finally {
       setLoading(false);
       setSavingDraft(false);
@@ -574,39 +797,16 @@ export default function CreateScreen() {
       minute: '2-digit',
     });
 
-  /* ── No business state ── */
+  /* ── No host profile yet: explain hosting and hand off to setup ── */
   if (!hasBusiness) {
-    return (
-      <View style={[styles.noBizContainer, { paddingTop: insets.top + 40 }]}>
-        <View style={styles.noBizIconWrap}>
-          <Image
-            source={require('@/assets/images/EMlogo.png')}
-            style={styles.noBizLogo}
-            resizeMode="contain"
-          />
+    if (appLoading) {
+      return (
+        <View style={styles.loadingState}>
+          <ActivityIndicator size="large" color={Colors.primary} />
         </View>
-        <Text style={styles.noBizTitle}>Create Events</Text>
-        <Text style={styles.noBizSubtitle}>
-          You need a business profile to start posting events and reaching your
-          community.
-        </Text>
-        <TouchableOpacity
-          style={styles.noBizCta}
-          onPress={() => router.push('/business/onboarding' as never)}
-          activeOpacity={0.85}
-        >
-          <LinearGradient
-            colors={[Colors.primary, Colors.secondary]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.noBizCtaGradient}
-          >
-            <Text style={styles.noBizCtaText}>Set Up Business</Text>
-            <ChevronRight size={18} color="#fff" />
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
-    );
+      );
+    }
+    return <StartHostingLanding />;
   }
 
   /* ── Main form ── */
@@ -669,8 +869,71 @@ export default function CreateScreen() {
           </TouchableOpacity>
         ) : null}
 
+        <HostTipCard
+          tip={hostTipId}
+          onDismiss={dismissHostTip}
+          onAction={() => router.push('/premium/plans' as never)}
+          style={styles.hostTip}
+        />
+
+        {standing ? (
+          <View
+            style={[styles.standingBanner, standing.tone === 'danger' && styles.standingBannerDanger]}
+            accessibilityRole="alert"
+          >
+            <Text style={styles.standingTitle}>{standing.title}</Text>
+            <Text style={styles.standingBody}>{standing.body}</Text>
+          </View>
+        ) : null}
+
+        {/* ── Guided first event ── */}
+        {showGuide ? (
+          <View style={styles.guideCard}>
+            <View style={styles.guideHeader}>
+              <Sparkles size={18} color={Colors.primary} />
+              <Text style={styles.guideTitle} accessibilityRole="header">
+                Your first event: three things that matter
+              </Text>
+              <TouchableOpacity
+                onPress={handleDismissGuide}
+                accessibilityRole="button"
+                accessibilityLabel="Hide first event tips"
+                style={styles.guideDismissBtn}
+              >
+                <Text style={styles.guideDismiss}>Hide</Text>
+              </TouchableOpacity>
+            </View>
+            {FIRST_EVENT_STEPS.map((step, i) => (
+              <View key={step.key} style={styles.guideStep}>
+                <Text style={styles.guideStepNum}>{i + 1}</Text>
+                <View style={styles.fieldContent}>
+                  <Text style={styles.guideStepTitle}>{step.title}</Text>
+                  <Text style={styles.guideStepHint}>{step.short}</Text>
+                </View>
+              </View>
+            ))}
+            <Text style={styles.guideFootnote}>
+              Everything else is optional. You can edit the event after publishing.
+            </Text>
+          </View>
+        ) : null}
+
+        {/* ── Event size preset (prefill only) ── */}
+        <Text style={styles.sectionLabel} onLayout={captureSection('preset')}>Event size</Text>
+        <View style={[styles.card, styles.presetCard]}>
+          <EventPresetPicker
+            value={presetId}
+            suggested={suggestedPreset}
+            onSelect={handleSelectPreset}
+            keptNotice={presetKept}
+          />
+        </View>
+
         {/* ── Section: Basic Info ── */}
         <Text style={styles.sectionLabel} onLayout={captureSection('basic')}>Basic Information</Text>
+        {showGuide ? (
+          <Text style={styles.guideInlineHint}>Step 1 of 3 · {FIRST_EVENT_STEPS[0].hint}</Text>
+        ) : null}
         <View style={styles.card}>
           <View style={styles.fieldRow}>
             <View style={styles.fieldContent}>
@@ -732,6 +995,9 @@ export default function CreateScreen() {
 
         {/* ── Section: Date & Time ── */}
         <Text style={styles.sectionLabel} onLayout={captureSection('datetime')}>Date & Time</Text>
+        {showGuide ? (
+          <Text style={styles.guideInlineHint}>Step 2 of 3 · {FIRST_EVENT_STEPS[1].hint}</Text>
+        ) : null}
         <View style={styles.card}>
           <TouchableOpacity
             style={styles.dateRow}
@@ -907,7 +1173,7 @@ export default function CreateScreen() {
                 notifyConfirm({
                   title: 'Premium Feature',
                   message:
-                    'Recurring events are only available for Premium businesses. Upgrade to create recurring events.',
+                    copy.recurringPremium,
                   cancelLabel: 'OK',
                   confirmLabel: 'Upgrade',
                   onConfirm: () => router.push('/premium/plans' as never),
@@ -946,11 +1212,14 @@ export default function CreateScreen() {
 
         {/* ── Section: Location ── */}
         <Text style={styles.sectionLabel} onLayout={captureSection('location')}>Location</Text>
+        {showGuide ? (
+          <Text style={styles.guideInlineHint}>Step 3 of 3 · {FIRST_EVENT_STEPS[2].hint}</Text>
+        ) : null}
         <View style={styles.card}>
           <View style={styles.fieldRow}>
             <View style={styles.fieldContent}>
               <Text style={styles.locationNote}>
-                Defaults to your business address if you do not set a different venue
+                {copy.locationNote}
               </Text>
               <TouchableOpacity
                 style={styles.addressTouchable}
@@ -978,15 +1247,16 @@ export default function CreateScreen() {
                   >
                     {formData.address?.trim()
                       ? formData.address
-                      : 'Tap to set venue on map'}
+                      : copy.locationPlaceholder}
                   </Text>
                 </View>
-                {!formData.address?.trim() &&
-                  (formData.lat !== DEFAULT_LOCATION.lat ||
-                    formData.lng !== DEFAULT_LOCATION.lng) && (
-                    <Text style={styles.addressCoords}>Location set</Text>
-                  )}
+                {/* Only a place the host actually picked counts: a map centred on
+                    their home area is not a location. */}
+                {!formData.address?.trim() && venueChosenRef.current && (
+                  <Text style={styles.addressCoords}>Location set</Text>
+                )}
               </TouchableOpacity>
+              {errors.location ? <Text style={styles.errorText}>{errors.location}</Text> : null}
             </View>
           </View>
         </View>
@@ -1094,16 +1364,26 @@ export default function CreateScreen() {
         {/* ── Submit ── */}
         <Button
           label={
-            uploadProgress ?? (atEventLimit ? 'Monthly limit reached' : 'Publish Event')
+            uploadProgress ??
+            (publishingPaused ? 'Publishing paused' : atEventLimit ? 'Monthly limit reached' : 'Publish Event')
           }
-          onPress={() => void handleSubmit('publish')}
+          onPress={handlePublishPress}
           loading={loading && !savingDraft}
-          disabled={atEventLimit || loading}
+          disabled={atEventLimit || loading || publishingPaused}
           size="lg"
           fullWidth
           gradient
           icon={<Sparkles size={18} color="#FFFFFF" />}
           style={styles.submitWrap}
+        />
+        <Button
+          label="Preview"
+          variant="secondary"
+          onPress={() => setPreviewOpen(true)}
+          disabled={loading}
+          fullWidth
+          accessibilityLabel="Preview how your event will look to attendees"
+          style={styles.draftWrap}
         />
         <Button
           label="Save as draft"
@@ -1119,6 +1399,56 @@ export default function CreateScreen() {
           Drafts are private and free; publish from Manage event when ready.
         </Text>
       </ScrollView>
+
+      <EventPreviewSheet
+        visible={previewOpen}
+        event={
+          previewOpen
+            ? formToPreviewEvent(formData, {
+                business: userBusiness ?? null,
+                category: categories.find((c) => c.id === formData.categoryId) ?? null,
+              })
+            : null
+        }
+        gaps={previewGaps(formData)}
+        publishing={loading && !savingDraft}
+        savingDraft={savingDraft}
+        onClose={() => setPreviewOpen(false)}
+        onPublish={() => {
+          setPreviewOpen(false);
+          // The preview stays available while paused, but publishing does not.
+          if (publishingPaused) {
+            notify.error(trustErrorMessage('host_restricted'));
+            return;
+          }
+          void handleSubmit('publish');
+        }}
+        onSaveDraft={() => {
+          setPreviewOpen(false);
+          void handleSubmit('draft');
+        }}
+      />
+
+      <EventPublishedSheet
+        visible={publishedEvent != null}
+        event={publishedEvent}
+        followerCount={publishedFollowers}
+        isFirstEvent={publishedIsFirst}
+        businessId={userBusiness?.id}
+        eventsLeftThisMonth={
+          !premiumLoading && eventLimit > 0 ? Math.max(0, eventLimit - eventCount) : null
+        }
+        onClose={() => {
+          const id = publishedEvent?.id;
+          setPublishedEvent(null);
+          if (id) router.push(`/event/${id}` as never);
+        }}
+        onOpenManage={() => {
+          const id = publishedEvent?.id;
+          setPublishedEvent(null);
+          if (id) router.push(`/business/manage-event/${id}` as never);
+        }}
+      />
 
       <TimeZonePicker
         visible={tzPickerOpen}
@@ -1156,6 +1486,84 @@ export default function CreateScreen() {
 /* ────────────────────────── STYLES ────────────────────────── */
 
 const styles = StyleSheet.create({
+  presetCard: { padding: 14 },
+  hostTip: { marginBottom: 16 },
+  standingBanner: {
+    marginBottom: 16,
+    padding: 14,
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    borderColor: Colors.warningText,
+    backgroundColor: Colors.surface,
+    gap: 4,
+  },
+  standingBannerDanger: { borderColor: Colors.error },
+  standingTitle: { fontSize: Typography.sizes.md, fontFamily: Typography.labelFontFamilies.medium, color: Colors.text.primary },
+  standingBody: { fontSize: Typography.sizes.sm, fontFamily: Typography.fontFamily, color: Colors.text.secondary, lineHeight: 19 },
+  guideCard: {
+    backgroundColor: Colors.primarySoft,
+    borderRadius: BorderRadius.lg,
+    padding: 16,
+    marginBottom: 20,
+    gap: 12,
+  },
+  guideHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  guideTitle: {
+    flex: 1,
+    fontSize: Typography.sizes.md,
+    fontFamily: Typography.labelFontFamilies.medium,
+    color: Colors.text.primary,
+  },
+  guideDismissBtn: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  guideDismiss: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.labelFontFamilies.medium,
+    color: Colors.primary,
+  },
+  guideStep: { flexDirection: 'row', gap: 10 },
+  guideStepNum: {
+    width: 18,
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.labelFontFamilies.medium,
+    color: Colors.primary,
+  },
+  guideStepTitle: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.labelFontFamilies.medium,
+    color: Colors.text.primary,
+  },
+  guideStepHint: {
+    marginTop: 2,
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.secondary,
+    lineHeight: 19,
+  },
+  guideFootnote: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamily,
+    // tertiary grey failed WCAG AA contrast on the pink card (axe).
+    color: Colors.text.secondary,
+  },
+  guideInlineHint: {
+    marginTop: -8,
+    marginBottom: 8,
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.secondary,
+    lineHeight: 16,
+  },
+  loadingState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background.primary,
+  },
   root: {
     flex: 1,
     backgroundColor: Palette.surfaceMuted,
@@ -1427,58 +1835,4 @@ const styles = StyleSheet.create({
     }),
   },
   /* ── No-business state ── */
-  noBizContainer: {
-    flex: 1,
-    backgroundColor: Palette.surfaceMuted,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 40,
-  },
-  noBizIconWrap: {
-    width: 80,
-    height: 80,
-    borderRadius: 24,
-    backgroundColor: Palette.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 24,
-  },
-  noBizLogo: {
-    width: 48,
-    height: 48,
-    tintColor: Colors.primary,
-  },
-  noBizTitle: {
-    fontSize: 22,
-    fontFamily: Typography.displayFontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: Colors.text.primary,
-    marginBottom: 8,
-  },
-  noBizSubtitle: {
-    fontSize: Typography.sizes.md,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.tertiary,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 28,
-  },
-  noBizCta: {
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  noBizCtaGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 15,
-    paddingHorizontal: 32,
-  },
-  noBizCtaText: {
-    fontSize: 16,
-    fontFamily: Typography.fontFamilies.bold,
-    fontWeight: Typography.weights.bold,
-    color: '#FFFFFF',
-  },
 });

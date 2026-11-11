@@ -7,6 +7,7 @@ const navItems = [
   { href: '/events', label: 'Events' },
   { href: '/categories', label: 'Categories' },
   { href: '/businesses', label: 'Businesses' },
+  { href: '/verification', label: 'Verification' },
   { href: '/subscriptions', label: 'Subscriptions' },
   { href: '/complaints', label: 'Complaints' },
   { href: '/chat-moderation', label: 'Chat moderation' },

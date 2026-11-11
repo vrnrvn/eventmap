@@ -76,6 +76,7 @@ import {
   BookmarkCheck,
   CloudOff,
   Ban,
+  BadgeCheck,
 } from '@/components/icons.generated';
 import {
   classifyRsvpError,
@@ -1046,8 +1047,8 @@ export default function EventDetail() {
       : null
     : freshnessNote({ hasData: true, dataUpdatedAt: detailsUpdatedAt, isError: lastLoadFailed, connectivity });
 
-  const venueLat = Number.isFinite(event.lat) ? event.lat : business.lat;
-  const venueLng = Number.isFinite(event.lng) ? event.lng : business.lng;
+  const venueLat = Number.isFinite(event.lat) ? event.lat : (business.lat ?? NaN);
+  const venueLng = Number.isFinite(event.lng) ? event.lng : (business.lng ?? NaN);
   const canOpenEventChat = chatIsOpen;
   const hasJoinedEvent = details.user_rsvp === 'going';
   const hasRequested = details.user_rsvp === 'requested';
@@ -1545,7 +1546,7 @@ export default function EventDetail() {
             onPress={() => router.push(`/business/${business.id}` as never)}
             activeOpacity={0.85}
             accessibilityRole="button"
-            accessibilityLabel={`View business ${business.name}${
+            accessibilityLabel={`View business ${business.name}${business.verified ? ', verified' : ''}${
               user && !isOwner && details.user_following_business ? ', following' : ''
             }`}
             // The Follow chip is nested in this row (one VoiceOver element).
@@ -1568,9 +1569,19 @@ export default function EventDetail() {
             <Avatar imageUrl={business.logo_url} name={business.name} size={48} />
             <View style={styles.hostBusinessMeta}>
               <Text style={styles.hostBusinessLabel}>Organizer</Text>
-              <Text style={styles.hostBusinessName} numberOfLines={2}>
-                {business.name}
-              </Text>
+              <View style={styles.hostNameRow}>
+                <Text style={styles.hostBusinessName} numberOfLines={2}>
+                  {business.name}
+                </Text>
+                {/* Same badge as the host page, so "verified" looks the same
+                    wherever the host appears. */}
+                {business.verified ? (
+                  <View style={styles.hostVerified} accessible={false} importantForAccessibility="no-hide-descendants">
+                    <BadgeCheck size={14} color={Colors.primary} />
+                    <Text style={styles.hostVerifiedText}>Verified</Text>
+                  </View>
+                ) : null}
+              </View>
               <Text style={styles.hostBusinessHint}>View business profile</Text>
             </View>
             {/* get_event_details already returns user_following_business; this
@@ -2054,6 +2065,13 @@ export default function EventDetail() {
 }
 
 const styles = StyleSheet.create({
+  hostNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  hostVerified: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  hostVerifiedText: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.labelFontFamilies.medium,
+    color: Colors.primary,
+  },
   container: {
     flex: 1,
     backgroundColor: Colors.background.primary,

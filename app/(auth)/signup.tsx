@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,8 @@ import {
   TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
+import { isHostIntentParam, markPendingHostIntent } from '@/utils/hostIntent';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/Button';
 import { TextField } from '@/components/ui/TextField';
@@ -25,6 +26,11 @@ import { a11yState } from '@/utils/accessibility';
 
 export default function SignupScreen() {
   const insets = useSafeAreaInsets();
+  const { intent } = useLocalSearchParams<{ intent?: string }>();
+  const hostIntent = isHostIntentParam(intent);
+  useEffect(() => {
+    if (hostIntent) markPendingHostIntent();
+  }, [hostIntent]);
   const { signUp, signInWithOAuth } = useAuth();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');

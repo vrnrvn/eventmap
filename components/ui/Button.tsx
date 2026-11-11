@@ -160,6 +160,9 @@ const styles = StyleSheet.create({
   },
   gradientFill: {
     flex: 1,
+    // The wrapper is a centred row, so without this the gradient was only as
+    // tall as the label (a thin bar inside a 56 px button, visible on web).
+    alignSelf: 'stretch',
     width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
