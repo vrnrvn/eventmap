@@ -323,6 +323,89 @@ export type Database = {
         }
         Relationships: []
       }
+      collection_items: {
+        Row: {
+          added_at: string
+          collection_id: string
+          event_id: string
+          note: string | null
+        }
+        Insert: {
+          added_at?: string
+          collection_id: string
+          event_id: string
+          note?: string | null
+        }
+        Update: {
+          added_at?: string
+          collection_id?: string
+          event_id?: string
+          note?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collection_items_collection_id_fkey"
+            columns: ["collection_id"]
+            isOneToOne: false
+            referencedRelation: "collections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "collection_items_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      collections: {
+        Row: {
+          category_ids: string[]
+          color: string | null
+          created_at: string
+          icon_key: string | null
+          id: string
+          kind: string
+          name: string
+          sort_order: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          category_ids?: string[]
+          color?: string | null
+          created_at?: string
+          icon_key?: string | null
+          id?: string
+          kind?: string
+          name: string
+          sort_order?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          category_ids?: string[]
+          color?: string | null
+          created_at?: string
+          icon_key?: string | null
+          id?: string
+          kind?: string
+          name?: string
+          sort_order?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "collections_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       complaints: {
         Row: {
           created_at: string
@@ -1797,6 +1880,15 @@ export type Database = {
         Args: { business_uuid: string }
         Returns: boolean
       }
+      collection_members: {
+        Args: { p_collection_id: string }
+        Returns: {
+          added_at: string
+          event_id: string
+          note: string
+          sources: string[]
+        }[]
+      }
       create_event_with_limit_check: {
         Args: {
           p_address: string
@@ -1895,6 +1987,25 @@ export type Database = {
           average: number
           review_count: number
         }[]
+      }
+      get_collection_events: {
+        Args: {
+          p_category_ids?: string[]
+          p_collection_id: string
+          p_filter?: string
+          p_limit?: number
+          p_offset?: number
+          p_sort?: string
+        }
+        Returns: Json
+      }
+      get_event_collection_membership: {
+        Args: { p_event_id: string }
+        Returns: Json
+      }
+      get_events_collection_membership: {
+        Args: { p_event_ids: string[] }
+        Returns: Json
       }
       get_event_attendees_page: {
         Args: {
@@ -2061,6 +2172,7 @@ export type Database = {
         }
         Returns: Json
       }
+      get_user_collections: { Args: Record<PropertyKey, never>; Returns: Json }
       get_user_going_events: {
         Args: {
           p_limit?: number
@@ -2164,6 +2276,7 @@ export type Database = {
         Returns: undefined
       }
       reopen_business: { Args: never; Returns: undefined }
+      reorder_collections: { Args: { p_ids: string[] }; Returns: undefined }
       reschedule_event: {
         Args: {
           p_address?: string

@@ -314,6 +314,59 @@ export type RankedEvent = Omit<Event, 'updated_at'> & {
   status?: EventStatus;
 };
 
+/**
+ * Private event collections (migration 20261112100000,
+ * docs/EVENT_COLLECTIONS_PLAN.md). `manual` holds exactly its pinned items;
+ * `smart` is a favourited event type: everything the owner saved or RSVP'd
+ * to in `category_ids`, plus pinned extras.
+ */
+export type CollectionKind = 'manual' | 'smart';
+
+/** How an event got into a collection (fixed order from the server). */
+export type CollectionSource = 'pinned' | 'going' | 'requested' | 'interested' | 'saved';
+
+export type Collection = {
+  id: string;
+  name: string;
+  kind: CollectionKind;
+  category_ids: string[];
+  icon_key: string | null;
+  color: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  /** Aggregates from get_user_collections. */
+  item_count: number;
+  upcoming_count: number;
+  /** Upcoming members that are recurring series. */
+  recurring_count: number;
+  /** Soonest next date among upcoming members; null when none. */
+  next_start_datetime: string | null;
+  /** Up to three cover images, soonest first. */
+  cover_urls: string[];
+};
+
+/** A row of get_collection_events: the shared list row plus how it got there. */
+export type CollectionEvent = RankedEvent & {
+  has_ended: boolean;
+  sources: CollectionSource[];
+  /** Most recent of the relationships in `sources`. */
+  added_at: string;
+  note: string | null;
+};
+
+/** One of the caller's collections that contains an event, and how. */
+export type CollectionMembership = {
+  collection_id: string;
+  /** Explicitly added; removable from the collection. */
+  pinned: boolean;
+  /** Matches a smart collection's rule through a save or RSVP. */
+  by_rule: boolean;
+};
+
+export type CollectionSort = 'next' | 'rsvp' | 'added' | 'title';
+export type CollectionFilter = 'all' | 'upcoming' | 'repeating' | 'past' | 'pinned' | 'saved' | 'going';
+
 export type EventDetails = {
   event: Event;
   business: Business;

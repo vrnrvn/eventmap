@@ -9,9 +9,8 @@
  * category suggestions, Discover's empty state, and shared links
  * (eventmap://category/live-music, https://…/category/live-music).
  */
-import { cadenceLabel } from '@/utils/recurrence';
 import { PERSISTED_QUERY } from '@/utils/queryPersistence';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -24,10 +23,12 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Location from 'expo-location';
 import * as Clipboard from 'expo-clipboard';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
+import { DEFAULT_BROWSE_RADIUS_KM, useBrowseCenter } from '@/hooks/useBrowseCenter';
+import { useFavouriteCategories } from '@/hooks/useCollections';
+import { isCollectionsUnavailable } from '@/services/collections';
 import { useCategories } from '@/hooks/useCategories';
 import { queryKeys } from '@/hooks/queryKeys';
 import { useScreenState } from '@/hooks/useScreenState';
@@ -38,65 +39,26 @@ import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { FreshnessNote, OfflineState } from '@/components/ui/QueryStates';
 import { Button } from '@/components/ui/Button';
-import { MapPin, Share2 } from '@/components/icons.generated';
+import { Heart, MapPin, Share2 } from '@/components/icons.generated';
 import { findCategoryBySlug, getCategoryWebUrl } from '@/utils/categoryBrowse';
 import { categoryTint, presentCategory } from '@/utils/categoryPresentation';
 import { DATE_PRESETS, type DatePresetKey } from '@/utils/datePresets';
-import { filterEventsByDateRange } from '@/utils/recurrence';
+import { cadenceLabel, filterEventsByDateRange } from '@/utils/recurrence';
 import { formatDistance } from '@/utils/formatEventWhen';
 import { describeEventDateTime } from '@/utils/timezone';
 import { shareEventLink } from '@/utils/eventShare';
 import { a11yState } from '@/utils/accessibility';
 import { notify } from '@/utils/notify';
+import { collectionErrorMessage } from '@/utils/collections';
 import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
 import type { RankedEvent } from '@/types/database';
 
 const PAGE_SIZE = 30;
-const DEFAULT_RADIUS_KM = 25;
+const DEFAULT_RADIUS_KM = DEFAULT_BROWSE_RADIUS_KM;
 const WIDE_RADIUS_KM = 100;
 /** Same fallback centre as Discover when no location is known. */
-const DEFAULT_CENTER = { lat: 37.7749, lng: -122.4194 };
 /** Presets offered here ('custom' needs the search overlay's picker). */
 const PRESET_KEYS: DatePresetKey[] = ['any', 'today', 'tomorrow', 'weekend', 'week', 'month'];
-
-type Center = { lat: number; lng: number; precise: boolean };
-
-/**
- * Where to look: the profile's home area, else the device's last known fix
- * (only if permission was already granted — this screen never prompts), else
- * Discover's default centre.
- */
-function useBrowseCenter(): Center | null {
-  const { profile } = useAuth();
-  const [center, setCenter] = useState<Center | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const perm = await Location.getForegroundPermissionsAsync();
-        if (perm.granted) {
-          const last = await Location.getLastKnownPositionAsync();
-          if (last && !cancelled) {
-            setCenter({ lat: last.coords.latitude, lng: last.coords.longitude, precise: true });
-            return;
-          }
-        }
-      } catch {
-        // Fall through to the profile area / default.
-      }
-      if (cancelled) return;
-      if (profile?.lat != null && profile?.lng != null) {
-        setCenter({ lat: profile.lat, lng: profile.lng, precise: false });
-      } else {
-        setCenter({ ...DEFAULT_CENTER, precise: false });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [profile?.lat, profile?.lng]);
-  return center;
-}
 
 const BrowseRow = memo(function BrowseRow({ event }: { event: RankedEvent }) {
   const when = event.next_start_datetime || event.start_datetime;
@@ -124,9 +86,12 @@ const BrowseRow = memo(function BrowseRow({ event }: { event: RankedEvent }) {
 export default function CategoryBrowseScreen() {
   const insets = useSafeAreaInsets();
   const { slug } = useLocalSearchParams<{ slug: string }>();
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const { allCategories, isPending: categoriesPending, isError: categoriesError, refetch: refetchCategories } =
     useCategories();
+  // Phase D: favouriting a type = a smart collection that gathers everything
+  // the viewer saves or joins in it.
+  const favourites = useFavouriteCategories();
   const category = useMemo(() => findCategoryBySlug(allCategories, slug), [allCategories, slug]);
   const presentation = presentCategory(category ?? slug ?? null);
   const center = useBrowseCenter();
@@ -185,6 +150,27 @@ export default function CategoryBrowseScreen() {
     }
   }, [query]);
 
+  const favourited = category ? favourites.isFavourite(category.id) : false;
+  const favouriteBusy = category ? favourites.inFlight.has(category.id) : false;
+  const canFavourite = !!user && !!category && !favourites.unavailable && !isCollectionsUnavailable();
+  const toggleFavourite = useCallback(async () => {
+    if (!category || favouriteBusy) return;
+    try {
+      if (favourited) {
+        await favourites.unfavourite(category.id);
+        notify.success(`Removed ${presentation.label} from your favourite types.`);
+      } else {
+        const id = await favourites.favourite(category.id);
+        notify.withAction(`${presentation.label} is now a collection.`, {
+          label: 'Open',
+          onPress: () => router.push(`/collections/${id}` as never),
+        });
+      }
+    } catch (err) {
+      notify.error(collectionErrorMessage(err) ?? (favourited ? "Couldn't remove the favourite." : "Couldn't favourite this type."));
+    }
+  }, [category, favourited, favouriteBusy, favourites, presentation.label]);
+
   const showOnMap = useCallback(() => {
     if (!category) return;
     router.navigate({ pathname: '/(tabs)/discover', params: { category: category.slug } } as never);
@@ -218,6 +204,31 @@ export default function CategoryBrowseScreen() {
           <Text style={styles.heroMeta}>
             {center?.precise ? 'Near you' : 'Near your area'} · within {radiusKm} km
           </Text>
+          {canFavourite ? (
+            <TouchableOpacity
+              style={[
+                styles.favBtn,
+                favourited && { backgroundColor: presentation.color, borderColor: presentation.color },
+              ]}
+              onPress={() => void toggleFavourite()}
+              disabled={favouriteBusy}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={favourited ? `Remove ${presentation.label} from favourite types` : `Favourite ${presentation.label}`}
+              accessibilityHint={favourited ? undefined : 'Collects everything you save or join in this type'}
+              {...a11yState({ selected: favourited, busy: favouriteBusy }, 'button')}
+              hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+            >
+              <Heart
+                size={14}
+                color={favourited ? Colors.white : presentation.color}
+                fill={favourited ? Colors.white : 'transparent'}
+              />
+              <Text style={[styles.favText, { color: favourited ? Colors.white : presentation.color }]}>
+                {favourited ? 'Favourite type' : 'Favourite this type'}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
       <ScrollView
@@ -386,6 +397,20 @@ const styles = StyleSheet.create({
     fontFamily: Typography.labelFontFamilies.medium,
     color: Colors.text.tertiary,
   },
+  favBtn: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: Spacing.sm,
+    minHeight: 32,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.round,
+    borderWidth: 1,
+    borderColor: Colors.border.light,
+    backgroundColor: Colors.surface,
+  },
+  favText: { fontSize: Typography.sizes.xs, fontFamily: Typography.fontFamilies.semibold },
   presetRow: { gap: Spacing.sm, paddingHorizontal: Spacing.md, paddingVertical: Spacing.md },
   presetChip: {
     paddingHorizontal: 14,

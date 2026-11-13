@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { socialService } from '@/services/social';
+import { collectionsService } from '@/services/collections';
 import {
   deleteNotification,
   markAllNotificationsAsRead,
@@ -9,6 +10,7 @@ import { getConnectivity } from '@/utils/connectivity';
 import { notify } from '@/utils/notify';
 import { classifyError, isConnectionError } from '@/utils/networkErrors';
 import { snapshotKeys } from '@/utils/offlineSnapshot';
+import { parseCollectionItemTarget } from '@/utils/collections';
 import {
   enqueueWrite,
   outcomeForFailure,
@@ -33,6 +35,13 @@ async function perform(w: PendingWrite): Promise<void> {
       return w.on ? socialService.saveEvent(w.targetId) : socialService.unsaveEvent(w.targetId);
     case 'follow':
       return w.on ? socialService.followBusiness(w.targetId) : socialService.unfollowBusiness(w.targetId);
+    case 'collectionItem': {
+      const pair = parseCollectionItemTarget(w.targetId);
+      if (!pair) return;
+      return w.on
+        ? collectionsService.addItem(pair.collectionId, pair.eventId)
+        : collectionsService.removeItem(pair.collectionId, pair.eventId);
+    }
     case 'notificationRead':
       return w.targetId === '*' ? markAllNotificationsAsRead() : markNotificationAsRead(w.targetId);
     case 'notificationDelete':

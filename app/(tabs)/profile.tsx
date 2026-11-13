@@ -44,21 +44,22 @@ import { useScreenState } from '@/hooks/useScreenState';
 import { PERSISTED_QUERY } from '@/utils/queryPersistence';
 import { confirmAction } from '@/utils/confirm';
 import {
-  MapPin,
+  ArrowLeftRight,
   BadgeCheck,
+  BarChart3,
+  Bookmark,
   CalendarDays,
   ChevronRight,
+  Eye,
+  FolderHeart,
+  Heart,
   LogOut,
-  ArrowLeftRight,
+  MapPin,
+  MessageCircle,
+  PlusCircle,
   Settings,
   Sparkles,
-  PlusCircle,
-  MessageCircle,
-  Bookmark,
-  BarChart3,
   Users,
-  Heart,
-  Eye,
 } from '@/components/icons.generated';
 
 const CREATED_PREVIEW_LIMIT = 3;
@@ -374,6 +375,11 @@ export default function ProfileScreen() {
                   icon={<Bookmark size={15} color={Palette.primary} />}
                   label="Saved"
                   onPress={() => router.push('/saved-events')}
+                />
+                <QuickLink
+                  icon={<FolderHeart size={15} color={Palette.primary} />}
+                  label="Collections"
+                  onPress={() => router.push('/collections' as never)}
                 />
                 <QuickLink
                   icon={<Heart size={15} color={Palette.primary} />}

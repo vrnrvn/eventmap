@@ -11,6 +11,7 @@ export const SOURCE_COLORS: Record<CalendarSource, string> = {
   hosting: Colors.success,
   interested: Colors.secondary,
   saved: Colors.accentDark,
+  collections: Colors.secondaryDark,
 };
 
 export const SOURCE_LABELS: Record<CalendarSource, string> = {
@@ -18,6 +19,7 @@ export const SOURCE_LABELS: Record<CalendarSource, string> = {
   interested: 'Interested',
   saved: 'Saved',
   hosting: 'Hosting',
+  collections: 'Collections',
 };
 
 const MAX_DOTS = 3;

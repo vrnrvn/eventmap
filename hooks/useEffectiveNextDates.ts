@@ -24,7 +24,15 @@ const EMPTY: OccurrenceException[] = [];
  *
  * Returns id → ISO; one-off events are not in the map (use start_datetime).
  */
-export function useEffectiveNextDates(rows: readonly SeriesRow[] | undefined, enabled = true): Map<string, string> {
+/**
+ * Exceptions of every series in a list, grouped by event id, in one batched
+ * query (shared with useEffectiveNextDates through the same key). Series
+ * without exceptions are absent from the map.
+ */
+export function useOccurrenceExceptionsForEvents(
+  rows: readonly SeriesRow[] | undefined,
+  enabled = true
+): { byEvent: Map<string, OccurrenceException[]>; series: SeriesRow[] } {
   const series = useMemo(() => (rows ?? []).filter((r) => r.is_recurring && r.recurrence_pattern), [rows]);
   const ids = useMemo(() => [...new Set(series.map((r) => r.id))].sort(), [series]);
   const query = useQuery({
@@ -33,12 +41,20 @@ export function useEffectiveNextDates(rows: readonly SeriesRow[] | undefined, en
     queryFn: () => occurrencesService.listExceptionsForEvents(ids),
     staleTime: 60 * 1000,
   });
+  const byEvent = useMemo(() => {
+    const map = new Map<string, OccurrenceException[]>();
+    for (const x of query.data ?? EMPTY) map.set(x.event_id, [...(map.get(x.event_id) ?? []), x]);
+    return map;
+  }, [query.data]);
+  return { byEvent, series };
+}
+
+export function useEffectiveNextDates(rows: readonly SeriesRow[] | undefined, enabled = true): Map<string, string> {
+  const { byEvent, series } = useOccurrenceExceptionsForEvents(rows, enabled);
   return useMemo(() => {
-    const byEvent = new Map<string, OccurrenceException[]>();
-    for (const x of query.data ?? EMPTY) byEvent.set(x.event_id, [...(byEvent.get(x.event_id) ?? []), x]);
     const now = new Date();
     const out = new Map<string, string>();
     for (const r of series) out.set(r.id, effectiveNextStartIso(r, byEvent.get(r.id) ?? EMPTY, now));
     return out;
-  }, [series, query.data]);
+  }, [series, byEvent]);
 }

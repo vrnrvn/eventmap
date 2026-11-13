@@ -43,6 +43,20 @@ describe('enqueueWrite', () => {
     const q = enqueueWrite([], save('e1', true), 1);
     expect(removeWrite(q, save('e1', false))).toEqual([]);
   });
+
+  it('collection pins are keyed per (collection, event) pair', () => {
+    let q: PendingEntry[] = [];
+    q = enqueueWrite(q, { kind: 'collectionItem', targetId: 'c1:e1', on: true }, 1);
+    q = enqueueWrite(q, { kind: 'collectionItem', targetId: 'c2:e1', on: true }, 2);
+    q = enqueueWrite(q, { kind: 'collectionItem', targetId: 'c1:e1', on: false }, 3);
+    expect(q.map((e) => [e.targetId, (e as { on: boolean }).on])).toEqual([
+      ['c2:e1', true],
+      ['c1:e1', false],
+    ]);
+    // A save for the same event is a different intent and is kept.
+    q = enqueueWrite(q, save('e1', true), 4);
+    expect(q).toHaveLength(3);
+  });
 });
 
 describe('shouldFlushOnTransition', () => {
@@ -77,9 +91,12 @@ describe('parseQueue', () => {
       { ...save('e2', true), queuedAt: 0, attempts: 0 }, // expired
       { kind: 'save', targetId: 'e3', queuedAt: now, attempts: 0 }, // no `on`
       { kind: 'rsvp', targetId: 'e4', queuedAt: now, attempts: 0 }, // unknown kind
+      { kind: 'collectionItem', targetId: 'c1:e5', queuedAt: now, attempts: 0 }, // no `on`
       null,
     ]);
     expect(parseQueue(raw, now)).toEqual([good]);
+    const pin = { kind: 'collectionItem', targetId: 'c1:e5', on: true, collectionName: 'Plans', queuedAt: now, attempts: 0 };
+    expect(parseQueue(JSON.stringify([pin]), now)).toEqual([pin]);
     expect(parseQueue('nope', now)).toEqual([]);
   });
 });
@@ -90,6 +107,9 @@ describe('copy', () => {
     expect(describeWrite({ kind: 'follow', targetId: 'b', on: false })).toBe('unfollow an organizer');
     expect(queuedMessage(save('e1', true))).toMatch(/back online/);
     expect(queuedMessage({ kind: 'notificationRead', targetId: 'n' })).toBeNull();
+    expect(describeWrite({ kind: 'collectionItem', targetId: 'c1:e1', on: true, label: 'Jazz', collectionName: 'Plans' })).toBe('add “Jazz” to “Plans”');
+    expect(describeWrite({ kind: 'collectionItem', targetId: 'c1:e1', on: false })).toBe('remove an event from a collection');
+    expect(queuedMessage({ kind: 'collectionItem', targetId: 'c1:e1', on: true })).toMatch(/Added on this device/);
   });
 });
 
@@ -159,6 +179,12 @@ vi.mock('@/services/notifications', () => ({
   markNotificationAsRead: fake('read'),
   markAllNotificationsAsRead: fake('readAll'),
   deleteNotification: fake('delete'),
+}));
+vi.mock('@/services/collections', () => ({
+  collectionsService: {
+    addItem: async (c: string, e: string) => fake('pin')(`${c}:${e}`),
+    removeItem: async (c: string, e: string) => fake('unpin')(`${c}:${e}`),
+  },
 }));
 
 const pw = await import('../services/pendingWrites');
@@ -279,11 +305,31 @@ describe('runOrQueue', () => {
   });
 });
 
+describe('collection pins', () => {
+  it('replay routes a queued pin to the collections service with the pair split', async () => {
+    calls.length = 0;
+    store.clear();
+    conn.resetConnectivityForTests();
+    pw.setPendingWritesUser(null);
+    pw.setPendingWritesUser('u1');
+    pw.setPendingWritesSessionVerified(true);
+    await pw.flushPendingWrites();
+    conn.setDeviceConnectivity('offline');
+    expect(await pw.runOrQueue({ kind: 'collectionItem', targetId: 'c1:e1', on: true })).toBe('queued');
+    expect(await pw.runOrQueue({ kind: 'collectionItem', targetId: 'c1:e2', on: false })).toBe('queued');
+    expect(calls).toEqual([]);
+    conn.setDeviceConnectivity('online');
+    await pw.flushPendingWrites();
+    expect(calls).toEqual(['pin:c1:e1', 'unpin:c1:e2']);
+    expect(pw.getPendingWriteCount()).toBe(0);
+  });
+});
+
 describe('RSVPs are never queued', () => {
   it('the queue has no RSVP / waitlist kind', async () => {
     const fs = await import('node:fs');
     const src = fs.readFileSync(new URL('../utils/pendingWrites.ts', import.meta.url), 'utf8');
     const kinds = [...src.matchAll(/kind: '(\w+)'/g)].map((m) => m[1]);
-    expect(new Set(kinds)).toEqual(new Set(['save', 'follow', 'notificationRead', 'notificationDelete']));
+    expect(new Set(kinds)).toEqual(new Set(['save', 'follow', 'collectionItem', 'notificationRead', 'notificationDelete']));
   });
 });

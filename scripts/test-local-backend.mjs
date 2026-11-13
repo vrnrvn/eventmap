@@ -398,6 +398,36 @@ try {
   assert.equal(ok(await sam.from('event_chat_messages').select('*').eq('event_id', eventId)).length, 0);
   console.log('PASS: RSVP list, two-attendee chat gate, realtime, sender identity, leave-event revocation');
 
+  // Private collections (20261112100000). Skipped with a notice until the
+  // migration is applied, so this suite keeps passing on older databases.
+  {
+    const probe = await alex.rpc('get_user_collections');
+    if (probe.error && ['PGRST202', '42883'].includes(probe.error.code)) {
+      console.log('SKIP: collections (migration 20261112100000 not applied)');
+    } else {
+      ok(probe);
+      const created = ok(await alex.from('collections').insert({ user_id: alexId, name: `Integration ${Date.now()}` }).select('*').single());
+      try {
+        ok(await alex.from('collection_items').insert({ collection_id: created.id, event_id: eventId, note: 'front row' }));
+        const dup = await alex.from('collection_items').insert({ collection_id: created.id, event_id: eventId });
+        assert.equal(dup.error?.code, '23505', 'A second pin is a unique violation the client treats as success');
+        const rows = ok(await alex.rpc('get_collection_events', { p_collection_id: created.id, p_sort: 'next', p_filter: 'all' }));
+        assert.ok(rows.some((r) => r.id === eventId && r.sources.includes('pinned') && r.note === 'front row'), 'Pinned event listed with its note');
+        const home = ok(await alex.rpc('get_user_collections'));
+        assert.ok(home.some((c) => c.id === created.id && c.item_count === 1), 'Home lists the collection with its count');
+        const membership = ok(await alex.rpc('get_event_collection_membership', { p_event_id: eventId }));
+        assert.ok(membership.some((m) => m.collection_id === created.id && m.pinned), 'Membership reports the pin');
+        const foreign = ok(await sam.rpc('get_collection_events', { p_collection_id: created.id }));
+        assert.equal(foreign.length, 0, "Another user reads someone else's collection as empty");
+        const steal = await sam.from('collection_items').insert({ collection_id: created.id, event_id: eventId });
+        assert.ok(steal.error, "Another user cannot pin into someone else's collection");
+        console.log('PASS: collections create, pin, list, membership, cross-user isolation');
+      } finally {
+        ok(await alex.from('collections').delete().eq('id', created.id));
+      }
+    }
+  }
+
   photoPath = `${alexId}/integration-${Date.now()}.png`;
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
   ok(await alex.storage.from('avatars').upload(photoPath, png, { contentType: 'image/png' }));

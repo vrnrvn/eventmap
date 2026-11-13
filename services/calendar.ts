@@ -26,20 +26,38 @@ export class CalendarRpcUnavailableError extends Error {
 export type CalendarRange = { rows: SourcedEvent<CalendarRpcRow>[]; truncated: boolean };
 
 let rpcUnavailable = false;
+// The 'collections' source arrives with 20261112100000; an older function
+// rejects it with invalid_source. Remembered for the session after one miss.
+let collectionsSourceUnsupported = false;
 
 /** Whether an earlier call already found the RPC missing in this session. */
 export function isCalendarRpcKnownUnavailable(): boolean {
   return rpcUnavailable;
 }
 
+/** False once the backend refused the 'collections' source (pre-20261112100000). */
+export function isCalendarCollectionsSourceSupported(): boolean {
+  return !collectionsSourceUnsupported;
+}
+
 export const calendarService = {
   async getUserCalendar(from: Date, to: Date, sources: readonly CalendarSource[]): Promise<CalendarRange> {
     if (rpcUnavailable) throw new CalendarRpcUnavailableError();
-    const { data, error } = await supabase.rpc('get_user_calendar', {
-      p_from: from.toISOString(),
-      p_to: to.toISOString(),
-      p_sources: toRpcSources(sources),
-    });
+    const effective = collectionsSourceUnsupported ? sources.filter((s) => s !== 'collections') : sources;
+    const call = (wanted: readonly CalendarSource[]) =>
+      supabase.rpc('get_user_calendar', {
+        p_from: from.toISOString(),
+        p_to: to.toISOString(),
+        p_sources: toRpcSources(wanted),
+      });
+    let wanted = effective;
+    let { data, error } = await call(wanted);
+    if (error && wanted.includes('collections') && String(error.message ?? '').includes('invalid_source')) {
+      // Older function: drop the new source once and retry; the chip hides.
+      collectionsSourceUnsupported = true;
+      wanted = wanted.filter((s) => s !== 'collections');
+      ({ data, error } = await call(wanted));
+    }
     if (error) {
       if (isMissingDbFunction(error)) {
         rpcUnavailable = true;
@@ -48,6 +66,6 @@ export const calendarService = {
       throw error;
     }
     const raw = (data ?? {}) as { rows?: CalendarRpcRow[]; truncated?: boolean };
-    return { rows: fromRpcRows(raw.rows ?? [], sources), truncated: !!raw.truncated };
+    return { rows: fromRpcRows(raw.rows ?? [], wanted), truncated: !!raw.truncated };
   },
 };

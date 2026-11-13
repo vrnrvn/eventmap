@@ -26,6 +26,7 @@ import { useIsRestoring, useQuery, useQueryClient, type QueryClient } from '@tan
 import { PERSISTED_QUERY } from '@/utils/queryPersistence';
 import { queryKeys } from '@/hooks/queryKeys';
 import { useCategories } from '@/hooks/useCategories';
+import { useFavouriteCategories } from '@/hooks/useCollections';
 import { useConnectivity } from '@/services/connectivity';
 import { freshnessNote } from '@/utils/screenState';
 import { FreshnessNote } from '@/components/ui/QueryStates';
@@ -36,7 +37,15 @@ import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/
 import { orderCategoriesForViewer, presentCategory } from '@/utils/categoryPresentation';
 import { categoryRoute, findCategoryBySlug } from '@/utils/categoryBrowse';
 import { CategoryIcon } from '@/components/CategoryIcon';
-import { X, Search, SlidersHorizontal, Plus, MapPin, Flame } from '@/components/icons.generated';
+import {
+  Flame,
+  Heart,
+  MapPin,
+  Plus,
+  Search,
+  SlidersHorizontal,
+  X,
+} from '@/components/icons.generated';
 import { EventmapFilter, EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView';
 import { SearchOverlay } from '@/components/SearchOverlay';
@@ -141,6 +150,14 @@ export default function DiscoverScreen() {
   const [loading, setLoading] = useState(!lastArea);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  // Phase F: one chip for every favourited type at once (docs §7, decision
+  // "For you" chip). Only shown when the signed-in user has favourites.
+  const favourites = useFavouriteCategories();
+  const favouriteIds = useMemo(() => [...favourites.byCategory.keys()].sort(), [favourites.byCategory]);
+  const forYouActive =
+    favouriteIds.length > 0 &&
+    selectedCategories.length === favouriteIds.length &&
+    [...selectedCategories].sort().every((id, i) => id === favouriteIds[i]);
   const [showSearchOverlay, setShowSearchOverlay] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [center, setCenter] = useState(lastArea?.center ?? DEFAULT_CENTER);
@@ -1061,6 +1078,20 @@ export default function DiscoverScreen() {
               All events
             </Text>
           </TouchableOpacity>
+          {favouriteIds.length > 0 ? (
+            <TouchableOpacity
+              style={[styles.overlayChip, forYouActive && styles.overlayChipActive]}
+              onPress={() => setSelectedCategories(forYouActive ? [] : favouriteIds)}
+              activeOpacity={0.85}
+              hitSlop={CHIP_HIT_SLOP}
+              accessibilityRole="button"
+              accessibilityLabel="For you: your favourite event types"
+              {...a11yState({ selected: forYouActive }, 'button')}
+            >
+              <Heart size={14} color={forYouActive ? Colors.text.inverse : Colors.primary} fill={forYouActive ? Colors.text.inverse : 'transparent'} />
+              <Text style={[styles.overlayChipText, forYouActive && styles.overlayChipTextActive]}>For you</Text>
+            </TouchableOpacity>
+          ) : null}
           {orderedCategories.map((category) => {
             const selected = selectedCategories.includes(category.id);
             const { label, color } = presentCategory(category);

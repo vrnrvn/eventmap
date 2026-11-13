@@ -31,6 +31,7 @@ import { CategoryIcon } from '@/components/CategoryIcon';
 import { BUSINESS_CATEGORY_LABELS } from '@/constants/businessCategories';
 import { CategoryPicker } from '@/components/CategoryPicker';
 import { useCategories } from '@/hooks/useCategories';
+import { useFavouriteCategories } from '@/hooks/useCollections';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
 import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { clearOnboardingDraft } from '@/utils/onboardingDraft';
@@ -112,6 +113,9 @@ export default function SettingsScreen() {
     isError: categoriesError,
     refetch: refetchCategories,
   } = useCategories();
+  // Phase F: favourite types (smart collections) get a heart in the Interests picker.
+  const favouriteTypes = useFavouriteCategories();
+  const favouriteTypeIds = useMemo(() => [...favouriteTypes.byCategory.keys()], [favouriteTypes.byCategory]);
   const [saving, setSaving] = useState<'user' | 'business' | null>(null);
   const [savedSection, setSavedSection] = useState<'user' | 'business' | null>(null);
 
@@ -1148,7 +1152,18 @@ export default function SettingsScreen() {
                       }
                       density="compact"
                       showCount={false}
+                      markedIds={favouriteTypeIds}
                     />
+                    {/* Phase D: favourited types live as collections, a separate idea from the ranking boost above. */}
+                    <TouchableOpacity
+                      style={styles.catLink}
+                      onPress={() => router.push('/collections' as never)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Manage favourite event types in Collections"
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    >
+                      <Text style={styles.catLinkText}>Want every event of a type collected for you? Favourite it in Collections →</Text>
+                    </TouchableOpacity>
                   </View>
                 </View>
 
@@ -1997,6 +2012,12 @@ const styles = StyleSheet.create({
     color: Colors.text.tertiary,
     marginBottom: 8,
     marginLeft: 4,
+  },
+  catLink: { marginTop: Spacing.sm, minHeight: 32, justifyContent: 'center' },
+  catLinkText: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamilies.semibold,
+    color: Colors.primary,
   },
   catHint: {
     fontSize: Typography.sizes.xs,

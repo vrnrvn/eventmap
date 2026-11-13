@@ -15,6 +15,7 @@ vi.mock('@/services/social', () => ({
   socialService: { saveEvent: async (id: string) => void calls.push(`save:${id}`) },
 }));
 vi.mock('@/services/notifications', () => ({}));
+vi.mock('@/services/collections', () => ({ collectionsService: {} }));
 
 describe('pendingWrites initial state', () => {
   it('treats the session as unverified until PendingWritesSync says otherwise', async () => {

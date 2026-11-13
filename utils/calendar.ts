@@ -23,12 +23,13 @@ import {
 import { hasEventEnded } from '@/utils/eventStatus';
 import { buildRecurrenceRule, type IcsEventInput } from '@/utils/eventIcs';
 
-export type CalendarSource = 'going' | 'interested' | 'saved' | 'hosting';
+/** 'collections' = any event in one of the viewer's collections (20261112100000). */
+export type CalendarSource = 'going' | 'interested' | 'saved' | 'hosting' | 'collections';
 
 /** Display priority when one event is in several lists. */
-export const SOURCE_PRIORITY: readonly CalendarSource[] = ['going', 'hosting', 'interested', 'saved'];
+export const SOURCE_PRIORITY: readonly CalendarSource[] = ['going', 'hosting', 'interested', 'saved', 'collections'];
 
-export const ALL_SOURCES: readonly CalendarSource[] = ['going', 'interested', 'saved', 'hosting'];
+export const ALL_SOURCES: readonly CalendarSource[] = ['going', 'interested', 'saved', 'collections', 'hosting'];
 
 /** The fields the calendar needs from a list row. RankedEvent and Event both satisfy it. */
 export type CalendarEvent = {

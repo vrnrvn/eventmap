@@ -8,7 +8,7 @@
  * is a live region so screen readers hear the count change.
  */
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Check } from '@/components/icons.generated';
+import { Check, Heart } from '@/components/icons.generated';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { presentCategory } from '@/utils/categoryPresentation';
 import { a11yState } from '@/utils/accessibility';
@@ -29,6 +29,8 @@ type Props = {
   showCount?: boolean;
   /** Copy for the error state; defaults to "interests". */
   noun?: string;
+  /** Ids drawn with a heart: favourited types that are also collections (Phase F). */
+  markedIds?: readonly string[];
 };
 
 const CHIP_SKELETON_WIDTHS = [104, 128, 88, 140, 96, 120, 84, 112];
@@ -42,6 +44,7 @@ export function CategoryPicker({
   density = 'spacious',
   showCount = true,
   noun = 'interests',
+  markedIds,
 }: Props) {
   const compact = density === 'compact';
   const none = selectedIds.length === 0;
@@ -85,6 +88,7 @@ export function CategoryPicker({
       <View style={[styles.grid, compact && styles.gridCompact]}>
         {categories.map((cat) => {
           const isSelected = selectedIds.includes(cat.id);
+          const isMarked = !!markedIds?.includes(cat.id);
           const { label, color } = presentCategory(cat);
           return (
             <TouchableOpacity
@@ -98,7 +102,7 @@ export function CategoryPicker({
               activeOpacity={0.7}
               accessibilityRole="checkbox"
               {...a11yState({ checked: isSelected })}
-              accessibilityLabel={label}
+              accessibilityLabel={isMarked ? `${label}, favourite type` : label}
               hitSlop={compact ? { top: 4, bottom: 4, left: 2, right: 2 } : undefined}
             >
               {isSelected ? (
@@ -115,6 +119,9 @@ export function CategoryPicker({
               >
                 {label}
               </Text>
+              {isMarked ? (
+                <Heart size={12} color={isSelected ? Colors.text.inverse : Colors.primary} fill={isSelected ? Colors.text.inverse : Colors.primary} />
+              ) : null}
             </TouchableOpacity>
           );
         })}

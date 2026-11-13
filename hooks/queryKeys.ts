@@ -21,6 +21,20 @@ export const queryKeys = {
   /** Phase B: one get_user_calendar call per range and source set. */
   calendarRange: (userId: string | undefined, fromIso: string, toIso: string, sources: string) =>
     ['events', 'calendar', userId ?? 'anon', 'range', fromIso, toIso, sources] as const,
+  /**
+   * Private collections (docs/EVENT_COLLECTIONS_PLAN.md). Under the 'events'
+   * prefix: a save or RSVP changes what a smart collection contains.
+   */
+  collections: (userId: string | undefined) => ['events', 'collections', userId ?? 'anon'] as const,
+  collectionEvents: (userId: string | undefined, collectionId: string, sort: string, filter: string) =>
+    ['events', 'collections', userId ?? 'anon', 'items', collectionId, sort, filter] as const,
+  collectionEventsPrefix: (userId: string | undefined, collectionId: string) =>
+    ['events', 'collections', userId ?? 'anon', 'items', collectionId] as const,
+  /** Which of the viewer's collections hold one event (add-to-collection sheet, detail badge). */
+  eventCollections: (eventId: string) => ['event', 'collections', eventId] as const,
+  /** Same for a page of events (Saved rows' "in N collections" hint). */
+  eventsCollections: (userId: string | undefined, idsKey: string) =>
+    ['event', 'collections', 'many', userId ?? 'anon', idsKey] as const,
   /** Prefix for every attendance-derived list (joined tabs + saved + calendar). */
   attendanceLists: () => ['events'] as const,
   /**

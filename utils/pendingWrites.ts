@@ -3,7 +3,7 @@ import type { ConnectivityStatus } from './connectivity';
 
 /**
  * Writes that can wait for a connection (docs/OFFLINE_PLAN.md §3.7): saves,
- * follows and notification read / dismiss. Pure module — unit-tested under
+ * follows, collection pins and notification read / dismiss. Pure module — unit-tested under
  * node; services/pendingWrites.ts stores and replays the queue.
  *
  * The queue holds the user's latest *intent* per target rather than a log of
@@ -19,6 +19,12 @@ import type { ConnectivityStatus } from './connectivity';
 export type PendingWrite =
   | { kind: 'save'; targetId: string; on: boolean; label?: string }
   | { kind: 'follow'; targetId: string; on: boolean; label?: string }
+  /**
+   * Pin / unpin an event in a collection. targetId is
+   * `${collectionId}:${eventId}` (utils/collections collectionItemTarget) so
+   * one key covers the pair; `collectionName` is for the toast copy.
+   */
+  | { kind: 'collectionItem'; targetId: string; on: boolean; label?: string; collectionName?: string }
   /** targetId '*' = mark all as read. */
   | { kind: 'notificationRead'; targetId: string }
   | { kind: 'notificationDelete'; targetId: string };
@@ -88,7 +94,7 @@ export function parseQueue(raw: string | null | undefined, now: number): Pending
       if (typeof e !== 'object' || e === null) return false;
       const x = e as Partial<PendingEntry> & { on?: unknown };
       const kindOk =
-        ((x.kind === 'save' || x.kind === 'follow') && typeof x.on === 'boolean') ||
+        ((x.kind === 'save' || x.kind === 'follow' || x.kind === 'collectionItem') && typeof x.on === 'boolean') ||
         x.kind === 'notificationRead' ||
         x.kind === 'notificationDelete';
       return (
@@ -113,6 +119,10 @@ export function describeWrite(w: PendingWrite): string {
       return w.on ? `save ${name ?? 'an event'}` : `remove ${name ?? 'an event'} from saved`;
     case 'follow':
       return w.on ? `follow ${name ?? 'an organizer'}` : `unfollow ${name ?? 'an organizer'}`;
+    case 'collectionItem': {
+      const list = w.collectionName ? `“${w.collectionName}”` : 'a collection';
+      return w.on ? `add ${name ?? 'an event'} to ${list}` : `remove ${name ?? 'an event'} from ${list}`;
+    }
     case 'notificationRead':
       return w.targetId === '*' ? 'mark notifications as read' : 'mark a notification as read';
     case 'notificationDelete':
@@ -131,6 +141,8 @@ export function queuedMessage(w: PendingWrite): string | null {
       return (w.on ? 'Saved on this device.' : 'Removed on this device.') + tail;
     case 'follow':
       return (w.on ? 'Following on this device.' : 'Unfollowed on this device.') + tail;
+    case 'collectionItem':
+      return (w.on ? 'Added on this device.' : 'Removed on this device.') + tail;
     default:
       return null;
   }

@@ -6,7 +6,7 @@
 import type { CalendarSource, SourcedEvent } from '@/utils/calendar';
 import type { RankedEvent } from '@/types/database';
 
-export type CalendarRpcSource = 'going' | 'requested' | 'interested' | 'saved' | 'hosting';
+export type CalendarRpcSource = 'going' | 'requested' | 'interested' | 'saved' | 'hosting' | 'collections';
 
 /** Row shape of get_user_calendar: a list row plus zone, status note and the caller's relationships. */
 export type CalendarRpcRow = RankedEvent & {

@@ -34,6 +34,24 @@ archive.
 - **Waiting on you:** the device & manual testing list (offline on
   iOS/Android first); two product decisions left (approval mode with closed
   RSVPs; the not-started features backlog).
+- **Collections (2026-11-12, Phases A–F built, migration unapplied):** open
+  items live in `docs/EVENT_COLLECTIONS_PLAN.md` §6 (Phase F defaults with
+  alternatives), §7 (remaining decisions: rule editor vs. single column,
+  full Interests merge) and §8 (the Phase G runbook). **[decision]** **[DB]**
+- **Test flake (2026-11-12, pre-existing):** `scripts/test-categories-series.sql`
+  builds its series dates with `(now() + interval '60 minutes')::date`, which
+  uses the *session* timezone, while the fixture event is zoned `UTC`. On a
+  cluster whose session zone is not UTC (a native Postgres, `America/New_York`
+  here) the suite fails after ~19:00 local with `invalid_occurrence` at the
+  `restore_occurrence` step. Reproduced without the collections migration.
+  Supabase's container runs in UTC, so `scripts/db-scratch.sh` never sees it;
+  `scripts/db-isolated.sh` now sets the database timezone to UTC. A durable
+  fix is `(now() AT TIME ZONE 'UTC')::date` in the suite's `d` table.
+- **Database (2026-11-12):** `20261112100000_event_collections.sql` is
+  prepared and validated on an isolated copy only (`scripts/db-isolated.sh`,
+  `scripts/test-collections.sql`); it is NOT applied to the shared local
+  database. No session applies migrations to the shared database any more;
+  the owner does. See `docs/EVENT_COLLECTIONS_PLAN.md` §8.
 - **Database:** the four 2026-11-08 migrations and eight 2026-11-09
   category/series migrations are recorded in the local DB. Hosted databases
   have not been checked or changed and must be handled separately.

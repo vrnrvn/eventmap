@@ -28,6 +28,7 @@ import { eventChatService } from '@/services/eventChat';
 import { eventChatAccess, type ChatAccessSettings } from '@/utils/eventChatAccess';
 import { goBackOr } from '@/utils/navigation';
 import { socialService } from '@/services/social';
+import { isCollectionsUnavailable } from '@/services/collections';
 import { reviewsService, type ReviewWithProfile } from '@/services/reviews';
 import {
   EventDetails,
@@ -49,34 +50,37 @@ import {
   AttendeesBottomSheet,
   type AttendeesBottomSheetHandle,
 } from '@/components/AttendeesBottomSheet';
+import { AddToCollectionSheet } from '@/components/AddToCollectionSheet';
 import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ReviewCard } from '@/components/ReviewCard';
 import { ReviewForm } from '@/components/ReviewForm';
 import {
   ArrowLeft,
   ArrowRight,
-  ExternalLink,
-  Settings2,
-  FileText,
-  EyeOff,
-  PauseCircle,
-  Ticket,
-  ShieldCheck,
-  Star,
-  Flag,
-  Repeat,
-  Share2,
-  Clock3,
-  CalendarPlus,
-  Download,
-  TrendingUp,
-  ChevronRight,
-  MessageCircle,
+  BadgeCheck,
+  Ban,
   Bookmark,
   BookmarkCheck,
+  CalendarPlus,
+  ChevronRight,
+  Clock3,
   CloudOff,
-  Ban,
-  BadgeCheck,
+  Download,
+  ExternalLink,
+  EyeOff,
+  FileText,
+  Flag,
+  FolderHeart,
+  FolderPlus,
+  MessageCircle,
+  PauseCircle,
+  Repeat,
+  Settings2,
+  Share2,
+  ShieldCheck,
+  Star,
+  Ticket,
+  TrendingUp,
 } from '@/components/icons.generated';
 import {
   classifyRsvpError,
@@ -148,7 +152,9 @@ export default function EventDetail() {
   const { width: windowWidth } = useWindowDimensions();
   // Times render in the viewer's own zone; say which one.
   const viewerTz = useMemo(() => getDeviceTimeZone(), []);
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // `date` (YYYY-MM-DD in the event zone) comes from a series date row in a
+  // collection: that date is highlighted in the dates list below.
+  const { id, date: focusDateKey } = useLocalSearchParams<{ id: string; date?: string }>();
   const { user, isBanned, sessionLoading } = useAuth();
   // A save / unsave queued offline for this event: shown on the bookmark.
   const pendingSave = usePendingWrite('save', id);
@@ -223,6 +229,9 @@ export default function EventDetail() {
   const [previewAttendees, setPreviewAttendees] = useState<PublicAttendee[]>([]);
   const [attendeesRefresh, setAttendeesRefresh] = useState(0);
   const [togglingSave, setTogglingSave] = useState(false);
+  // Phase C: the add-to-collection sheet (long-press on the bookmark, the
+  // Collections row, or the toast action after saving).
+  const [collectionsSheetOpen, setCollectionsSheetOpen] = useState(false);
   const hasLoadedRef = useRef(false);
   const [chatPreview, setChatPreview] = useState<EventChatMessageWithSender | null>(null);
   const [chatUnread, setChatUnread] = useState(0);
@@ -761,7 +770,13 @@ export default function EventDetail() {
     try {
       // Queued (kept as is) when offline; replayed on reconnect.
       const result = await runOrQueueWithNotice({ kind: 'save', targetId: id, on: !wasSaved, label: details.event.title });
-      if (result === 'done') invalidateLists();
+      if (result === 'done') {
+        invalidateLists();
+        // Saved just now: offer to also file it into a collection.
+        if (!wasSaved && !isCollectionsUnavailable()) {
+          notify.withAction('Saved.', { label: 'Add to collection', onPress: () => setCollectionsSheetOpen(true) });
+        }
+      }
     } catch (err) {
       setDetails((d) =>
         d ? { ...d, user_saved: wasSaved, save_count: Math.max(0, d.save_count + (wasSaved ? 1 : -1)) } : d
@@ -1111,6 +1126,7 @@ export default function EventDetail() {
               <TouchableOpacity
                 style={styles.backButton}
                 onPress={handleToggleSave}
+                onLongPress={() => (blockedByPreview() ? undefined : setCollectionsSheetOpen(true))}
                 disabled={togglingSave}
                 accessibilityRole="button"
                 accessibilityLabel={details.user_saved ? 'Remove from saved events' : 'Save event'}
@@ -1411,6 +1427,29 @@ export default function EventDetail() {
           </View>
           ) : null}
 
+          {user && !eventCancelled && !isCollectionsUnavailable() ? (
+            <View style={styles.calendarRow}>
+              <View style={styles.metaIconWrap}>
+                <FolderHeart size={18} color={Colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.metaLabel}>Collections</Text>
+                <View style={styles.calendarChoiceRow}>
+                  <TouchableOpacity
+                    style={styles.calendarChoiceBtn}
+                    onPress={() => (blockedByPreview() ? undefined : setCollectionsSheetOpen(true))}
+                    activeOpacity={0.75}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add to collection"
+                  >
+                    <Text style={styles.calendarChoiceText}>Add to collection</Text>
+                    <FolderPlus size={14} color={Colors.primary} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          ) : null}
+
           <TouchableOpacity
             style={styles.attendeesSection}
             onPress={() => (details.rsvp_count > 0 ? attendeesSheetRef.current?.present() : null)}
@@ -1647,10 +1686,11 @@ export default function EventDetail() {
               {listOccurrences(event, occurrenceExceptions, { count: 5 }).map((o) => {
                 const attendance = dateAttendance(details.user_rsvp, dateRsvpsQuery.data ?? [], o.dateKey);
                 const canToggle = !!user && !isOwner && o.status !== 'cancelled' && !eventEnded;
+                const focused = !!focusDateKey && o.dateKey === focusDateKey;
                 return (
-                <View key={o.dateKey} style={styles.recurrenceRow}>
+                <View key={o.dateKey} style={[styles.recurrenceRow, focused && styles.recurrenceRowFocused]}>
                 <Text
-                  style={[styles.recurrenceDate, styles.recurrenceDateFlex, o.status === 'cancelled' && styles.recurrenceDateCancelled]}
+                  style={[styles.recurrenceDate, styles.recurrenceDateFlex, o.status === 'cancelled' && styles.recurrenceDateCancelled, focused && styles.recurrenceDateFocused]}
                   accessibilityLabel={
                     o.status === 'cancelled'
                       ? `${formatDateTime(o.start.toISOString())}, cancelled`
@@ -2052,7 +2092,13 @@ export default function EventDetail() {
         </View>
       ) : null}
       {id && (
-        <AttendeesBottomSheet ref={attendeesSheetRef} eventId={id} refreshToken={attendeesRefresh} />
+        <>
+          <AddToCollectionSheet
+            event={collectionsSheetOpen && details ? { id, title: details.event.title } : null}
+            onClose={() => setCollectionsSheetOpen(false)}
+          />
+          <AttendeesBottomSheet ref={attendeesSheetRef} eventId={id} refreshToken={attendeesRefresh} />
+        </>
       )}
       <ReportReasonSheet
         visible={reportSheetOpen}
@@ -2610,6 +2656,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.sm,
   },
+  recurrenceRowFocused: {
+    backgroundColor: Colors.primarySoft,
+    borderRadius: BorderRadius.sm,
+    marginHorizontal: -Spacing.xs,
+    paddingHorizontal: Spacing.xs,
+  },
+  recurrenceDateFocused: { color: Colors.text.primary, fontFamily: Typography.fontFamilies.semibold },
   recurrenceDateFlex: { flex: 1 },
   dateRsvpChip: {
     marginTop: Spacing.xs,

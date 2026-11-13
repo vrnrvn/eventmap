@@ -42,3 +42,4 @@ types/supabase.generated.ts.tmp
 
 # typescript
 *.tsbuildinfo
+.isolated-pg/

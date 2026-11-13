@@ -51,6 +51,10 @@ async function fetchList(source: ListSource, userId: string, businessId: string 
     case 'hosting':
       if (!businessId) return [];
       return eventsService.getBusinessEvents(businessId, { scope: 'upcoming', limit: CALENDAR_PAGE_CAP, offset: 0 });
+    case 'collections':
+      // No per-source list exists before 20261112100000, and the range RPC
+      // (which carries the source) is missing in this fallback mode anyway.
+      return [];
   }
 }
 

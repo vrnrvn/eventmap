@@ -27,6 +27,8 @@ import { Button } from '@/components/ui/Button';
 import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { EventListItem, type EventListItemBadge } from '@/components/EventListItem';
 import { MonthGrid, SOURCE_COLORS, SOURCE_LABELS } from '@/components/calendar/MonthGrid';
+import { isCalendarCollectionsSourceSupported } from '@/services/calendar';
+import { isCollectionsUnavailable } from '@/services/collections';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import {
   addDaysToKey,
@@ -176,9 +178,12 @@ export default function CalendarScreen() {
     [userId]
   );
 
+  // 'collections' hides once the backend refused it (pre-20261112100000);
+  // the refusal arrives through the data hook, which re-renders this screen.
+  const collectionsSupported = isCalendarCollectionsSourceSupported() && !isCollectionsUnavailable();
   const availableSources = useMemo(
-    () => ALL_SOURCES.filter((s) => s !== 'hosting' || hasBusiness),
-    [hasBusiness]
+    () => ALL_SOURCES.filter((s) => (s !== 'hosting' || hasBusiness) && (s !== 'collections' || collectionsSupported)),
+    [hasBusiness, collectionsSupported]
   );
   const activeSources = useMemo(
     () => sources.filter((s) => availableSources.includes(s)),

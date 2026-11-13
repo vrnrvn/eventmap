@@ -44,11 +44,51 @@ export function makeData({ notifications = 140, events = 60, business = false, l
     lat: 37.7749, lng: -122.4194, hobbies: null, has_completed_onboarding: true, preferred_categories: [], is_admin: false,
     is_profile_private: false, show_attendance_publicly: true, show_future_events: true, notification_preferences: {},
     event_reminder_enabled: true, event_reminder_minutes: 60, created_at: iso(-9000) };
-  return { categories, biz, ev, ranked, notifs, people, messages, profile, business, follows: [{ id: uuid(1, 'f'), business: biz }] };
+  // Private collections (20261112100000): one manual list with pinned events,
+  // one smart (favourited category 'music') filled from saves / RSVPs.
+  const collections = [
+    { id: uuid(1, '9'), user_id: UID, name: 'Weekend plans', kind: 'manual', category_ids: [], icon_key: null, color: null,
+      sort_order: 1, created_at: iso(-200), updated_at: iso(-2) },
+    { id: uuid(2, '9'), user_id: UID, name: 'Music', kind: 'smart', category_ids: [categories[0].id], icon_key: 'mic-vocal', color: '#1d4ed8',
+      sort_order: 2, created_at: iso(-150), updated_at: iso(-1) },
+  ];
+  const collectionItems = ranked.slice(0, 12).filter((_, i) => i % 2 === 0)
+    .map((e, i) => ({ collection_id: collections[0].id, event_id: e.id, added_at: iso(-i), note: i === 0 ? 'bring a scarf' : null }));
+  // Series dates: ev[0] is weekly from its start. Second date cancelled,
+  // third moved two hours later, viewer opted out of the fourth.
+  // Occurrence keys are calendar dates in the EVENT's zone (ev[0] is Asia/Kathmandu).
+  const dayKey = (d) => new Date(d).toLocaleDateString('en-CA', { timeZone: ev[0].timezone });
+  const plusDays = (isoStr, n) => new Date(new Date(isoStr).getTime() + n * 86400e3).toISOString();
+  const s0 = ev[0].start_datetime;
+  const exceptions = [
+    { event_id: ev[0].id, occurrence_date: dayKey(plusDays(s0, 7)), kind: 'cancelled', new_start: null, new_end: null, note: 'Venue closed' },
+    { event_id: ev[0].id, occurrence_date: dayKey(plusDays(s0, 14)), kind: 'rescheduled',
+      new_start: new Date(new Date(plusDays(s0, 14)).getTime() + 2 * 3600e3).toISOString(),
+      new_end: new Date(new Date(plusDays(ev[0].end_datetime, 14)).getTime() + 2 * 3600e3).toISOString(), note: null },
+  ];
+  const dateRsvps = [{ event_id: ev[0].id, user_id: UID, occurrence_date: dayKey(plusDays(s0, 21)), status: 'not_going' }];
+  return { categories, biz, ev, ranked, notifs, people, messages, profile, business, collections, collectionItems, exceptions, dateRsvps, follows: [{ id: uuid(1, 'f'), business: biz }] };
 }
 
 const qp = (q) => Object.fromEntries(new URLSearchParams(q));
 const eqv = (s) => (s && s.startsWith('eq.') ? s.slice(3) : undefined);
+/** PostgREST `in.(a,b)` → [a, b]; undefined when absent. */
+const inList = (s) => (s && s.startsWith('in.(') ? s.slice(4, -1).split(',').filter(Boolean) : undefined);
+
+/** Members of one fake collection in the get_collection_events row shape (pinned ∪ smart rule). */
+function collectionRows(data, c) {
+  const out = new Map();
+  const add = (e, source, at, note) => { const cur = out.get(e.id) ?? { ...e, sources: [], added_at: at, note: null }; cur.sources.push(source);
+    if (at > cur.added_at) cur.added_at = at; if (note) cur.note = note; out.set(e.id, cur); };
+  // Pinned events carry the viewer's own save / RSVP tags in any collection (as the SQL helper does).
+  for (const i of data.collectionItems.filter((i) => i.collection_id === c.id)) { const e = data.ranked.find((x) => x.id === i.event_id); if (!e) continue;
+    add(e, 'pinned', i.added_at, i.note); if (e.user_rsvp) add(e, e.user_rsvp, e.created_at); if (e.user_saved) add(e, 'saved', e.saved_at); }
+  if (c.kind === 'smart') for (const e of data.ranked.filter((e) => c.category_ids.includes(e.category_id))) {
+    if (e.user_rsvp) add(e, e.user_rsvp, e.created_at); if (e.user_saved) add(e, 'saved', e.saved_at); }
+  const order = { pinned: 0, going: 1, requested: 2, interested: 3, saved: 4 };
+  return [...out.values()].map((e) => ({ ...e, sources: [...e.sources].sort((a, b) => order[a] - order[b]) }))
+    .sort((a, b) => (a.has_ended === b.has_ended ? a.next_start_datetime.localeCompare(b.next_start_datetime) : a.has_ended ? 1 : -1));
+}
 
 export function makeRouter(data, { unknown = [], overrides = {} } = {}) {
   const page = (rows, r) => {
@@ -145,7 +185,65 @@ export function makeRouter(data, { unknown = [], overrides = {} } = {}) {
           is_private: p.is_private, status: b.p_status || 'going', joined_at: iso(-i), reason: null, chat_blocked: false }));
         return { json: { total: data.people.length, items, has_more: off + lim < data.people.length } }; }
       case 'rpc/get_event_host_overview': return { status: 404, json: { code: 'PGRST202', message: 'not found' } };
-      case 'rpc/get_user_calendar': return { json: { rows: [], truncated: false } };
+      case 'rpc/get_user_calendar': { const b = body(r); const srcs = b.p_sources || [];
+        if (srcs.some((x) => !['going', 'requested', 'interested', 'saved', 'hosting', 'collections'].includes(x))) return { status: 400, json: { code: 'P0001', message: 'invalid_source' } };
+        const rows = new Map();
+        if (srcs.includes('collections')) for (const c of data.collections) for (const e of collectionRows(data, c)) {
+          if (e.has_ended) continue; const cur = rows.get(e.id) ?? { ...e, sources: [] }; if (!cur.sources.includes('collections')) cur.sources.push('collections'); rows.set(e.id, cur); }
+        return { json: { rows: [...rows.values()].map((e) => ({ ...e, sources: [...e.sources].sort(), user_rsvp: null })), truncated: false } }; }
+      // Series exceptions and per-date RSVPs (202611091*): a cancelled and a
+      // moved date on the first series, and one opt-out by the viewer.
+      case 'event_occurrence_exceptions': { const ids = inList(q.event_id); return { json: data.exceptions.filter((x) => !ids || ids.includes(x.event_id)) }; }
+      case 'rsvp_occurrences': { const id = eqv(q.event_id); return { json: data.dateRsvps.filter((x) => !id || x.event_id === id) }; }
+      // ── collections (docs/EVENT_COLLECTIONS_PLAN.md) ──
+      case 'rpc/get_user_collections': return { json: [...data.collections].sort((a, z) => a.sort_order - z.sort_order || a.created_at.localeCompare(z.created_at)).map((c) => {
+        const rows = collectionRows(data, c);
+        const up = rows.filter((e) => !e.has_ended);
+        return { ...c, item_count: rows.length, upcoming_count: up.length, recurring_count: up.filter((e) => e.is_recurring).length,
+          next_start_datetime: up[0]?.next_start_datetime ?? null, cover_urls: up.map((e) => e.cover_image_url).filter(Boolean).slice(0, 3) }; }) };
+      case 'rpc/get_collection_events': { const b = body(r); const c = data.collections.find((x) => x.id === b.p_collection_id);
+        if (!c) return { json: [] };
+        let rows = collectionRows(data, c);
+        const f = b.p_filter || 'all';
+        rows = rows.filter((e) => f === 'all' ? true : f === 'upcoming' ? !e.has_ended : f === 'repeating' ? !e.has_ended && e.is_recurring
+          : f === 'past' ? e.has_ended : e.sources.includes(f));
+        if (b.p_sort === 'rsvp') rows = [...rows].sort((a, z) => z.rsvp_count - a.rsvp_count);
+        else if (b.p_sort === 'added') rows = [...rows].sort((a, z) => z.added_at.localeCompare(a.added_at));
+        else if (b.p_sort === 'title') rows = [...rows].sort((a, z) => a.title.localeCompare(z.title));
+        const off = b.p_offset || 0, lim = b.p_limit || 30;
+        return { json: rows.slice(off, off + lim) }; }
+      case 'rpc/get_event_collection_membership': { const b = body(r);
+        return { json: data.collections.map((c) => ({ collection_id: c.id,
+          pinned: data.collectionItems.some((i) => i.collection_id === c.id && i.event_id === b.p_event_id),
+          by_rule: c.kind === 'smart' && data.ranked.some((e) => e.id === b.p_event_id && c.category_ids.includes(e.category_id) && (e.user_saved || e.user_rsvp)) }))
+          .filter((m) => m.pinned || m.by_rule) }; }
+      case 'rpc/get_events_collection_membership': { const ids = body(r).p_event_ids || [];
+        return { json: ids.map((id) => ({ event_id: id, collection_ids: data.collections.filter((c) =>
+          data.collectionItems.some((i) => i.collection_id === c.id && i.event_id === id)
+          || (c.kind === 'smart' && data.ranked.some((e) => e.id === id && c.category_ids.includes(e.category_id) && (e.user_saved || e.user_rsvp)))).map((c) => c.id) }))
+          .filter((m) => m.collection_ids.length > 0) }; }
+      case 'rpc/reorder_collections': { (body(r).p_ids || []).forEach((id, i) => { const c = data.collections.find((x) => x.id === id); if (c) c.sort_order = i + 1; }); return { json: null }; }
+      case 'collections': {
+        if (r.method === 'POST') { const b = body(r); const row = { id: uuid(data.collections.length + 1, '9'), user_id: UID, kind: 'manual', category_ids: [], icon_key: null, color: null,
+          sort_order: 0, created_at: iso(0), updated_at: iso(0), ...b, name: (b.name || '').trim() };
+          // Mirror the server trigger: a smart collection defaults its name / colour / icon from the category; one per category.
+          if (row.kind === 'smart') { const cat = data.categories.find((c) => c.id === row.category_ids[0]);
+            if (data.collections.some((c) => c.kind === 'smart' && c.category_ids.join() === row.category_ids.join())) return { status: 409, json: { code: '23505', message: 'duplicate key value violates unique constraint "collections_smart_rule_key"' } };
+            if (!row.name) row.name = cat?.label ?? 'Type'; if (!row.color) row.color = '#4338ca'; if (!row.icon_key) row.icon_key = cat?.icon_key ?? null; }
+          data.collections.push(row); return one(row, r); }
+        if (r.method === 'PATCH') { const id = eqv(q.id); const c = data.collections.find((x) => x.id === id); if (c) Object.assign(c, body(r), { updated_at: iso(0) }); return { json: [] }; }
+        if (r.method === 'DELETE') { const id = eqv(q.id); data.collections = data.collections.filter((x) => x.id !== id); data.collectionItems = data.collectionItems.filter((i) => i.collection_id !== id); return { json: [] }; }
+        // PostgREST array contains: category_ids=cs.{uuid,...}
+        const cs = q.category_ids && q.category_ids.startsWith('cs.') ? q.category_ids.slice(4, -1).split(',').filter(Boolean) : null;
+        return { json: data.collections.filter((c) => (!q.kind || c.kind === eqv(q.kind)) && (!cs || cs.every((id) => c.category_ids.includes(id)))) };
+      }
+      case 'collection_items': {
+        if (r.method === 'POST') { const b = body(r); if (data.collectionItems.some((i) => i.collection_id === b.collection_id && i.event_id === b.event_id)) return { status: 409, json: { code: '23505', message: 'duplicate key' } };
+          data.collectionItems.push({ added_at: iso(0), note: null, ...b }); return { json: [] }; }
+        if (r.method === 'DELETE') { const cid = eqv(q.collection_id), eid = eqv(q.event_id); data.collectionItems = data.collectionItems.filter((i) => !(i.collection_id === cid && i.event_id === eid)); return { json: [] }; }
+        if (r.method === 'PATCH') { const cid = eqv(q.collection_id), eid = eqv(q.event_id); const it = data.collectionItems.find((i) => i.collection_id === cid && i.event_id === eid); if (it) Object.assign(it, body(r)); return { json: [] }; }
+        return { json: data.collectionItems };
+      }
       default: unknown.push(key + (r.query || '')); return isObj(r) ? { json: null } : { json: [] };
     }
   };

@@ -18,6 +18,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { socialService } from '@/services/social';
+import { collectionsService, isCollectionsUnavailable } from '@/services/collections';
+import { useAuth } from '@/contexts/AuthContext';
+import { useQuery } from '@tanstack/react-query';
+import { AddToCollectionSheet } from '@/components/AddToCollectionSheet';
 import { runOrQueue } from '@/services/pendingWrites';
 import { notify } from '@/utils/notify';
 import { Button } from '@/components/ui/Button';
@@ -33,6 +37,8 @@ import {
   Bookmark,
   BookmarkX,
   ChevronRight,
+  FolderHeart,
+  FolderPlus,
   Repeat,
 } from '@/components/icons.generated';
 import { a11yState } from '@/utils/accessibility';
@@ -48,12 +54,18 @@ type SavedEventSection = { key: string; title: string | null; data: RankedEvent[
 const SavedEventRow = memo(function SavedEventRow({
   event,
   onUnsave,
+  onAddToCollection,
   nextIso,
+  collectionCount = 0,
 }: {
   event: RankedEvent;
   onUnsave: (event: RankedEvent) => void;
+  /** Opens the add-to-collection sheet; undefined when collections are unavailable. */
+  onAddToCollection?: (event: RankedEvent) => void;
   /** Effective next date for series (useEffectiveNextDates). */
   nextIso?: string;
+  /** How many of the viewer's collections hold this event (batched RPC). */
+  collectionCount?: number;
 }) {
   const cancelled = event.status === 'cancelled';
   const ended = !!event.has_ended;
@@ -70,6 +82,9 @@ const SavedEventRow = memo(function SavedEventRow({
     metaLines.push(
       `${event.rsvp_count} ${event.rsvp_count === 1 ? 'person' : 'people'} going`
     );
+  }
+  if (collectionCount > 0) {
+    metaLines.push(`In ${collectionCount} ${collectionCount === 1 ? 'collection' : 'collections'}`);
   }
   return (
     <View style={styles.cardSpacing}>
@@ -91,16 +106,29 @@ const SavedEventRow = memo(function SavedEventRow({
         }
         metaLines={metaLines}
         rightAction={
-          <TouchableOpacity
-            style={styles.bookmarkBadge}
-            onPress={() => onUnsave(event)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            accessibilityRole="button"
-            accessibilityLabel={`Remove ${event.title} from saved events`}
-            {...a11yState({ selected: true }, 'button')}
-          >
-            <Bookmark size={14} color={Colors.primary} fill={Colors.primary} />
-          </TouchableOpacity>
+          <View style={styles.rowActions}>
+            {onAddToCollection && !ended && !cancelled ? (
+              <TouchableOpacity
+                style={styles.collectionBadge}
+                onPress={() => onAddToCollection(event)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel={`Add ${event.title} to a collection`}
+              >
+                <FolderPlus size={14} color={Colors.text.secondary} />
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              style={styles.bookmarkBadge}
+              onPress={() => onUnsave(event)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${event.title} from saved events`}
+              {...a11yState({ selected: true }, 'button')}
+            >
+              <Bookmark size={14} color={Colors.primary} fill={Colors.primary} />
+            </TouchableOpacity>
+          </View>
         }
         onPress={() => router.push(`/event/${event.id}` as never)}
         accessibilityLabel={`${event.title}, ${display.primary}${display.secondary ? `, ${display.secondary}` : ''}${ended ? ', ended' : ''}`}
@@ -145,6 +173,20 @@ export default function SavedEvents() {
   // Only the pull gesture drives the RefreshControl; background refetches
   // (focus, invalidation, foreground) must not animate the list.
   const [pulling, setPulling] = useState(false);
+  // Phase C: file a saved event into a collection from its row.
+  const [collectionTarget, setCollectionTarget] = useState<{ id: string; title: string } | null>(null);
+  const collectionsAvailable = !isCollectionsUnavailable();
+  const { user } = useAuth();
+  const openCollections = useCallback((event: RankedEvent) => setCollectionTarget({ id: event.id, title: event.title }), []);
+  // One batched call per loaded page set: which collections hold each row.
+  const idsKey = useMemo(() => events.map((e) => e.id).join(','), [events]);
+  const membershipQuery = useQuery({
+    queryKey: queryKeys.eventsCollections(user?.id, idsKey),
+    enabled: collectionsAvailable && !!user && events.length > 0,
+    queryFn: () => collectionsService.membershipMany(events.map((e) => e.id)),
+    staleTime: 30_000,
+  });
+  const collectionCounts = membershipQuery.data;
 
   const retryLoad = useCallback(() => {
     void query.refetch();
@@ -224,9 +266,15 @@ export default function SavedEvents() {
 
   const renderItem = useCallback(
     ({ item }: { item: RankedEvent }) => (
-      <SavedEventRow event={item} onUnsave={handleUnsave} nextIso={nextById.get(item.id)} />
+      <SavedEventRow
+        event={item}
+        onUnsave={handleUnsave}
+        onAddToCollection={collectionsAvailable ? openCollections : undefined}
+        nextIso={nextById.get(item.id)}
+        collectionCount={collectionCounts?.get(item.id)?.length ?? 0}
+      />
     ),
-    [handleUnsave, nextById]
+    [handleUnsave, nextById, collectionsAvailable, openCollections, collectionCounts]
   );
 
   const renderSectionHeader = useCallback(
@@ -268,7 +316,16 @@ export default function SavedEvents() {
             </Text>
           </View>
         </View>
-        <View style={styles.headerSpacer} />
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.push('/collections' as never)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Open collections"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <FolderHeart size={20} color={Colors.text.primary} />
+        </TouchableOpacity>
       </View>
 
       {loading ? (
@@ -366,6 +423,7 @@ export default function SavedEvents() {
           }
         />
       )}
+      <AddToCollectionSheet event={collectionTarget} onClose={() => setCollectionTarget(null)} />
     </View>
   );
 }
@@ -441,9 +499,6 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
     marginTop: 1,
-  },
-  headerSpacer: {
-    width: 40,
   },
 
   /* ── Loading skeleton (mirrors EventListItem) ── */
@@ -530,6 +585,15 @@ const styles = StyleSheet.create({
 
   cardSpacing: {
     marginBottom: 12,
+  },
+  rowActions: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
+  collectionBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: Colors.neutralSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   bookmarkBadge: {
     width: 32,

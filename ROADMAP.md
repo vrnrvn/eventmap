@@ -27,7 +27,8 @@ work; their current status and remaining effort need review.
   green as host screens change (labels, 44 px targets, 320 px layout,
   host-type wording), and extend it to large widths, font scaling and native.
 - **Event collections:** Let users organize saved events into named lists, such
-  as plans for a weekend or venues to explore.
+  as plans for a weekend or venues to explore. Planned in
+  `docs/EVENT_COLLECTIONS_PLAN.md`; Phase A (data layer) done 2026-11-12.
 
 These ideas have not yet been scoped or estimated. Hosted deployment, production
 payments, device push, and store releases remain separate decisions.
