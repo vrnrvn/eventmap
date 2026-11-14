@@ -5,6 +5,8 @@ import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/
 import { Button } from '@/components/ui/Button';
 import { DiscoverEventCard } from '@/components/DiscoverEventCard';
 import { describeEventTime } from '@/utils/timezone';
+import { EventPlaybookCard } from '@/components/EventPlaybookCard';
+import type { EventPlaybook, PlaybookItemId, PlaybookTarget } from '@/utils/eventPlaybook';
 import type { RankedEvent } from '@/types/database';
 
 /**
@@ -18,7 +20,9 @@ import type { RankedEvent } from '@/types/database';
 export function EventPreviewSheet({
   visible,
   event,
-  gaps,
+  playbook = null,
+  onPlaybookTick,
+  onPlaybookAction,
   publishing,
   savingDraft,
   onClose,
@@ -28,8 +32,15 @@ export function EventPreviewSheet({
   visible: boolean;
   /** Null while the form has nothing worth previewing. */
   event: RankedEvent | null;
-  /** Things the host has not filled in yet; hints, not validation. */
-  gaps: readonly string[];
+  /**
+   * "Before you publish" checklist built from the live form
+   * (docs/HOST_EVENT_PLAYBOOK_PLAN.md P3). It replaced the older "Still
+   * missing: …" line, which said less about the same fields.
+   */
+  playbook?: EventPlaybook | null;
+  onPlaybookTick?: (item: PlaybookItemId, done: boolean) => void;
+  /** Tapping an item: the sheet closes and the screen goes to that section. */
+  onPlaybookAction?: (target: PlaybookTarget) => void;
   publishing: boolean;
   savingDraft: boolean;
   onClose: () => void;
@@ -67,7 +78,25 @@ export function EventPreviewSheet({
             <X size={20} color={Colors.text.secondary} />
           </Pressable>
         </View>
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        {/* The indicator stays on: this sheet always has more below the
+            fold on a phone, and hiding it left no hint that it scrolls. */}
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.body}>
+          {playbook && playbook.total > 0 ? (
+            playbook.complete ? (
+              <Text style={styles.ready}>Everything on the checklist is filled in. Ready to publish.</Text>
+            ) : (
+              <EventPlaybookCard
+                playbook={playbook}
+                // One line above the preview card, opening on tap. Expanded
+                // it pushed the card off the screen; collapsed it still cost
+                // 123 px, which is most of a 320 px phone's scroll area.
+                visibility="collapsed"
+                compact
+                onAction={onPlaybookAction ? (target) => onPlaybookAction(target) : undefined}
+                onTick={onPlaybookTick ?? (() => {})}
+              />
+            )
+          ) : null}
           <Text style={styles.caption}>How your event appears on Discover</Text>
           <View style={styles.cardWrap} pointerEvents="none" accessibilityElementsHidden={false}>
             <DiscoverEventCard
@@ -100,25 +129,27 @@ export function EventPreviewSheet({
             ) : null}
           </View>
 
-          {gaps.length > 0 ? (
-            <Text style={styles.gaps}>
-              Still missing: {gaps.join(', ')}. You can publish without them, but the event is easier to find with
-              them.
-            </Text>
-          ) : null}
         </ScrollView>
 
         <View style={styles.actions}>
           <Button label="Publish" onPress={onPublish} loading={publishing} size="lg" fullWidth gradient />
-          <Button
-            label="Save as Draft"
-            onPress={onSaveDraft}
-            loading={savingDraft}
-            variant="secondary"
-            size="lg"
-            fullWidth
-          />
-          <Button label="Keep Editing" onPress={onClose} variant="ghost" size="md" fullWidth />
+          {/* Side by side rather than stacked: three full-width buttons ate
+              170 px of a 425 px screen, leaving nothing for the preview. */}
+          <View style={styles.secondaryRow}>
+            <View style={styles.secondaryHalf}>
+              <Button
+                label="Save as Draft"
+                onPress={onSaveDraft}
+                loading={savingDraft}
+                variant="secondary"
+                size="md"
+                fullWidth
+              />
+            </View>
+            <View style={styles.secondaryHalf}>
+              <Button label="Keep Editing" onPress={onClose} variant="ghost" size="md" fullWidth />
+            </View>
+          </View>
         </View>
       </View>
     </Modal>
@@ -156,6 +187,8 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
   },
   body: { paddingBottom: 12, gap: 12 },
+  secondaryRow: { flexDirection: 'row', gap: 10 },
+  secondaryHalf: { flex: 1 },
   caption: { fontSize: Typography.sizes.sm, fontFamily: Typography.fontFamily, color: Colors.text.tertiary },
   cardWrap: { alignItems: 'center' },
   detailCard: { backgroundColor: Colors.surface, borderRadius: BorderRadius.lg, padding: 14 },
@@ -174,6 +207,11 @@ const styles = StyleSheet.create({
   },
   detailHint: { fontSize: Typography.sizes.sm, fontFamily: Typography.fontFamily, color: Colors.text.secondary },
   spaced: { marginTop: 10 },
-  gaps: { fontSize: Typography.sizes.sm, fontFamily: Typography.fontFamily, color: Colors.text.secondary, lineHeight: 19 },
+  ready: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamily,
+    color: Colors.successText,
+    lineHeight: 19,
+  },
   actions: { gap: 8, paddingTop: 8, flexShrink: 0 },
 });

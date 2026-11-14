@@ -20,7 +20,16 @@ export type NotificationType =
   | 'waitlist'
   | 'moderation'
   | 'report_update'
-  | 'host_announcement';
+  | 'host_announcement'
+  /**
+   * Notices addressed to the host (20261110160000 + 20261113110000, both
+   * opt-in and off by default). Listed here so they render with their own
+   * icon and routing rather than the unknown-type fallback.
+   */
+  | 'host_day_of'
+  | 'host_post_event_summary'
+  | 'host_verification_update'
+  | 'host_standing_update';
 
 export interface Notification {
   id: string;

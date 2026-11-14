@@ -18,6 +18,7 @@ import { getEventWebUrl } from '@/utils/eventIcs';
 import { businessesService } from '@/services/businesses';
 import { notify } from '@/utils/notify';
 import { markChecklistSignal } from '@/utils/hostChecklistStore';
+import { markPlaybookSignal } from '@/utils/eventPlaybookStore';
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -74,7 +75,10 @@ export function EventPublishedSheet({
         url: getEventWebUrl(event.id),
         copyToClipboard: (text) => Clipboard.setStringAsync(text).then(() => {}),
       });
-      if (outcome !== 'dismissed') markChecklistSignal(businessId, 'sharedEvent');
+      if (outcome !== 'dismissed') {
+        markChecklistSignal(businessId, 'sharedEvent');
+        markPlaybookSignal(event.id, 'shared');
+      }
       if (outcome === 'copied') notify.success('Link copied to the clipboard.');
     } catch {
       notify.error('Could not share the link.');
@@ -187,7 +191,9 @@ export function EventPublishedSheet({
           <Action
             icon={<SettingsIcon size={18} color={Colors.primary} />}
             title="Open Manage event"
-            description="Attendees, capacity, announcements and chat."
+            // The hand-off into the lead-up checklist (playbook P7): the
+            // host has just published, and the next things to do live there.
+            description="Your lead-up checklist, attendees, capacity and chat."
             onPress={onOpenManage}
           />
 

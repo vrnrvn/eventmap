@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { blockedOffline } from '@/utils/requireOnline';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '@/contexts/AuthContext';
@@ -37,6 +37,10 @@ import { HostTipCard } from '@/components/HostTipCard';
 import { useHostTip } from '@/hooks/useHostTip';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { ImagePickerButton, type ImageAsset } from '@/components/ImagePickerButton';
+import { EventPlaybookCard } from '@/components/EventPlaybookCard';
+import { useEventPlaybook } from '@/hooks/useEventPlaybook';
+import { omitPlaybookItems } from '@/utils/eventPlaybook';
+import { parseCapacity, previewCoverImage } from '@/utils/eventFormPreview';
 import { WebDateTimeInput } from '@/components/WebDateTimeInput';
 import {
   RecurrencePicker,
@@ -104,6 +108,19 @@ type EventFormData = {
 /** Zone used to convert picker dates to instants (device zone for legacy events). */
 const effectiveZone = (f: Pick<EventFormData, 'timezone'>) => f.timezone ?? getDeviceTimeZone();
 
+/** Error key → the anchor to scroll to (same idea as Create's FIELD_SECTION). */
+const EDIT_FIELD_SECTION: Record<string, string> = {
+  title: 'basic',
+  description: 'basic',
+  categoryId: 'category',
+  startDatetime: 'datetime',
+  endDatetime: 'datetime',
+  recurrenceEnd: 'datetime',
+  maxAttendees: 'capacity',
+  extras: 'extras',
+  links: 'links',
+};
+
 /** Serialize the form fields that count as "changes" for the unsaved guard. */
 const snapshotOf = (f: EventFormData) =>
   JSON.stringify({
@@ -164,6 +181,28 @@ export default function EditEvent() {
   const [showExtras, setShowExtras] = useState(false);
   const [tzPickerOpen, setTzPickerOpen] = useState(false);
   const recurrencePickerRef = useRef<RecurrencePickerHandle>(null);
+  const scrollViewRef = useRef<ScrollView>(null);
+  /**
+   * Y offset of each field group, captured on layout, so a refused Save can
+   * scroll to the field that actually failed instead of leaving the host
+   * looking at an unchanged screen (the summary is announced for screen
+   * readers, but sighted users got nothing). Mirrors the Create form.
+   */
+  const sectionY = useRef<Record<string, number>>({});
+  const captureSection = useCallback(
+    (key: string) => (e: { nativeEvent: { layout: { y: number } } }) => {
+      sectionY.current[key] = e.nativeEvent.layout.y;
+    },
+    []
+  );
+  const scrollToFirstError = useCallback((keys: string[]) => {
+    const target = keys
+      .map((key) => sectionY.current[EDIT_FIELD_SECTION[key] ?? ''])
+      .filter((y): y is number => typeof y === 'number')
+      .sort((a, b) => a - b)[0];
+    if (target == null) return;
+    scrollViewRef.current?.scrollTo({ y: Math.max(0, target - 12), animated: true });
+  }, []);
   /** Track the original photos loaded from DB to detect removals */
   const originalPhotoIds = useRef<string[]>([]);
   /** Saved sort_order per existing photo, so only moved ones are rewritten. */
@@ -194,6 +233,48 @@ export default function EditEvent() {
     originalEvent.current?.publish_state !== 'draft'
   );
   const isPremiumBusiness = userBusiness?.subscription_tier === 'premium';
+
+  /**
+   * "Before you publish" checklist for a draft being edited
+   * (docs/HOST_EVENT_PLAYBOOK_PLAN.md P3), live from the form. Published
+   * events get nothing here: their checklist is the lead-up list in the
+   * Manage hub, and repeating it inside the edit form would be noise.
+   *
+   * Informational: no `onAction`, because this screen *is* the tool every
+   * item points at, and it has no section anchors to scroll to.
+   */
+  const draftPlaybookEvent = useMemo(() => {
+    const original = originalEvent.current;
+    if (!original || original.publish_state !== 'draft') return null;
+    const tz = effectiveZone(formData);
+    return {
+      ...original,
+      title: formData.title,
+      description: formData.description,
+      category_id: formData.categoryId,
+      cover_image_url: previewCoverImage(formData.images),
+      address: formData.address,
+      lat: formData.lat,
+      lng: formData.lng,
+      timezone: formData.timezone,
+      max_attendees: parseCapacity(formData.maxAttendees),
+      ticket_url: formData.extras.ticketUrl.trim() || null,
+      start_datetime: pickerDateToInstant(formData.startDatetime, tz).toISOString(),
+      end_datetime: pickerDateToInstant(formData.endDatetime, tz).toISOString(),
+      publish_state: 'draft' as const,
+    };
+  }, [formData]);
+  const draftPlaybook = useEventPlaybook({
+    eventId: id ?? null,
+    event: draftPlaybookEvent,
+    facts: useMemo(
+      () => ({ eventLinks: formData.links.filter((l) => l.url.trim()).length, photos: formData.images.length }),
+      [formData.links, formData.images.length]
+    ),
+    enabled: !!draftPlaybookEvent && !!userBusiness,
+  });
+  // Publish lives in the Manage hub, not in this form.
+  const draftChecklist = draftPlaybook.playbook ? omitPlaybookItems(draftPlaybook.playbook, ['publish']) : null;
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -462,9 +543,14 @@ export default function EditEvent() {
       setShowExtras(true);
     }
     setErrors(e);
-    // Screen readers otherwise hear nothing when Save is refused.
-    if (Object.keys(e).length > 0) announce(validationSummary(e));
-    return Object.keys(e).length === 0;
+    const problems = Object.keys(e);
+    if (problems.length > 0) {
+      // Screen readers otherwise hear nothing when Save is refused.
+      announce(validationSummary(e));
+      // ...and sighted users otherwise see nothing move on a long form.
+      scrollToFirstError(problems);
+    }
+    return problems.length === 0;
   };
 
   /**
@@ -774,12 +860,14 @@ export default function EditEvent() {
       />
 
       <ScrollView
+        ref={scrollViewRef}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
         <HostTipCard tip={hostTipId} onDismiss={dismissHostTip} style={styles.hostTip} />
 
+        <View onLayout={captureSection('basic')} />
         <Input
           label="Title"
           value={formData.title}
@@ -806,6 +894,7 @@ export default function EditEvent() {
           }
         />
 
+        <View onLayout={captureSection('category')} />
         <Text style={styles.label}>Category</Text>
         <View style={styles.categoriesGridWrap}>
           <CategorySelectGrid
@@ -820,6 +909,7 @@ export default function EditEvent() {
           <Text style={styles.errorText}>{errors.categoryId}</Text>
         )}
 
+        <View onLayout={captureSection('datetime')} />
         <Text style={styles.label}>Time zone</Text>
         <TouchableOpacity
           style={styles.dateButton}
@@ -1010,6 +1100,7 @@ export default function EditEvent() {
           <Text style={styles.errorText}>{errors.recurrenceEnd}</Text>
         )}
 
+        <View onLayout={captureSection('capacity')} />
         <Input
           label="Max attendees (optional)"
           value={formData.maxAttendees}
@@ -1038,6 +1129,7 @@ export default function EditEvent() {
             style={showExtras ? { transform: [{ rotate: '90deg' }] } : undefined}
           />
         </TouchableOpacity>
+        <View onLayout={captureSection('extras')} />
         {showExtras ? (
           <EventExtrasFields
             value={formData.extras}
@@ -1050,6 +1142,7 @@ export default function EditEvent() {
         ) : null}
         {errors.extras ? <Text style={styles.errorText}>{errors.extras}</Text> : null}
 
+        <View onLayout={captureSection('links')} />
         <Text style={styles.label}>Links</Text>
         <EventLinksEditor
           links={formData.links}
@@ -1136,6 +1229,15 @@ export default function EditEvent() {
             }))
           }
         />
+        {draftChecklist && draftPlaybook.visibility !== 'hidden' ? (
+          <EventPlaybookCard
+            playbook={draftChecklist}
+            visibility={draftPlaybook.visibility}
+            onTick={draftPlaybook.tick}
+            onDismiss={draftPlaybook.dismiss}
+            style={styles.draftChecklist}
+          />
+        ) : null}
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, Spacing.md) }]}>
@@ -1154,6 +1256,7 @@ export default function EditEvent() {
 
 const styles = StyleSheet.create({
   hostTip: { marginBottom: 16 },
+  draftChecklist: { marginTop: 24 },
   seriesScopeLink: {
     color: Colors.primary,
     fontFamily: Typography.fontFamilies.semibold,

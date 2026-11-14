@@ -15,6 +15,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import {
   Mail,
+  BadgeCheck,
+  BarChart3,
   Clock3,
   RefreshCcw,
   BellOff,
@@ -50,6 +52,7 @@ import { FreshnessNote, OfflineState } from '@/components/ui/QueryStates';
 import { useAuth } from '@/contexts/AuthContext';
 import { notify } from '@/utils/notify';
 import { formatRelativeLabel } from '@/utils/relativeTime';
+import { notificationRoute } from '@/utils/notificationRoute';
 import { ErrorState } from '@/components/ui/ErrorState';
 
 type Notification = ApiNotification;
@@ -99,7 +102,14 @@ const getIconMeta = (type: NotificationType) => {
       return { Icon: ListOrdered, bg: alpha(Colors.secondary, 0.12), color: Palette.secondary };
     case 'moderation':
     case 'report_update':
+    case 'host_standing_update':
       return { Icon: ShieldAlert, bg: Palette.readIconBg, color: Palette.subtle };
+    case 'host_day_of':
+      return { Icon: Clock3, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
+    case 'host_post_event_summary':
+      return { Icon: BarChart3, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
+    case 'host_verification_update':
+      return { Icon: BadgeCheck, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
     default:
       return { Icon: Mail, bg: alpha(Colors.primary, 0.08), color: Palette.primary };
   }
@@ -428,21 +438,16 @@ export default function NotificationsScreen() {
   const handlePress = useCallback(
     (notification: Notification) => {
       if (!notification.read) markAsRead(notification.id);
-      if (notification.eventId) {
-        const isChat = notification.type === 'chat_message' || notification.type === 'chat_mention';
-        const path = isChat
-          ? notification.messageId
-            ? `/event-chat/${notification.eventId}?messageId=${notification.messageId}`
-            : `/event-chat/${notification.eventId}`
-          : `/event/${notification.eventId}`;
-        router.push(path as never);
-        return;
-      }
-      if (notification.businessId) {
-        router.push(`/business/${notification.businessId}` as never);
-        return;
-      }
-      router.push('/(tabs)/discover' as never);
+      // Host notices carry an eventId too, but belong in the hub, not on
+      // the attendee page (utils/notificationRoute).
+      router.push(
+        notificationRoute({
+          type: notification.type,
+          eventId: notification.eventId,
+          businessId: notification.businessId,
+          messageId: notification.messageId,
+        }) as never
+      );
     },
     [markAsRead]
   );

@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useFocusEffect } from 'expo-router';
 import {
   View,
   Text,
@@ -14,7 +13,7 @@ import {
 import Constants from 'expo-constants';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { HostProfileSection } from '@/components/HostProfileSection';
 import { hostCopy } from '@/utils/hostCopy';
@@ -53,6 +52,7 @@ import {
   Shield,
   RotateCcw,
   FileText,
+  BarChart3,
   Bell,
   ChevronRight,
   UserRoundX,
@@ -121,9 +121,6 @@ export default function SettingsScreen() {
 
   const isBizMode = hasBusiness && userMode === 'business';
   const accentColor = isBizMode ? Colors.secondary : Colors.primary;
-  const accentGradient: [string, string] = isBizMode
-    ? [Colors.secondary, Colors.secondaryLight]
-    : [Palette.gradientStart, Palette.gradientEnd];
   const accentSoft = isBizMode ? alpha(Colors.secondary, 0.12) : Palette.accentSoft;
 
   const [userForm, setUserForm] = useState({
@@ -160,7 +157,15 @@ export default function SettingsScreen() {
 
   const [businessNotificationForm, setBusinessNotificationForm] = useState({
     notificationsEnabled: true,
+    /** Opt-in host notices (20261113110000); never on until the host says so. */
+    dayOfNotice: false,
+    postEventNotice: false,
   });
+  /**
+   * The columns only exist once 20261113110000 is applied; the business row
+   * carries every column, so their absence says the migration is missing.
+   */
+  const hostNoticesAvailable = userBusiness ? userBusiness.host_day_of_notice !== undefined : false;
 
   const [businessForm, setBusinessForm] = useState({
     name: '',
@@ -284,6 +289,10 @@ export default function SettingsScreen() {
         });
         setBusinessNotificationForm({
           notificationsEnabled: userBusiness.notifications_enabled ?? true,
+          // Opt-in host notices (20261113110000): off unless the host said
+          // yes. `undefined` means the migration is not applied yet.
+          dayOfNotice: userBusiness.host_day_of_notice ?? false,
+          postEventNotice: userBusiness.host_post_event_notice ?? false,
         });
       };
       load();
@@ -333,7 +342,7 @@ export default function SettingsScreen() {
       });
       await refreshProfile();
       showSavedFeedback('user');
-    } catch (e) {
+    } catch {
       notify.error('Failed to save profile. Please try again.');
     } finally {
       setSaving(null);
@@ -410,7 +419,7 @@ export default function SettingsScreen() {
 
       await refreshBusiness();
       showSavedFeedback('business');
-    } catch (e) {
+    } catch {
       notify.error('Failed to save business. Please try again.');
     } finally {
       setSaving(null);
@@ -445,7 +454,7 @@ export default function SettingsScreen() {
         event_reminder_minutes: reminderMinutes,
       });
       await refreshProfile();
-    } catch (e) {
+    } catch {
       setNotificationForm(notificationForm);
       notify.error('Failed to update notification settings. Please try again.');
     }
@@ -454,15 +463,38 @@ export default function SettingsScreen() {
   const handleBusinessNotificationToggle = async (value: boolean) => {
     if (!userBusiness) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const prev = businessNotificationForm.notificationsEnabled;
-    setBusinessNotificationForm({ notificationsEnabled: value });
+    const prev = businessNotificationForm;
+    setBusinessNotificationForm({ ...prev, notificationsEnabled: value });
     try {
       await businessesService.updateBusiness(userBusiness.id, {
         notifications_enabled: value,
       });
       await refreshBusiness();
-    } catch (e) {
-      setBusinessNotificationForm({ notificationsEnabled: prev });
+    } catch {
+      setBusinessNotificationForm(prev);
+      notify.error('Failed to update notification settings. Please try again.');
+    }
+  };
+
+  /**
+   * Opt-in host notices (docs/HOST_EVENT_PLAYBOOK_PLAN.md P6). Both are off
+   * until the host turns them on here; nothing is ever sent by default.
+   */
+  const handleHostNoticeToggle = async (
+    field: 'dayOfNotice' | 'postEventNotice',
+    value: boolean
+  ) => {
+    if (!userBusiness) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const prev = businessNotificationForm;
+    setBusinessNotificationForm({ ...prev, [field]: value });
+    try {
+      await businessesService.updateBusiness(userBusiness.id, {
+        [field === 'dayOfNotice' ? 'host_day_of_notice' : 'host_post_event_notice']: value,
+      });
+      await refreshBusiness();
+    } catch {
+      setBusinessNotificationForm(prev);
       notify.error('Failed to update notification settings. Please try again.');
     }
   };
@@ -485,7 +517,7 @@ export default function SettingsScreen() {
       if (field === 'showProfileToOthers' && !value) {
         notify.success("Profile is now private. Others won't see you or find you in search.");
       }
-    } catch (e) {
+    } catch {
       setPrivacyForm(privacyForm);
       notify.error('Failed to update privacy settings. Please try again.');
     }
@@ -1037,6 +1069,56 @@ export default function SettingsScreen() {
                     }
                   />
                 </View>
+                {/* Only once 20261113110000 is applied: without the columns
+                    the switches would have nothing to write to. */}
+                {hostNoticesAvailable ? (
+                  <>
+                    <View style={styles.privacyRow}>
+                      <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                        <Clock size={16} color={accentColor} />
+                      </View>
+                      <View style={styles.privacyContent}>
+                        <Text style={styles.privacyTitle}>Remind me on the day</Text>
+                        <Text style={styles.privacyDesc}>
+                          A few hours before each event starts
+                        </Text>
+                      </View>
+                      <Switch
+                        value={businessNotificationForm.dayOfNotice}
+                        onValueChange={(v) => handleHostNoticeToggle('dayOfNotice', v)}
+                        disabled={!businessNotificationForm.notificationsEnabled}
+                        accessibilityLabel="Remind me on the day"
+                        accessibilityHint="A few hours before each event starts"
+                        trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
+                        thumbColor={
+                          businessNotificationForm.dayOfNotice ? Colors.primary : Colors.background.secondary
+                        }
+                      />
+                    </View>
+                    <View style={styles.privacyRow}>
+                      <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
+                        <BarChart3 size={16} color={accentColor} />
+                      </View>
+                      <View style={styles.privacyContent}>
+                        <Text style={styles.privacyTitle}>Summary after the event</Text>
+                        <Text style={styles.privacyDesc}>
+                          How it went, and what to do next
+                        </Text>
+                      </View>
+                      <Switch
+                        value={businessNotificationForm.postEventNotice}
+                        onValueChange={(v) => handleHostNoticeToggle('postEventNotice', v)}
+                        disabled={!businessNotificationForm.notificationsEnabled}
+                        accessibilityLabel="Summary after the event"
+                        accessibilityHint="How it went, and what to do next"
+                        trackColor={{ false: Colors.border.medium, true: alpha(Colors.primary, 0.5) }}
+                        thumbColor={
+                          businessNotificationForm.postEventNotice ? Colors.primary : Colors.background.secondary
+                        }
+                      />
+                    </View>
+                  </>
+                ) : null}
               </View>
 
               {/* Manage subscription – only for premium business users */}

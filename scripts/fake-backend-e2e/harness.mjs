@@ -74,7 +74,10 @@ export async function startHarness({ repo, dist, backendOrigin, route, seed, vie
     async shot(file) { const s = await send('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(file, Buffer.from(s.data, 'base64')); },
     async click(text, exact = false) {
       return api.eval(`(() => { const want = ${JSON.stringify(text)};
-        const els = [...document.querySelectorAll('[role=button],[role=tab],[role=link],a,button,[tabindex]')];
+        // checkbox/switch included: RN-web renders those roles for toggles
+        // (the playbook's manual ticks, Settings switches), which were
+        // previously unreachable from a suite.
+        const els = [...document.querySelectorAll('[role=button],[role=tab],[role=link],[role=checkbox],[role=switch],a,button,[tabindex]')];
         const el = els.find((e) => { const t = (e.getAttribute('aria-label') || e.innerText || '').trim(); return ${exact} ? t === want : t.includes(want); });
         if (!el) return 'NOT FOUND'; el.scrollIntoView({block:'center'}); el.click(); return 'ok'; })()`);
     },

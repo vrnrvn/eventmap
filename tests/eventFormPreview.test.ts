@@ -4,7 +4,6 @@ import {
   formToPreviewEvent,
   parseCapacity,
   previewCoverImage,
-  previewGaps,
   type PreviewFormInput,
 } from '@/utils/eventFormPreview';
 import { EMPTY_EXTRAS } from '@/utils/eventExtras';
@@ -125,15 +124,8 @@ describe('formToPreviewEvent', () => {
   });
 });
 
-describe('previewGaps', () => {
-  it('lists what is still missing', () => {
-    expect(previewGaps(form({ images: [{ uri: 'file://a' }] }))).toEqual([]);
-    expect(previewGaps(form({ title: ' ', images: [] }))).toEqual(['a title', 'a cover photo']);
-    expect(previewGaps(form({ categoryId: '', description: '', address: '  ' }))).toEqual([
-      'a category',
-      'a description',
-      'a place',
-      'a cover photo',
-    ]);
+describe('an unsaved preview is a draft', () => {
+  it('never claims to be published, so the pre-publish checklist sees the truth', () => {
+    expect(formToPreviewEvent(form(), ctx).publish_state).toBe('draft');
   });
 });

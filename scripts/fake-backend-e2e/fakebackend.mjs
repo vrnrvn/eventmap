@@ -1,4 +1,5 @@
 // In-memory fake of the Supabase REST/RPC surface the app uses. Deterministic.
+
 export const UID = '11111111-1111-4111-8111-111111111111';
 export const BIZ = '22222222-2222-4222-8222-222222222222';
 const iso = (offsetH) => new Date(Date.now() + offsetH * 3600e3).toISOString();
@@ -11,6 +12,9 @@ export function makeData({ notifications = 140, events = 60, business = false, l
     id: BIZ, owner_id: business ? UID : uuid(99, 'f'), name: 'Café Ünïcode 🎉 Bar', description: 'A test business',
     category: 'food', address: '1 Market St, San Francisco', lat: 37.7749, lng: -122.4194, logo_url: null, contact_email: null,
     google_reviews_url: null, social_handles: null, verified: true, subscription_tier: 'premium',
+    // Opt-in host notices (20261113110000): present and off, so Settings
+    // shows the switches in their default state.
+    notifications_enabled: true, host_day_of_notice: false, host_post_event_notice: false,
     subscription_expires_at: iso(24 * 20), events_created_this_month: 3, last_reset_date: new Date().toISOString().slice(0, 10),
     created_at: iso(-9000),
   };
@@ -74,6 +78,13 @@ const qp = (q) => Object.fromEntries(new URLSearchParams(q));
 const eqv = (s) => (s && s.startsWith('eq.') ? s.slice(3) : undefined);
 /** PostgREST `in.(a,b)` → [a, b]; undefined when absent. */
 const inList = (s) => (s && s.startsWith('in.(') ? s.slice(4, -1).split(',').filter(Boolean) : undefined);
+
+/** One host-checklist row, created on first write (the RPCs upsert). */
+function playbookRow(data, eventId) {
+  if (!data.playbook) data.playbook = new Map();
+  if (!data.playbook.has(eventId)) data.playbook.set(eventId, { ticked: [], dismissed_stages: [] });
+  return data.playbook.get(eventId);
+}
 
 /** Members of one fake collection in the get_collection_events row shape (pinned ∪ smart rule). */
 function collectionRows(data, c) {
@@ -195,6 +206,35 @@ export function makeRouter(data, { unknown = [], overrides = {} } = {}) {
       // moved date on the first series, and one opt-out by the viewer.
       case 'event_occurrence_exceptions': { const ids = inList(q.event_id); return { json: data.exceptions.filter((x) => !ids || ids.includes(x.event_id)) }; }
       case 'rsvp_occurrences': { const id = eqv(q.event_id); return { json: data.dateRsvps.filter((x) => !id || x.event_id === id) }; }
+      // ── host event checklist (docs/HOST_EVENT_PLAYBOOK_PLAN.md P5) ──
+      // Mirrors migration 20261113100000: server-side merge, host-only, and
+      // the same validation, so the client's fallback path is exercised for
+      // real. `data.playbookUnavailable` makes the table look unapplied.
+      case 'event_host_playbook': {
+        if (data.playbookUnavailable) return { status: 404, json: { code: 'PGRST205', message: 'not found' } };
+        const ids = inList(q.event_id);
+        const rows = [...(data.playbook ?? new Map()).entries()]
+          .filter(([id]) => !ids || ids.includes(id))
+          .map(([event_id, v]) => ({ event_id, ticked: v.ticked, dismissed_stages: v.dismissed_stages }));
+        return { json: rows };
+      }
+      case 'rpc/set_event_playbook_item': {
+        if (data.playbookUnavailable) return { status: 404, json: { code: 'PGRST202', message: 'not found' } };
+        const b = body(r);
+        if (!b.p_item || !/^[a-z][a-z0-9_]{0,39}$/.test(b.p_item)) return { status: 400, json: { code: 'P0001', message: 'invalid_item' } };
+        const row = playbookRow(data, b.p_event_id);
+        if (b.p_done) { if (!row.ticked.includes(b.p_item)) row.ticked.push(b.p_item); }
+        else row.ticked = row.ticked.filter((t) => t !== b.p_item);
+        return { json: { event_id: b.p_event_id, ...row } };
+      }
+      case 'rpc/dismiss_event_playbook_stage': {
+        if (data.playbookUnavailable) return { status: 404, json: { code: 'PGRST202', message: 'not found' } };
+        const b = body(r);
+        if (!['before', 'leadup', 'dayof', 'after'].includes(b.p_stage)) return { status: 400, json: { code: 'P0001', message: 'invalid_stage' } };
+        const row = playbookRow(data, b.p_event_id);
+        if (!row.dismissed_stages.includes(b.p_stage)) row.dismissed_stages.push(b.p_stage);
+        return { json: { event_id: b.p_event_id, ...row } };
+      }
       // ── collections (docs/EVENT_COLLECTIONS_PLAN.md) ──
       case 'rpc/get_user_collections': return { json: [...data.collections].sort((a, z) => a.sort_order - z.sort_order || a.created_at.localeCompare(z.created_at)).map((c) => {
         const rows = collectionRows(data, c);

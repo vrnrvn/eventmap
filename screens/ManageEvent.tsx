@@ -38,6 +38,7 @@ import {
   RotateCcw,
   Search,
   Send,
+  Share2,
   ShieldAlert,
   Ticket,
   Timer,
@@ -67,6 +68,18 @@ import { carryOverToDuplicate } from '@/services/eventPresetSettings';
 import { markChecklistSignal } from '@/utils/hostChecklistStore';
 import { HostTipCard } from '@/components/HostTipCard';
 import { useHostTip } from '@/hooks/useHostTip';
+import { EventPlaybookCard } from '@/components/EventPlaybookCard';
+import { useEventPlaybook } from '@/hooks/useEventPlaybook';
+import {
+  announcementItemForStage,
+  playbookFactsFromHub,
+  playbookStage,
+  type PlaybookTarget,
+} from '@/utils/eventPlaybook';
+import { markPlaybookSignal } from '@/utils/eventPlaybookStore';
+import { shareEventLink } from '@/utils/eventShare';
+import { getEventWebUrl } from '@/utils/eventIcs';
+import * as Clipboard from 'expo-clipboard';
 import type { WaitlistMode } from '@/types/database';
 import { queryKeys } from '@/hooks/queryKeys';
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
@@ -294,7 +307,9 @@ const attendeeKey = (item: HostAttendee) => item.user_id;
  * My Events, Event Detail and the chat screen (docs/HOST_TOOLS_PLAN.md §4A).
  */
 export default function ManageEvent() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // `checklist=1` comes from the My Events progress pill: open the hub with
+  // the checklist already expanded.
+  const { id, checklist: checklistParam } = useLocalSearchParams<{ id: string; checklist?: string }>();
   const { userBusiness } = useApp();
   const { profile } = useAuth();
   const queryClient = useQueryClient();
@@ -352,6 +367,7 @@ export default function ManageEvent() {
   });
   const chatStatus = chatStatusQuery.data ?? null;
 
+
   // Depend on the stable `refetch` functions, not the query result objects:
   // `useQuery` returns a new object every render, which would give this
   // callback a new identity each render (and previously re-triggered the
@@ -394,6 +410,41 @@ export default function ManageEvent() {
 
   const going = overview?.going ?? details?.rsvp_count ?? 0;
   const capacity = summarizeCapacity(going, event?.max_attendees);
+
+  /**
+   * Per-event checklist (docs/HOST_EVENT_PLAYBOOK_PLAN.md P2). Owner only,
+   * like the tips. Facts come from what this screen already loads; anything
+   * not loaded yet stays unknown and its item is hidden, never shown undone.
+   */
+  const playbookFacts = useMemo(
+    () =>
+      event
+        ? playbookFactsFromHub({
+            event,
+            requested: overview?.requested ?? null,
+            openReports: overview?.chat?.open_reports ?? null,
+            announcementsToday: overview?.announcements_today ?? null,
+            links: details?.links?.length ?? null,
+            photos: details?.photos?.length ?? null,
+            pinnedMessageId: chatStatus ? (chatStatus.pinned_message_id ?? null) : undefined,
+          })
+        : {},
+    [event, overview, details?.links?.length, details?.photos?.length, chatStatus]
+  );
+  // A series stages off its next occurrence, not its first date.
+  const playbookInput = useMemo(
+    () => (event ? { ...event, next_start_datetime: nextStart } : null),
+    [event, nextStart]
+  );
+  const eventPlaybook = useEventPlaybook({
+    eventId: id,
+    event: playbookInput,
+    facts: playbookFacts,
+    enabled: isOwner,
+  });
+  // Stable across renders (useCallback in the hook), so handlers can depend
+  // on it without being rebuilt every render.
+  const playbookTick = eventPlaybook.tick;
 
   // ── Attendees tab ─────────────────────────────────────────────────────────
   const [attendeeStatus, setAttendeeStatus] = useState<HostAttendeeStatus>('going');
@@ -687,6 +738,9 @@ export default function ManageEvent() {
       notify.success(next === null ? 'Capacity removed.' : `Capacity set to ${next}.`);
       await detailsQuery.refetch();
       void overviewQuery.refetch();
+      // Ticks "Set an attendee limit" on the getting-started checklist, which
+      // reads a server count and would otherwise lag behind.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.hostChecklist(userBusiness?.id) });
     } catch (err) {
       notify.error(
         isCapacityBelowAttendanceError(err)
@@ -696,7 +750,7 @@ export default function ManageEvent() {
     } finally {
       setSavingSettings(false);
     }
-  }, [id, event, capacityDraft, going, detailsQuery, overviewQuery]);
+  }, [id, event, capacityDraft, going, detailsQuery, overviewQuery, queryClient, userBusiness?.id]);
 
   const stepCapacity = (delta: number) => {
     const current = capacityDraft.trim() === '' ? Math.max(going, 0) : Number(capacityDraft);
@@ -732,6 +786,13 @@ export default function ManageEvent() {
     setSendingAnnouncement(true);
     try {
       const result = await hostToolsService.sendAnnouncement(id, body, announceAudience);
+      // The hub can only count announcements per day, not tell what they were
+      // for; sending one from here says exactly which item it satisfies.
+      const satisfied = event ? announcementItemForStage(playbookStage(event)) : null;
+      if (satisfied) playbookTick(satisfied, true);
+      // The getting-started checklist's "Post an announcement" step reads a
+      // server count; without this it stays unticked until it goes stale.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.hostChecklist(userBusiness?.id) });
       setAnnounceOpen(false);
       setAnnounceBody('');
       notify.success(
@@ -752,7 +813,18 @@ export default function ManageEvent() {
     } finally {
       setSendingAnnouncement(false);
     }
-  }, [id, announceBody, announceAudience, going, overview, overviewQuery]);
+  }, [
+    id,
+    announceBody,
+    announceAudience,
+    going,
+    overview,
+    overviewQuery,
+    event,
+    playbookTick,
+    queryClient,
+    userBusiness?.id,
+  ]);
 
   // ── Chat tab ──────────────────────────────────────────────────────────────
   const [moderationOpen, setModerationOpen] = useState(false);
@@ -824,6 +896,7 @@ export default function ManageEvent() {
     if (!ok) return;
     try {
       await businessesService.notifyFollowersAboutEvent(id);
+      markPlaybookSignal(id, 'notifiedFollowers');
       notify.success('Followers notified.');
     } catch {
       notify.error('Failed to notify followers');
@@ -889,6 +962,7 @@ export default function ManageEvent() {
     if (!ok) return;
     try {
       const newId = await hostToolsService.duplicateEvent(id);
+      markPlaybookSignal(id, 'duplicated');
       const carried = await carryOverToDuplicate(newId, {
         eventType: event.event_type ?? null,
         chatMode: chatStatus?.chat_mode ?? null,
@@ -917,6 +991,79 @@ export default function ManageEvent() {
     [id, detailsQuery]
   );
 
+  const handleShare = useCallback(async () => {
+    if (!id || !event) return;
+    try {
+      const outcome = await shareEventLink({
+        title: event.title,
+        url: getEventWebUrl(id),
+        copyToClipboard: (text) => Clipboard.setStringAsync(text).then(() => {}),
+      });
+      if (outcome !== 'dismissed') {
+        markPlaybookSignal(id, 'shared');
+        markChecklistSignal(userBusiness?.id, 'sharedEvent');
+      }
+      if (outcome === 'copied') notify.success('Link copied to the clipboard.');
+    } catch {
+      notify.error('Could not share the link.');
+    }
+  }, [id, event, userBusiness?.id]);
+
+  const openInsights = useCallback(() => {
+    if (!event) return;
+    markPlaybookSignal(event.id, 'openedInsights');
+    router.push(`/business/event-insights/${event.id}` as never);
+  }, [event]);
+
+  /** Where each checklist item goes; the model itself is route-free. */
+  const handlePlaybookAction = useCallback(
+    (target: PlaybookTarget) => {
+      if (!event) return;
+      switch (target) {
+        case 'edit_basics':
+        case 'edit_photo':
+        case 'edit_when':
+        case 'edit_where':
+        case 'edit_extras':
+          router.push(`/business/edit-event/${event.id}` as never);
+          return;
+        case 'publish':
+          void handlePublish();
+          return;
+        case 'share':
+          void handleShare();
+          return;
+        case 'notify_followers':
+          void handleNotifyFollowers();
+          return;
+        case 'attendees':
+          setTab('attendees');
+          return;
+        case 'settings':
+          setTab('settings');
+          return;
+        case 'announce':
+          setAnnounceOpen(true);
+          return;
+        case 'chat':
+          setTab('chat');
+          return;
+        case 'insights':
+          openInsights();
+          return;
+        case 'duplicate':
+          void handleDuplicate();
+          return;
+        case 'reviews':
+          if (userBusiness) router.push(`/business/${userBusiness.id}` as never);
+          return;
+        case 'none':
+          return;
+      }
+    },
+    [event, handlePublish, handleShare, handleNotifyFollowers, openInsights, handleDuplicate, userBusiness]
+  );
+
   // ── Render helpers ────────────────────────────────────────────────────────
   const renderOverview = () => {
     if (!event) return null;
@@ -933,6 +1080,15 @@ export default function ManageEvent() {
           tip={hostTipId}
           onDismiss={dismissHostTip}
           onAction={(target) => setTab(target === 'chat' ? 'chat' : target === 'settings' ? 'settings' : 'attendees')}
+          style={styles.hostTip}
+        />
+        <EventPlaybookCard
+          playbook={eventPlaybook.playbook}
+          visibility={eventPlaybook.visibility}
+          initialExpanded={checklistParam === '1' || undefined}
+          onAction={handlePlaybookAction}
+          onTick={eventPlaybook.tick}
+          onDismiss={eventPlaybook.dismiss}
           style={styles.hostTip}
         />
         {/* Hero */}
@@ -1054,11 +1210,19 @@ export default function ManageEvent() {
               onPress={handleNotifyFollowers}
             />
           ) : null}
+          {phase !== 'draft' && phase !== 'cancelled' ? (
+            <SettingsRow
+              icon={<Share2 size={16} color={Colors.primary} />}
+              title="Share"
+              description="Send the link to people you want there"
+              onPress={() => void handleShare()}
+            />
+          ) : null}
           <SettingsRow
             icon={<BarChart3 size={16} color={Colors.primary} />}
             title="Insights"
             description="Reach, saves and RSVPs"
-            onPress={() => router.push(`/business/event-insights/${event.id}` as never)}
+            onPress={openInsights}
           />
           <SettingsRow
             icon={<ExternalLink size={16} color={Colors.primary} />}

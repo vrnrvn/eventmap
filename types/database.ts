@@ -76,6 +76,12 @@ export type Business = {
   google_reviews_url: string | null;
   social_handles: BusinessSocialHandles | null;
   verified: boolean;
+  /**
+   * Opt-in host notices (20261113110000), both off by default. `undefined`
+   * means the migration is not applied, so the switches stay hidden.
+   */
+  host_day_of_notice?: boolean;
+  host_post_event_notice?: boolean;
   subscription_tier: SubscriptionTier;
   subscription_expires_at: string | null;
   events_created_this_month: number;

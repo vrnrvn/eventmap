@@ -195,11 +195,43 @@ picker and permission prompts (flow 1); notification taps from a push
   (badge clears on the next open); discarding a "waiting" chat message is
   local-only; edit drafts are keyed to `updated_at`; picked image paths can
   be purged by the OS before an offline publish retries.
+- [ ] **`axe-core` is not installed**, so the WCAG A/AA pass in
+  `suiteHostUi` (`AXE=<path>`) and `suiteA11y` cannot run. Everything else in
+  those suites runs: labels, 24 px floor, 44 px targets, headings, overflow,
+  clipped labels, runtime errors. `npm install --save-dev axe-core` was
+  refused by the agent environment's permission policy on 2026-11-13 — it
+  needs to be run by the owner. Until then, no automated colour-contrast or
+  ARIA-semantics coverage.
+- [ ] **The publish preview is inherently tall on a phone.** Reduced in
+  playbook P7+ (one-line checklist, two-up secondary actions, scroll
+  indicator restored — ~155 px reclaimed, measured), but card + details +
+  actions still exceed a 320 px-wide phone's 425 px viewport, so the detail
+  card stays below the fold. A real fix is a redesign (segmented view, or a
+  smaller preview card), not another reorder.
 - [ ] Discover/search cards have no bookmark (save is on the event page
   only). Common in event apps; small feature, not a bug.
 - [ ] Business mode profile: "Created" counts every event ever (no
   upcoming/past split), no rating card (the analytics screen already
   computes the venue average). Small features.
+- [x] **Edit event does not scroll to a failing field.** Fixed 2026-11-13 in
+  playbook P7: `sectionY` anchors, `EDIT_FIELD_SECTION` and
+  `scrollToFirstError` ported from Create, so a refused Save scrolls to the
+  first failing group instead of leaving the screen unchanged. The screen
+  reader announcement it already had is kept.
+- [x] **`formToPreviewEvent` hardcoded `publish_state: 'published'`.** Fixed
+  2026-11-13 in playbook P7 by removing the lie rather than documenting it:
+  nothing in the preview path reads the field (the doc comment's claim about
+  the Event Detail header was stale — that screen uses
+  `utils/eventPreview.ts`), so an unsaved event is now `'draft'`, which is
+  what it actually is. The override in `create.tsx` is gone with it.
+- [x] **`previewGaps` folded into the checklist.** Done 2026-11-13 (playbook
+  P7): the helper, its call site and its tests are deleted; the publish
+  preview shows the checklist only. The Create form is unreachable without a
+  host profile, so the fallback was dead. Original note: with a host profile loaded,
+  the publish preview shows the checklist instead; the gaps line renders only
+  when no profile is available. **Assigned to playbook P7**
+  (`docs/HOST_EVENT_PLAYBOOK_PLAN.md` §8): fold it into the checklist and
+  delete the helper if nothing else needs it.
 
 Moved elsewhere: reminder time zone → Deferred DB (needs a migration);
 Google-provider items → under the release blocker (same decision); WebView
@@ -208,6 +240,30 @@ Google-provider items → under the release blocker (same decision); WebView
 ---
 
 ## Database migrations
+
+### Prepared, NOT applied (2026-11-13)
+
+- [ ] `supabase/migrations/20261113100000_event_host_playbook.sql` —
+  per-event host checklist state (`event_host_playbook` + two merge RPCs;
+  playbook P5). **Not applied to the shared database**, which another
+  session owns. Validated on a throwaway native cluster
+  (`scripts/db-isolated.sh init`, 120 migrations + seed) with
+  `scripts/test-event-playbook.sql`: all checks pass, and the file is
+  idempotent on re-apply. The app works with or without it — without the
+  table, ticks stay on the device. After applying: `npm run backend:types`
+  (the entries are hand-written in `types/supabase.generated.ts` until
+  then), then re-run the test script.
+- [ ] `supabase/migrations/20261113110000_host_notice_optin.sql` — makes the
+  two host cron notices **opt-in** (playbook P6). 20261110160000 gates them
+  on `businesses.notifications_enabled`, which defaults TRUE, so applying
+  that file alone would start pushing to every existing host unasked. This
+  adds `host_day_of_notice` / `host_post_event_notice` (both DEFAULT false)
+  and re-creates `send_host_event_notices()` to require them. **Apply after
+  20261110160000.** Validated on the throwaway cluster with
+  `scripts/test-host-notice-optin.sql` (an opted-out host gets nothing; an
+  opted-in host gets one of each; re-runs send no duplicates; the master
+  switch still wins); idempotent on re-apply. Until it is applied the
+  Settings switches stay hidden and no host notice is sent.
 
 Owner authorized the following migrations for the local database on
 2026-11-08. All four were applied in one transaction and recorded in migration

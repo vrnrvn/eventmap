@@ -6,6 +6,7 @@ import { useConnectivity } from '@/services/connectivity';
 import { freshnessNote } from '@/utils/screenState';
 import { FreshnessNote, OfflineState } from '@/components/ui/QueryStates';
 import { HostChecklistCard } from '@/components/HostChecklistCard';
+import { useEventPlaybookPills } from '@/hooks/useEventPlaybookPills';
 import {
   View,
   Text,
@@ -44,6 +45,7 @@ import {
   ChevronRight,
   Clock,
   FileText,
+  ListChecks,
 } from '@/components/icons.generated';
 import { a11yState } from '@/utils/accessibility';
 
@@ -74,6 +76,12 @@ type CachedPage = { rows: Event[]; fetched: number };
 export default function MyEvents() {
   const insets = useSafeAreaInsets();
   const { hasBusiness, userBusiness } = useApp();
+  /**
+   * The loaders only need the id. Depending on the whole business object
+   * re-created them on every AppContext refresh, which is why their
+   * dependency arrays used to disagree with their bodies.
+   */
+  const businessId = userBusiness?.id;
   const [scope, setScope] = useState<Scope>('upcoming');
   const [events, setEvents] = useState<Event[]>([]);
   const nextById = useEffectiveNextDates(events);
@@ -135,12 +143,12 @@ export default function MyEvents() {
   /** First page for the current tab. `silent` keeps the list visible. */
   const loadInitial = useCallback(
     async (silent = false) => {
-      if (!userBusiness) {
+      if (!businessId) {
         setEvents([]);
         setLoading(false);
         return;
       }
-      const key = queryKeys.myEvents(userBusiness.id, scope);
+      const key = queryKeys.myEvents(businessId, scope);
       // First visit to this tab: show the page kept on the device (offline
       // included), then refresh quietly (docs/OFFLINE_PLAN.md §3.5).
       if (!hasLoadedRef.current) {
@@ -159,7 +167,7 @@ export default function MyEvents() {
       const seq = ++requestSeq.current;
       if (!silent) setLoading(true);
       try {
-        const { rows, fetched } = await fetchPage(userBusiness.id, scope, 0);
+        const { rows, fetched } = await fetchPage(businessId, scope, 0);
         if (seq !== requestSeq.current) return;
         setEvents(rows);
         setOffset(fetched);
@@ -186,15 +194,15 @@ export default function MyEvents() {
         }
       }
     },
-    [userBusiness?.id, scope, fetchPage, queryClient]
+    [businessId, scope, fetchPage, queryClient]
   );
 
   const loadMore = useCallback(async () => {
-    if (!userBusiness || loadingMore || !hasMore || loading) return;
+    if (!businessId || loadingMore || !hasMore || loading) return;
     setLoadingMore(true);
     const seq = requestSeq.current;
     try {
-      const { rows, fetched } = await fetchPage(userBusiness.id, scope, offset);
+      const { rows, fetched } = await fetchPage(businessId, scope, offset);
       if (seq !== requestSeq.current) return;
       setEvents((prev) => {
         const seen = new Set(prev.map((e) => e.id));
@@ -208,13 +216,13 @@ export default function MyEvents() {
     } finally {
       setLoadingMore(false);
     }
-  }, [userBusiness?.id, scope, offset, loadingMore, hasMore, loading, fetchPage]);
+  }, [businessId, scope, offset, loadingMore, hasMore, loading, fetchPage]);
 
   const handleRefresh = useCallback(async () => {
-    if (!userBusiness) return;
+    if (!businessId) return;
     setRefreshing(true);
     await loadInitial(true);
-  }, [userBusiness?.id, loadInitial]);
+  }, [businessId, loadInitial]);
 
   // Coming back from Edit / Insights / the event page refreshes quietly;
   // only the very first visit (and a tab switch) shows the skeleton.
@@ -224,13 +232,13 @@ export default function MyEvents() {
   useFocusEffect(
     useCallback(() => {
       if (isRestoring) return;
-      if (hasBusiness && userBusiness) {
+      if (hasBusiness && businessId) {
         void loadInitial(hasLoadedRef.current);
       } else {
         setEvents([]);
         setLoading(false);
       }
-    }, [hasBusiness, userBusiness?.id, loadInitial, isRestoring])
+    }, [hasBusiness, businessId, loadInitial, isRestoring])
   );
 
   const switchScope = (next: Scope) => {
@@ -279,6 +287,12 @@ export default function MyEvents() {
     }
   }, []);
 
+  /**
+   * Per-event checklist progress (docs/HOST_EVENT_PLAYBOOK_PLAN.md P4).
+   * Device-local only: no extra request is made for a list.
+   */
+  const playbookPills = useEventPlaybookPills(events, nextById);
+
   const renderItem = useCallback(
     ({ item }: { item: Event }) => {
       const cancelled = item.status === 'cancelled';
@@ -305,6 +319,7 @@ export default function MyEvents() {
               ? { label: 'Repeats', tone: 'primary' as const }
               : { label: 'Upcoming', tone: 'primary' as const };
       const c = counts.get(item.id);
+      const pill = cancelled ? null : playbookPills.get(item.id);
       const metaLines: string[] = [];
       if (c && !cancelled) {
         const cap = summarizeCapacity(c.going, item.max_attendees);
@@ -325,8 +340,22 @@ export default function MyEvents() {
             badge={badge}
             dateIcon={<Clock size={12} color={Colors.text.tertiary} />}
             metaLines={metaLines}
-            onPress={() => router.push(`/business/manage-event/${item.id}` as never)}
-            accessibilityLabel={`Manage ${item.title}`}
+            titleAccessory={
+              pill ? (
+                <View style={styles.pill}>
+                  <ListChecks size={11} color={Colors.primary} />
+                  <Text style={styles.pillText}>{pill}</Text>
+                </View>
+              ) : undefined
+            }
+            onPress={() =>
+              router.push(
+                // With something left to do, open the hub on its checklist
+                // rather than making the host find the card.
+                (pill ? `/business/manage-event/${item.id}?checklist=1` : `/business/manage-event/${item.id}`) as never
+              )
+            }
+            accessibilityLabel={pill ? `Manage ${item.title}, ${pill}` : `Manage ${item.title}`}
             actions={
               <>
                 {/* Cancelled events are read-only: no Edit, Notify or Cancel. */}
@@ -389,7 +418,7 @@ export default function MyEvents() {
         </View>
       );
     },
-    [handleCancelEvent, handleNotifyFollowers, counts, nextById]
+    [handleCancelEvent, handleNotifyFollowers, counts, nextById, playbookPills]
   );
 
   const keyExtractor = useCallback((item: Event) => item.id, []);
@@ -826,6 +855,20 @@ const styles = StyleSheet.create({
   },
 
   /* ── Action buttons ── */
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.round,
+    backgroundColor: Colors.primarySoft,
+  },
+  pillText: {
+    fontSize: Typography.sizes.xxs,
+    fontFamily: Typography.fontFamilies.semibold,
+    color: Colors.primary,
+  },
   editBtn: {
     flex: 1,
     flexDirection: 'row',

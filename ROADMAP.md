@@ -29,6 +29,15 @@ work; their current status and remaining effort need review.
 - **Event collections:** Let users organize saved events into named lists, such
   as plans for a weekend or venues to explore. Planned in
   `docs/EVENT_COLLECTIONS_PLAN.md`; Phase A (data layer) done 2026-11-12.
+- **Host event playbook:** A per-event, phase-aware checklist (before
+  publishing, lead-up, day of, after) that ticks itself from server facts and
+  points hosts at the right tool. Planned in `docs/HOST_EVENT_PLAYBOOK_PLAN.md`
+  (22-31 h; P1-P7 done 2026-11-13, only the owner's apply step remains; two
+  migrations prepared and unapplied).
+- **Discovery modes:** "Surprise me", "My neighbourhood" and "Just added"
+  browse modes on Discover, built on the ranked-events RPC and the browse
+  centre. Planned in `docs/DISCOVERY_MODES_PLAN.md` (20-30 h; 15-22 h without the
+  server sort change).
 
 These ideas have not yet been scoped or estimated. Hosted deployment, production
 payments, device push, and store releases remain separate decisions.

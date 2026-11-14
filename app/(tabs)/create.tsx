@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { blockedOffline } from '@/utils/requireOnline';
 import { useFormDraft } from '@/hooks/useFormDraft';
 import { readLastCategory, rememberLastCategory } from '@/utils/lastCategory';
@@ -46,7 +46,9 @@ import { HostTipCard } from '@/components/HostTipCard';
 import { useHostTip } from '@/hooks/useHostTip';
 import { EventPreviewSheet } from '@/components/EventPreviewSheet';
 import { EventPublishedSheet, type PublishedEventInfo } from '@/components/EventPublishedSheet';
-import { formToPreviewEvent, previewGaps } from '@/utils/eventFormPreview';
+import { formToPreviewEvent } from '@/utils/eventFormPreview';
+import { useEventPlaybook } from '@/hooks/useEventPlaybook';
+import { omitPlaybookItems, type PlaybookTarget } from '@/utils/eventPlaybook';
 import {
   FIRST_EVENT_STEPS,
   dismissFirstEventGuide,
@@ -401,6 +403,56 @@ export default function CreateScreen() {
   // query (available offline once loaded); with nothing loaded, a failed
   // load offers a retry instead of leaving an empty picker.
   const { categories, isError: categoriesFailed, refetch: refetchCategories } = useCategories();
+
+  const previewEvent = useMemo(
+    () =>
+      previewOpen
+        ? formToPreviewEvent(formData, {
+            business: userBusiness ?? null,
+            category: categories.find((c) => c.id === formData.categoryId) ?? null,
+          })
+        : null,
+    [previewOpen, formData, userBusiness, categories]
+  );
+  /**
+   * "Before you publish" checklist (docs/HOST_EVENT_PLAYBOOK_PLAN.md P3),
+   * from the unsaved form. Ticks are in memory: the event has no id yet.
+   */
+  const previewPlaybook = useEventPlaybook({
+    eventId: null,
+    event: previewEvent,
+    facts: useMemo(
+      () => ({ eventLinks: formData.links.filter((l) => l.url.trim()).length, photos: formData.images.length }),
+      [formData.links, formData.images.length]
+    ),
+    enabled: !!userBusiness,
+  });
+  /** Publish is the sheet's own button, not a line item in its list. */
+  const previewChecklist = previewPlaybook.playbook
+    ? omitPlaybookItems(previewPlaybook.playbook, ['publish'])
+    : null;
+
+  /** A checklist item points at the form section that fixes it. */
+  const scrollToSection = useCallback((section: string) => {
+    const y = sectionY.current[section];
+    scrollViewRef.current?.scrollTo({ y: Math.max(0, (y ?? 0) - 12), animated: true });
+  }, []);
+  const handlePreviewChecklistAction = useCallback(
+    (target: PlaybookTarget) => {
+      const section: Record<string, string> = {
+        edit_basics: 'basic',
+        edit_photo: 'photos',
+        edit_when: 'datetime',
+        edit_where: 'location',
+        edit_extras: 'links',
+        settings: 'capacity',
+      };
+      const key = section[target];
+      setPreviewOpen(false);
+      if (key) scrollToSection(key);
+    },
+    [scrollToSection]
+  );
   useEffect(() => {
     if (!categoriesFailed || categories.length > 0) return;
     notify.error("Couldn't load categories.", { label: 'Retry', onPress: () => void refetchCategories() });
@@ -1402,15 +1454,10 @@ export default function CreateScreen() {
 
       <EventPreviewSheet
         visible={previewOpen}
-        event={
-          previewOpen
-            ? formToPreviewEvent(formData, {
-                business: userBusiness ?? null,
-                category: categories.find((c) => c.id === formData.categoryId) ?? null,
-              })
-            : null
-        }
-        gaps={previewGaps(formData)}
+        event={previewEvent}
+        playbook={previewChecklist}
+        onPlaybookTick={previewPlaybook.tick}
+        onPlaybookAction={handlePreviewChecklistAction}
         publishing={loading && !savingDraft}
         savingDraft={savingDraft}
         onClose={() => setPreviewOpen(false)}
@@ -1446,7 +1493,9 @@ export default function CreateScreen() {
         onOpenManage={() => {
           const id = publishedEvent?.id;
           setPublishedEvent(null);
-          if (id) router.push(`/business/manage-event/${id}` as never);
+          // Land on the lead-up checklist: the host just published, so the
+          // next steps are what they came here for (playbook P7).
+          if (id) router.push(`/business/manage-event/${id}?checklist=1` as never);
         }}
       />
 

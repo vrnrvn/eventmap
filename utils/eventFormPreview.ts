@@ -5,11 +5,13 @@ import { pickerDateToInstant } from '@/utils/timezone';
 
 /**
  * Turns the Create form into a `RankedEvent` so the real
- * `DiscoverEventCard` and the Event Detail header can render a preview of an
- * event that does not exist yet (HOST_ONBOARDING_PLAN.md §11.2 step 3).
+ * `DiscoverEventCard` can render a preview of an event that does not exist
+ * yet (HOST_ONBOARDING_PLAN.md §11.2 step 3).
  *
  * Pure and renderer-free so it can be unit-tested. Nothing here is written to
- * the server; ids are placeholders.
+ * the server; ids are placeholders, and the row describes an unsaved event
+ * truthfully — `publish_state: 'draft'` — so anything deriving host state
+ * from it (the pre-publish checklist) reads the real situation.
  */
 
 export const PREVIEW_EVENT_ID = 'preview';
@@ -83,7 +85,9 @@ export function formToPreviewEvent(
     rsvp_closed: false,
     waitlist_mode: 'notify',
     timezone: form.timezone,
-    publish_state: 'published',
+    // Not saved, let alone published. The card does not read this; the
+    // pre-publish checklist does, and it must see a draft.
+    publish_state: 'draft',
     visibility: form.extras.visibility,
     ticket_url: form.extras.ticketUrl.trim() || null,
     price_label: form.extras.priceLabel.trim() || null,
@@ -104,18 +108,4 @@ export function formToPreviewEvent(
     user_rsvp: null,
     user_saved: false,
   };
-}
-
-/**
- * Fields a host most often forgets before publishing. Shown in the preview
- * sheet as hints; they are not validation (Publish runs the real checks).
- */
-export function previewGaps(form: PreviewFormInput): string[] {
-  const gaps: string[] = [];
-  if (!form.title.trim()) gaps.push('a title');
-  if (!form.categoryId) gaps.push('a category');
-  if (!form.description.trim()) gaps.push('a description');
-  if (!form.address.trim()) gaps.push('a place');
-  if (form.images.length === 0) gaps.push('a cover photo');
-  return gaps;
 }

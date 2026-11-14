@@ -66,6 +66,24 @@ const hostOverrides = (getData, shape) => ({
   }),
 });
 
+/** The hub needs full details for the event under test. */
+const detailsOverride = (r, data) => {
+  const e = data.ev.find((x) => x.id === JSON.parse(r.body || '{}').p_event_id) || data.ev[0];
+  return {
+    json: {
+      event: e, business: data.biz, category: data.categories.find((c) => c.id === e.category_id),
+      links: [], photos: [], rsvp_count: 0, save_count: 0,
+      user_rsvp: null, user_saved: false, user_following_business: false,
+    },
+  };
+};
+/** A quiet hub: no attendees, no reports, so only the checklist is on screen. */
+const quietOverview = () => ({
+  json: { going: 0, interested: 0, waitlist: 0, removed: 0, requested: 0, saves: 0,
+    views_total: 0, views_7d: 0, announcements_today: 0,
+    chat: { locked: false, slow_mode_seconds: 0, open_reports: 0, blocked_count: 0, message_count: 0 } },
+});
+
 async function review(h, label, width) {
   const r = JSON.parse(await h.eval(INSPECT));
   check(`${label} [${width}] controls are labeled`, r.unlabeled.length === 0, r.unlabeled.slice(0, 2).join(' | '));
@@ -119,6 +137,10 @@ for (const [width, height] of VIEWPORTS) {
     const h = await open({ ...P, dataOpts: { business: true }, viewport: [width, height], overrides: hostOverrides(() => D, { host_type: 'organiser', location_kind: 'area' }) });
     D = h.data;
     await h.go('/my-events', 9000);
+    // Per-event checklist pill (playbook P4).
+    const t4 = await h.text();
+    check(`U4 my-events [${width}] rows carry a checklist pill`, /\d+ to do/.test(t4),
+      (t4.match(/.{0,30}to do.{0,10}/) || [''])[0]);
     await review(h, 'U4 my-events-checklist', width);
     await h.close();
   }
@@ -176,6 +198,111 @@ for (const [width, height] of VIEWPORTS) {
     await h.close();
   }
 
+  if (run('U8')) { // Per-event checklist card in the hub (playbook P2)
+    let D;
+    const h = await open({
+      ...P, dataOpts: { business: true }, viewport: [width, height],
+      overrides: {
+        ...hostOverrides(() => D, { host_type: 'venue', location_kind: 'fixed' }),
+        '/rest/v1/rpc/get_event_host_overview': quietOverview,
+        '/rest/v1/rpc/get_event_details': detailsOverride,
+      },
+    });
+    D = h.data;
+    // ev[0] starts in 2 h, so the hub shows the day-of list.
+    await h.go(`/business/manage-event/${h.data.ev[0].id}`, 9000);
+    const t = await h.text();
+    check(`U8 hub-checklist [${width}] shows the stage it is in`, /Checklist · Today/.test(t), t.slice(0, 80));
+    check(`U8 hub-checklist [${width}] lists a manual item`, t.includes('Confirm the space'),
+      (t.match(/.{0,40}Confirm.{0,20}/) || [''])[0]);
+    check(`U8 hub-checklist [${width}] starts with nothing done`, /0 of \d+ done/.test(t),
+      (t.match(/\d+ of \d+ done/) || [''])[0]);
+
+    await h.click('Confirm the space');
+    await sleep(700);
+    const ticked = await h.text();
+    check(`U8 hub-checklist [${width}] ticking a manual item counts`, /1 of \d+ done/.test(ticked),
+      (ticked.match(/\d+ of \d+ done/) || [''])[0]);
+
+    await review(h, 'U8 manage-event-checklist', width);
+
+    await h.click('Hide the today checklist');
+    await sleep(600);
+    check(`U8 hub-checklist [${width}] dismissal hides this stage`, !/Checklist ·/.test(await h.text()));
+    check(`U8 hub-checklist [${width}] no runtime errors`, h.errors().length === 0, h.errors().slice(0, 2).join(' || '));
+    await h.close();
+  }
+
+  if (run('U9')) { // Established host: collapsed by default, deep link expands
+    let D;
+    const h = await open({
+      ...P, dataOpts: { business: true }, viewport: [width, height],
+      overrides: {
+        ...hostOverrides(() => D, { host_type: 'venue', location_kind: 'fixed' }),
+        '/rest/v1/rpc/get_event_host_overview': quietOverview,
+        '/rest/v1/rpc/get_event_details': detailsOverride,
+        // An experienced host (8 published) gets the quiet, collapsed card.
+        '/rest/v1/rpc/get_host_onboarding_status': () => ({
+          json: { has_logo: true, has_description: true, notifications_enabled: true,
+            published_events: 8, events_with_capacity: 3, recurring_events: 1, announcements: 2 },
+        }),
+      },
+    });
+    D = h.data;
+    const id = h.data.ev[0].id;
+    await h.go(`/business/manage-event/${id}`, 9000);
+    const collapsed = await h.text();
+    check(`U9 established [${width}] card is collapsed`, /Checklist · Today/.test(collapsed) && !collapsed.includes('Confirm the space'),
+      collapsed.slice(0, 80));
+    check(`U9 established [${width}] collapsed card names the next step`, /\bNext\b/.test(collapsed));
+
+    // The My Events pill links here with ?checklist=1 (playbook P4).
+    await h.go(`/business/manage-event/${id}?checklist=1`, 9000);
+    const expanded = await h.text();
+    check(`U9 deep link [${width}] opens the checklist expanded`, expanded.includes('Confirm the space'),
+      expanded.slice(0, 80));
+    check(`U9 deep link [${width}] no runtime errors`, h.errors().length === 0, h.errors().slice(0, 2).join(' || '));
+    await h.close();
+  }
+
+  if (run('U10')) { // Ticks survive a reload, and work on a backend without the table
+    let D;
+    const h = await open({
+      ...P, dataOpts: { business: true }, viewport: [width, height],
+      overrides: {
+        ...hostOverrides(() => D, { host_type: 'venue', location_kind: 'fixed' }),
+        '/rest/v1/rpc/get_event_host_overview': quietOverview,
+        '/rest/v1/rpc/get_event_details': detailsOverride,
+      },
+    });
+    D = h.data;
+    const id = h.data.ev[0].id;
+
+    // 1. With the checklist table present (migration applied).
+    await h.go(`/business/manage-event/${id}`, 9000);
+    await h.click('Confirm the space');
+    await sleep(800);
+    check(`U10 server [${width}] the tick reached the server`,
+      (h.data.playbook?.get(id)?.ticked || []).includes('venue_confirmed'),
+      JSON.stringify([...(h.data.playbook || new Map())]));
+    await h.go(`/business/manage-event/${id}`, 9000);
+    check(`U10 server [${width}] the tick survives a reload`, /1 of \d+ done/.test(await h.text()));
+
+    // 2. Same screen on a backend that never got the migration.
+    h.data.playbookUnavailable = true;
+    await h.go(`/business/manage-event/${id}`, 9000);
+    const offlineText = await h.text();
+    check(`U10 fallback [${width}] the checklist still renders`, /Checklist · Today/.test(offlineText), offlineText.slice(0, 80));
+    check(`U10 fallback [${width}] the device copy keeps the tick`, /1 of \d+ done/.test(offlineText),
+      (offlineText.match(/\d+ of \d+ done/) || [''])[0]);
+    await h.click('Pin the arrival details');
+    await sleep(700);
+    check(`U10 fallback [${width}] ticking still works with no table`, /2 of \d+ done/.test(await h.text()),
+      (await h.text()).match(/\d+ of \d+ done/)?.[0]);
+    check(`U10 fallback [${width}] no runtime errors`, h.errors().length === 0, h.errors().slice(0, 2).join(' || '));
+    await h.close();
+  }
+
   if (run('U6')) { // Preview + published sheets
     let D;
     const h = await open({ ...P, dataOpts: { business: true }, viewport: [width, height], overrides: hostOverrides(() => D, { host_type: 'venue', location_kind: 'fixed' }) });
@@ -187,7 +314,22 @@ for (const [width, height] of VIEWPORTS) {
     await sleep(400);
     await h.click('Preview how your event will look');
     await sleep(1500);
+    const sheet = await h.text();
+    // The pre-publish checklist is one line here (playbook P7): expanded it
+    // pushed the preview card off a 320 px screen.
+    check(`U6 preview [${width}] checklist summary is visible`, /Checklist \d+\/\d+/.test(sheet),
+      (sheet.match(/Checklist \d+\/\d+[^\n]*/) || [''])[0]);
+    check(`U6 preview [${width}] the preview card is visible too`, sheet.includes('Rooftop social'),
+      sheet.slice(0, 80));
     await review(h, 'U6 preview-sheet', width);
+    // ...and it opens to the full list on tap.
+    await h.click('Checklist');
+    await sleep(700);
+    const opened = await h.text();
+    check(`U6 preview [${width}] the summary opens the list`, opened.includes('Decide on a limit'),
+      opened.slice(0, 100));
+    await h.click('Checklist');
+    await sleep(500);
     await h.click('Publish', true);
     await sleep(5000);
     await review(h, 'U6 published-sheet', width);

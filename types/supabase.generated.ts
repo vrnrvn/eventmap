@@ -1,3 +1,12 @@
+// HAND-EDITED 2026-11-13 (host event playbook P6): businesses
+// host_day_of_notice / host_post_event_notice from the unapplied migration
+// 20261113110000.
+//
+// HAND-EDITED 2026-11-13 (host event playbook P5): event_host_playbook plus
+// set_event_playbook_item / dismiss_event_playbook_stage from the unapplied
+// migration 20261113100000. Regenerate with `npm run backend:types` once it
+// is applied.
+//
 // HAND-EDITED 2026-11-10 (host onboarding Stages 1–2): businesses host columns,
 // nullable location, profiles.intent, get_user_business SETOF, and
 // host_terms_current_version from the unapplied migrations 20261110100000 and
@@ -205,6 +214,8 @@ export type Database = {
           description: string
           events_created_this_month: number
           google_reviews_url: string | null
+          host_day_of_notice: boolean
+          host_post_event_notice: boolean
           host_terms_accepted_at: string | null
           host_terms_version: number | null
           host_type: string
@@ -235,6 +246,8 @@ export type Database = {
           description?: string
           events_created_this_month?: number
           google_reviews_url?: string | null
+          host_day_of_notice?: boolean
+          host_post_event_notice?: boolean
           host_terms_accepted_at?: string | null
           host_terms_version?: number | null
           host_type?: string
@@ -265,6 +278,8 @@ export type Database = {
           description?: string
           events_created_this_month?: number
           google_reviews_url?: string | null
+          host_day_of_notice?: boolean
+          host_post_event_notice?: boolean
           host_terms_accepted_at?: string | null
           host_terms_version?: number | null
           host_type?: string
@@ -322,6 +337,35 @@ export type Database = {
           sort_order?: number
         }
         Relationships: []
+      }
+      event_host_playbook: {
+        Row: {
+          dismissed_stages: string[]
+          event_id: string
+          ticked: string[]
+          updated_at: string
+        }
+        Insert: {
+          dismissed_stages?: string[]
+          event_id: string
+          ticked?: string[]
+          updated_at?: string
+        }
+        Update: {
+          dismissed_stages?: string[]
+          event_id?: string
+          ticked?: string[]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_host_playbook_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: true
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       collection_items: {
         Row: {
@@ -2277,6 +2321,14 @@ export type Database = {
       }
       reopen_business: { Args: never; Returns: undefined }
       reorder_collections: { Args: { p_ids: string[] }; Returns: undefined }
+      dismiss_event_playbook_stage: {
+        Args: { p_event_id: string; p_stage: string }
+        Returns: Json
+      }
+      set_event_playbook_item: {
+        Args: { p_done: boolean; p_event_id: string; p_item: string }
+        Returns: Json
+      }
       reschedule_event: {
         Args: {
           p_address?: string
