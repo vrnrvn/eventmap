@@ -9,14 +9,99 @@ archive.
 
 ## Ground rules
 
-- **Database:** use isolated scratch databases for model testing; apply local
-  migrations only when the owner authorizes them. Never reset without approval.
-- **DB state (read-only check, 2026-11-08):** every file in
-  `supabase/migrations/` up to `20261106170000` is recorded in the shared local
-  DB's `schema_migrations`. Any hosted/production project must be checked
+- **The shared local database is read-only (owner, 2026-11-14).** Do not apply
+  migrations, write test data, or reset it — not even a scratch copy made
+  inside the shared cluster, because a crash in one backend restarts every
+  connection in the cluster (see the segfault rule below). `SELECT`s to check
+  state are fine. All SQL testing happens in a **throwaway isolated
+  environment**; the owner applies migrations.
+- **In a superuser psql session, never provoke `permission denied for
+  function` after `SET ROLE anon` / `authenticated` / `service_role`.** On the
+  Supabase Postgres image (`17.6.1.106`, `supautils.hint_roles`) that error
+  segfaults the backend and crash-restarts the whole cluster. Assert
+  `has_function_privilege(...)` instead of calling the function. Root-caused
+  2026-11-14 (it had crashed the cluster four times since Nov 4); minimal repro
+  in [`docs/REVIEW_AND_ROADMAP_2026-11-14.md`](REVIEW_AND_ROADMAP_2026-11-14.md)
+  finding C1.
+  **Scope (measured 2026-11-14, isolated stack): superuser sessions only.** The
+  crash needs the session's *original* role to be a superuser, which is why it
+  only ever bit through psql suites. The same call as the non-superuser
+  `authenticator` role returns a normal error, and an anonymous
+  `POST /rpc/get_user_collections` through PostgREST returns a clean
+  `401 / 42501` with no crash. **Not reachable over HTTP** — an earlier note
+  here said it was; that was wrong.
+- **DB state (read-only check, 2026-11-14):** all **121** files in
+  `supabase/migrations/` are recorded in the shared local DB's
+  `schema_migrations`, and nothing is recorded that is not a file. Verify with:
+  `select count(*), max(version) from supabase_migrations.schema_migrations;`
+  → 121 / `20261113110000`. Any hosted/production project must be checked
   separately — in particular the Oct 30 security set (`20261030100000` admin
   self-grant, `…101000` premium self-grant, `…102000` storage ownership,
-  `…107000` search_path).
+  `…107000` search_path). No hosted project has ever been checked.
+- **Client/schema compatibility (policy, 2026-11-14).** The client targets the
+  migration set in `supabase/migrations/`; applying migrations is a
+  prerequisite of deploying a build, not something the client negotiates at
+  runtime. Concretely:
+  - **Do not add probe-and-retry fallbacks** — calling an RPC, catching
+    PGRST202/42883 because an *argument* or function is missing, retrying in
+    the old shape, and remembering it for the session. They cost a failed
+    round trip, they are only exercised in the window before a migration is
+    applied, and when they fire they silently downgrade behaviour. The two
+    that existed (`createKeyParamUnsupported`, `preferredBoostUnsupported` in
+    `services/events.ts`) were removed on 2026-11-14; losing the idempotency
+    key to a silent retry is exactly how duplicate events happened.
+  - **Error-path degradation is fine and is kept** where a missing object has
+    a genuine user-facing answer and costs nothing on the happy path: the
+    `MISSING` sets in `services/collections.ts` and `services/eventPlaybook.ts`
+    ("coming soon" / device-local ticks) and the "function missing → degraded"
+    branches in calendar and host tools. These also cover a hosted project
+    that is behind, which the README supports as a deployment option.
+  - The practical difference: a fallback that *changes what is written* is a
+    correctness hazard; one that *changes what is shown* when the server
+    genuinely lacks a feature is a feature.
+- **Pending database work** is listed precisely in
+  [`docs/MIGRATIONS_PENDING.md`](MIGRATIONS_PENDING.md): E-R1 is decided but
+  still needs a migration. The prepared orphan-function migration was applied
+  locally on 2026-11-14 with owner authorization.
+- **Previously unfiled object:**
+  `get_user_past_event_count()` (hand-applied; `docs/HOST_TOOLS_PLAN.md` §11
+  item 3). **Resolved locally 2026-11-14:**
+  `20261114100000_drop_unfiled_past_event_count.sql` drops it. It is an orphan
+  from a sibling worktree's unmerged `20261029100000`; verified unreferenced by
+  the repo, by every other DB function, and by every policy/view/trigger before
+  the file was written. The local migration is recorded and the function is
+  absent; hosted databases remain unchecked.
+- **Test environments (the default is `scripts/pg17-isolated.sh`).** It builds
+  a throwaway container from the *same image the stack runs* (Postgres 17.6,
+  auto-detected from the running stack), applies every migration and the seed
+  via the shared `scripts/db-shim.sql`, publishes no host port (nothing to
+  collide with other sessions), and `suites` runs all twelve
+  `scripts/test-*.sql` with a one-line summary that distinguishes a failed
+  assertion from a crashed backend. **12/12 pass there as of 2026-11-14** —
+  the first all-green run on the real engine. `scripts/db-isolated.sh` (native
+  Postgres, 14.15 here) remains for machines without Docker; it shares the
+  shim and also passes 12/12, but cannot reproduce PG17-only behaviour such as
+  the segfault above. The old shim masking bug — a second `GRANT ALL ON ALL
+  TABLES` pass after the migrations that undid their `REVOKE`s — is fixed in
+  both: the shim's `ALTER DEFAULT PRIVILEGES` already covers tables the
+  migrations create, so the second pass was redundant as well as harmful.
+  `scripts/db-scratch.sh` (a copy *inside* the shared cluster) now refuses to
+  run without `ALLOW_SHARED_CLUSTER=1`; every suite header says so.
+- **Scratch names must be unique per session** (include the branch id). Two
+  worktrees named `oak` once defaulted to the same `SCRATCH_DB` and wrote into
+  the same copy, which produced false "already on the shared DB" reports.
+- **Shared ports:** other sessions run isolated stacks on 3997/54397,
+  3981/54381 and similar. Check `lsof` right before starting a private
+  PostgREST, proxy or container; the scripts accept `STATIC_PORT` / `CDP_PORT`
+  / `PROXY`.
+- **Headless-Chrome harness:** always a fresh `--user-data-dir` (`mktemp -d`)
+  and random ports — Chrome hands a second launch on the same profile to the
+  running instance, so two sessions can silently share a browser. The local
+  shell exports `EXPO_NO_DOTENV=1`, so `expo export` ignores `.env.local`
+  unless the script sources it (`set -a; source .env.local`).
+- **Seed note:** the demo host (`host@example.test`) is also an admin, and
+  admins get premium analytics payloads. Clear `is_admin` inside a test
+  transaction to exercise the free tier.
 - Other users' profile data: never embed `profiles:user_id(...)` in a select —
   RLS returns null for anyone but the owner. Use `get_public_profile` /
   `get_profiles_display`.
@@ -25,20 +110,48 @@ archive.
 
 ---
 
-## Status at a glance (final review 2026-11-08)
+## Status at a glance (updated 2026-11-14)
+
+A full documentation review ran on 2026-11-14; its findings, ranked, and the
+step-by-step plan to close them are in
+[`docs/REVIEW_AND_ROADMAP_2026-11-14.md`](REVIEW_AND_ROADMAP_2026-11-14.md).
+Headlines, all verified against the code and the database:
+
+- **Local migrations are applied.** All 122 migrations are recorded on the
+  local DB, including the Nov 10 host-onboarding set, collections
+  (`20261112100000`) and both playbook files (`20261113100000`,
+  `20261113110000`) that this tracker previously listed as "prepared, NOT
+  applied". Hosted databases remain unchecked — see Database migrations.
+- **Generated types match the local schema.** On 2026-11-14 the output of
+  `supabase gen types typescript --local` was compared byte-for-byte after the
+  orphan-function migration; the removed function was the only difference.
+- **Code health (final check 2026-11-14):** app + admin typecheck clean;
+  **1,048 unit tests** in 86 files; app lint 0 errors / 7 warnings, admin 0
+  errors / 2 warnings; admin `next build` 21 pages / 25 routes; `npm audit`
+  34 (1 critical, 5 high) — unchanged since Nov 8. **Browser harness: 17
+  suites, 1,009 checks, 0 failures.** SQL suites 12/12 on the Supabase image.
+- **SQL suites:** **12/12** on the Supabase engine via
+  `scripts/pg17-isolated.sh suites`, no crashes (the shim's blanket-grant bug
+  that masked the twelfth was fixed on 2026-11-14).
+- **Still the release blocker:** production map tiles (deferred by decision).
+
+### Earlier snapshot (final review 2026-11-08)
 
 - **Release blocker:** production map tiles (deferred by decision — no new
   map APIs for now).
-- **Next work here (no device):** UI/UX flow passes — flow 1 (onboarding)
-  done on web; **flow 2 (first event as a new host) is next.**
+- **UI/UX flow passes: all nine are done on web** (flows 1–9; see the list
+  below and the Done log). What remains needs a device, an admin login, or a
+  human comparing screenshots.
 - **Waiting on you:** the device & manual testing list (offline on
   iOS/Android first); two product decisions left (approval mode with closed
   RSVPs; the not-started features backlog).
-- **Collections (2026-11-12, Phases A–F built, migration unapplied):** open
-  items live in `docs/EVENT_COLLECTIONS_PLAN.md` §6 (Phase F defaults with
-  alternatives), §7 (remaining decisions: rule editor vs. single column,
-  full Interests merge) and §8 (the Phase G runbook). **[decision]** **[DB]**
-- **Test flake (2026-11-12, pre-existing):** `scripts/test-categories-series.sql`
+- **Collections (Phases A–F built 2026-11-12; migration applied, confirmed
+  2026-11-14):** open items live in `docs/EVENT_COLLECTIONS_PLAN.md` §6 (Phase
+  F defaults with alternatives), §7 (remaining decisions: rule editor vs.
+  single column, full Interests merge) and §8 (the Phase G runbook — steps 1-2
+  are done by the apply; 3-6 remain). **[decision]**
+- **Test flake — FIXED 2026-11-14** (now `AT TIME ZONE 'UTC'` in the suite's
+  `d` table). Original note: `scripts/test-categories-series.sql`
   builds its series dates with `(now() + interval '60 minutes')::date`, which
   uses the *session* timezone, while the fixture event is zoned `UTC`. On a
   cluster whose session zone is not UTC (a native Postgres, `America/New_York`
@@ -47,11 +160,12 @@ archive.
   Supabase's container runs in UTC, so `scripts/db-scratch.sh` never sees it;
   `scripts/db-isolated.sh` now sets the database timezone to UTC. A durable
   fix is `(now() AT TIME ZONE 'UTC')::date` in the suite's `d` table.
-- **Database (2026-11-12):** `20261112100000_event_collections.sql` is
-  prepared and validated on an isolated copy only (`scripts/db-isolated.sh`,
-  `scripts/test-collections.sql`); it is NOT applied to the shared local
-  database. No session applies migrations to the shared database any more;
-  the owner does. See `docs/EVENT_COLLECTIONS_PLAN.md` §8.
+- **Database:** `20261112100000_event_collections.sql` was validated on an
+  isolated copy and has since been **applied** to the shared local database
+  (recorded in `schema_migrations`; objects `collections`, `collection_items`
+  and the nine collection RPCs verified present 2026-11-14). No session
+  applies migrations to the shared database; the owner does. See
+  `docs/EVENT_COLLECTIONS_PLAN.md` §8.
 - **Database:** the four 2026-11-08 migrations and eight 2026-11-09
   category/series migrations are recorded in the local DB. Hosted databases
   have not been checked or changed and must be handled separately.
@@ -77,46 +191,62 @@ what's wrong, add a short regression check.
    Coverage: create/edit reviewed in depth (Nov 2) and Create's duplicate
    guard tested; business onboarding never walked, nor the hand-off into
    the first event. **Here**, except photo picking (**Device**).
-3. [ ] **Notification → right screen** for every type (RSVP, reminder,
-   chat message/mention, waitlist, moderation, report update, event
-   updated/rescheduled/cancelled), from the in-app list and from a push
-   (warm + cold start). Coverage: notifications list paging/retry (suite
-   B); routing per type never checked. **Here** for the in-app list;
-   **Device** for pushes and per-channel delivery.
-4. [ ] **Report → moderation → outcome** — report an event / review /
-   chat message → admin acts (admin app) → reporter gets `report_update` →
-   what the reported user sees (removed message, chat block, ban).
-   Coverage: each piece built and reviewed separately; never end to end.
-   **Here** with the fake backend for the app side + admin build; the
-   admin side needs a manual login session. *Trust & safety: a broken
-   loop is invisible until someone needs it.*
-5. [ ] **Attendee journey on a busy event** — discover → event page →
-   join / waitlist / request (approval) → chat → reminder → event ends →
-   review the business. Coverage: best-covered area (tiers 0–3, regression
-   pass, suites B/C); the "after the event" part (ended state, review
-   prompt, past list) is the gap. **Here**.
-6. [ ] **Premium lifecycle as the host sees it** — free quota → limit hit
-   → upgrade → 30/month + recurring + boost → cancel/lapse → back to free
-   (Create, Manage event, Insights, premium screens). Coverage: logic unit-
-   tested, server rules prepared (pending migration); the screens were
-   never walked across a lapse. **Here** (fake backend can flip the tier
-   and expiry).
-7. [ ] **Privacy as other people see you** — private profile, hide
-   attendance, hide future events; checked as another attendee, as a host
-   (attendee list, chat names) and signed out. Coverage: server-side rules
-   reviewed (Nov 3 private-name audit); never checked from the outside in
-   the UI. **Here**.
-8. [ ] **Account management** — settings, notification preferences,
-   blocked users, sign out on a shared device, delete account. Coverage:
-   sign-out data clearing tested (suites B9/F2); delete account and
-   blocked users never walked. **Here** (delete against the fake backend
-   only).
-9. [ ] **Visual consistency sweep** — every screen side by side at 390 px
-   and 1280 px: spacing, radii, type scale, empty/loading/error states.
-   Coverage: per-screen screenshots exist from the a11y pass; never
-   compared as a set. **Here**; carries the design-token cleanup. Known
-   items: an error toast can cover the onboarding "Step N of 6" label; the
-   privacy switches use a teal "on" colour that isn't the brand red.
+3. [~] **Notification → right screen** — **in-app half done 2026-11-14**
+   (Done log → "flow 3"): `scripts/fake-backend-e2e/suiteNotifications.mjs`
+   taps one notification of each of the 18 types and asserts the URL, 55/55.
+   Found and fixed: the **push** path had its own older copy of the routing
+   rule, so a tapped push for a host notice opened the attendee page instead
+   of the hub; both paths now resolve through `utils/notificationRoute`.
+   **Device** half still open: tapping a real push (warm + cold start) and
+   per-channel delivery.
+4. [~] **Report → moderation → outcome** — **app side done 2026-11-14**
+   (Done log → "flow 4"): `scripts/fake-backend-e2e/suiteModeration.mjs`,
+   34/34 — reporting an event and a chat message (one `complaints` row each,
+   repeat shown as "already reported"), the reporter's `report_update`
+   notification opening the event, and the outcomes a moderated user sees
+   (suspended account refused on write but still reading; removed from a
+   chat, told up front; suspended told so in chat). The **admin half still
+   needs a manual login session**: acting on a complaint in the Next.js app
+   and confirming the reporter's `report_update` actually arrives from a real
+   trigger. The admin *build* is covered and was broken — see the Done log.
+   *Trust & safety: a broken loop is invisible until someone needs it.*
+5. [x] **Attendee journey on a busy event** — **done 2026-11-14**,
+   `scripts/fake-backend-e2e/suiteAttendee.mjs` 14/14. The gap (after the
+   event) is covered: an attended event that is over says so, points at the
+   attendance history, credits "You attended", drops the RSVP controls and
+   offers a review. Also the waitlist on a full event and the request flow on
+   an approval event. No defects found.
+6. [x] **Premium lifecycle as the host sees it** — **done 2026-11-14**,
+   `scripts/fake-backend-e2e/suitePremium.mjs` 19/19, including the lapse
+   that was never walked: a free host at the cap is told and offered the
+   upgrade, one with slots left gets the form, an active premium host past
+   the free cap is not blocked, a **lapsed** premium host is back on the free
+   cap, and manage/plans render for active, lapsed and free (a lapsed plan
+   reads "No Active Subscription"). No defects found.
+7. [x] **Privacy as other people see you** — **done 2026-11-14**,
+   `scripts/fake-backend-e2e/suitePrivacy.mjs` 15/15: a private profile
+   reveals nothing; a public profile with "share future events" off hides the
+   section entirely **and makes no request for it**, while turning it on
+   shows it; a private attendee is never listed under their full name; a
+   signed-out visitor can read an event without seeing personal state. No
+   defects found.
+8. [x] **Account management** — **done 2026-11-14**,
+   `scripts/fake-backend-e2e/suiteAccount.mjs` 10/10: a notification
+   preference toggle saves (one PATCH), the blocked list names who is blocked
+   and unblocks through its confirm, and Delete account asks for confirmation
+   and sends nothing until confirmed. Sign-out clearing stays covered by
+   B9/F2. No defects found.
+9. [~] **Visual consistency sweep** — **automatable half done 2026-11-14**,
+   `scripts/fake-backend-e2e/suiteVisual.mjs` 68/68: 11 screens at **390 px
+   and 1280 px**, asserting no horizontal overflow, a heading, real content
+   (not blank/error) and brand-coloured switches, with 22 screenshots written
+   for the side-by-side comparison. **What remains is the human half**:
+   actually comparing those screenshots as a set for spacing, radii and type
+   scale. Known items: the "teal switch" one is **stale — already fixed**
+   (every `Switch` in the app sets a brand `trackColor`, now pinned by the
+   suite); the onboarding toast overlap is still open and needs a design
+   call — see "Needs a product decision". The design-token cleanup now has an
+   inventory: `node scripts/design-token-audit.mjs`.
 
 Already covered well enough to come after these: maps/Discover browsing,
 event creation/editing details, host tools hub, calendar, insights,
@@ -186,11 +316,32 @@ picker and permission prompts (flow 1); notification taps from a push
 
 ### Medium
 - [ ] **No component/e2e test layer** (logic-only vitest). Long-term.
+- [ ] **[DB] Server-side "next date" ignores per-date exceptions (E-R1, the
+  server half).** `get_ranked_events`, the saved/going lists, `get_user_calendar`
+  and the three collection RPCs (`20261112100000:405,548,1019`) all compute
+  `next_start` with `event_next_occurrence`, not
+  `event_next_effective_occurrence`, so a skipped or moved date still ranks and
+  renders as the next date unless the client's `useEffectiveNextDates`
+  corrects it. Open since 2026-11-09
+  (`docs/CATEGORIES_AND_SERIES_PLAN.md` l.704-708, l.827); the collections
+  migration reused the plain helper and widened it.
+- [x] ~~**Runtime exposure of the `supautils` segfault**~~ — **closed
+  2026-11-14, it does not exist.** Tested on an isolated Postgres + PostgREST
+  stack: an anonymous `POST /rpc/get_user_collections` (anon has no EXECUTE)
+  returns `401 / 42501` with no crash, and the same call as the
+  `authenticator` role errors normally. The crash needs a superuser session,
+  so it is confined to psql suites. No decision needed; no change to grants.
 
 ### Low (worth doing when nearby)
-- [ ] **Design tokens:** ~550 raw padding/margin and ~180 radius literals.
-  Do it during the visual-consistency flow pass (flow 9 above), screen by
-  screen with screenshots — a blind codemod would shift layouts.
+- [ ] **Design tokens:** measured 2026-11-14 with
+  `node scripts/design-token-audit.mjs` — **1,025 literals in 87 files**:
+  spacing 272 on-scale + 573 off-scale, radius 45 on-scale + 135 off-scale.
+  On-scale values are a mechanical swap to the token; off-scale ones need a
+  judgement call. Worst files: `app/(tabs)/profile.tsx` (87),
+  `app/(onboarding)/index.tsx` (85), `screens/EventDetail.tsx` (58),
+  `screens/Settings.tsx` (52). Still to be done screen by screen with
+  before/after screenshots — a blind codemod would shift layouts. The audit
+  script exists so the number can only go down.
 - [ ] **Offline leftovers (minor):** chat `markRead` isn't queued offline
   (badge clears on the next open); discarding a "waiting" chat message is
   local-only; edit drafts are keyed to `updated_at`; picked image paths can
@@ -210,6 +361,73 @@ picker and permission prompts (flow 1); notification taps from a push
   smaller preview card), not another reorder.
 - [ ] Discover/search cards have no bookmark (save is on the event page
   only). Common in event apps; small feature, not a bug.
+
+#### Re-opened 2026-11-14 — still open in code, dropped by the Nov 8 rebuild
+
+Found by re-reading `docs/archive/ISSUES-history-2026-10-30_to_11-07.md`
+against the current code. Archive line numbers in brackets.
+
+- [x] **Offline gate covers one screen** — **fixed 2026-11-14.** `blockedOffline`
+  now guards all 15 host actions in `screens/ManageEvent.tsx` (before any
+  confirm dialog, so nobody confirms something that cannot happen), the 8
+  Settings saves/toggles, the 3 chat-moderation actions, and review responses
+  via `components/ReviewCard.tsx` (one place, covers both the event and venue
+  pages; the draft stays in the editor instead of an early resolve reading as
+  saved). Queued kinds (save, follow, notification read, collection pin) are
+  untouched. Original note: `runOrQueue` is used only in
+  `screens/BusinessDetail.tsx:54,184`; ManageEvent, Settings saves, review
+  responses and chat moderation had no offline pre-check. [A:1019]
+- [x] **Discover reloads everything on any profile change** — **fixed
+  2026-11-14.** The effect now keys on `profile?.id`, `profile?.lat`,
+  `profile?.lng` — the only fields `loadInitialData` reads — so a focus
+  refresh, a Settings save or an onboarding flag no longer refetches
+  categories + events, re-requests location permission and recentres the map.
+  Original: `app/(tabs)/discover.tsx:219-220` ran it from a `[profile]`
+  effect. [A:604]
+- [ ] **`get_event_host_overview.chat` lacks `chat_mode` / `open_policy` /
+  `pinned_message_id`**, so the host hub makes a second call. [A:886] **[DB]**
+- [x] **Admin Users search needs a full UUID** — **fixed 2026-11-14.** A pasted
+  id prefix (4+ hex digits, dashes optional) becomes a uuid range
+  (`uuidPrefixRange` in `SearchForm.tsx`, `.gte/.lte` on `id`) — Postgres has
+  no LIKE on uuid, so this avoids a cast PostgREST would reject. Unit-tested
+  (`tests/adminSearch.test.ts`); not clicked through against a real admin
+  login (owner). [A:1116]
+- [x] **FAQ "Last updated" is hardcoded** — **fixed 2026-11-14.** Now a
+  `FAQ_LAST_UPDATED` constant at the top of the file (set to the file's last
+  content change, 2026-11-08) formatted in the device locale; bump it when the
+  content changes. [A:146]
+- [x] **"Change password" shown to OAuth-only accounts** — **fixed 2026-11-14.**
+  Settings loads `authService.hasPasswordIdentity()` and the row reads "Set a
+  password" with a one-line explanation when the account has no email
+  identity; the reset screen already skipped the current-password step for
+  those users, so only the label was wrong. [A:285, A:333]
+- [x] **Venue page has no "Create event" CTA for the owner** — **fixed
+  2026-11-14.** An owner with nothing upcoming now sees the Upcoming Events
+  section with a short note and a "Create an event" row to the Create tab;
+  visitors still see no section, as before. [A:481]
+- [ ] **Contrast / scaling leftovers from the theme audit:** `Colors.success`
+  used as text (`components/DiscoverEventCard.tsx:225`, `screens/EventInsights.tsx`),
+  `Colors.warning` stars, `text.disabled` placeholders, `border.light` as a
+  sole input boundary; **zero** `maxFontSizeMultiplier` / `allowFontScaling`
+  anywhere (large-font never tested); reduce-motion honoured in 2 of 9
+  animated files. The Nov 8 pass fixed three *other* contrast items.
+  [A:1408-1429]
+- [ ] **Realtime still carries the anon key while a session is stale** —
+  `utils/sessionGate.ts:52` never blocks realtime by design. [A:1007]
+- [ ] **Maestro airplane-mode flows were never written** (OFFLINE_PLAN §7);
+  `.maestro/` has only `calendar.yaml` and `smoke.yaml`. [A:1271-1275]
+- [ ] Profile "Created" / venue "Upcoming" counts include recurring series
+  whose end date has passed (the lists drop them client-side). [A:602]
+- [ ] Nitpicks: stale error text "status can only be changed through
+  cancel_event" (`20261102110000:161`); `allow_capacity_shrink` uses `'on'`
+  where sibling flags use `'true'` (`20261103120000:182,224`); `refetchAll`
+  identity churn (`screens/ManageEvent.tsx:378-386`). [A:888]
+- [ ] Reviews and Followers lists have never been exercised in a browser run
+  (needs a host account); Followers rows offer no actions. [F:108-109, F:127]
+- [ ] Going-reminder window is ±5 min, so two missed pg_cron runs lose the
+  reminder; widening to ±10 was suggested. [F:118-119] **[DB]**
+- [ ] Public "attended" count as an opt-in profile setting (today
+  `attended_count` is owner-only). [F:48] **[decision]**
 - [ ] Business mode profile: "Created" counts every event ever (no
   upcoming/past split), no rating card (the analytics screen already
   computes the venue average). Small features.
@@ -241,29 +459,85 @@ Google-provider items → under the release blocker (same decision); WebView
 
 ## Database migrations
 
-### Prepared, NOT applied (2026-11-13)
+### Database state (verified read-only, 2026-11-14)
 
-- [ ] `supabase/migrations/20261113100000_event_host_playbook.sql` —
+**All 121 migration files are applied and recorded on the shared local
+database**, and nothing is recorded that is not a file. Reproduce with:
+
+```sql
+select count(*) as applied, max(version) as latest
+  from supabase_migrations.schema_migrations;   -- 121 | 20261113110000
+```
+
+Spot-verified objects from the most recent sets: `collections`,
+`collection_items`, the nine collection RPCs, `event_host_playbook`,
+`businesses.host_day_of_notice` / `host_post_event_notice`, an opt-in
+`send_host_event_notices()`, `profiles.intent`, `events.event_type`,
+`businesses.archived_at` + `archive_business()` / `reopen_business()`,
+`categories.synonyms`, and a single `create_event_with_limit_check` overload
+carrying `p_client_request_id`. Cron jobs `event_reminders` (*/5) and
+`host_event_notices` (*/15) are active.
+
+| Hosted / production | **Never checked.** No record exists of which migrations any hosted project has. Treat as unknown until someone runs the query above against it. |
+| --- | --- |
+
+**The post-apply follow-ups were never done** and are the substance of Step 2
+in the review doc:
+
+- [ ] `npm run backend:types` — not run since Nov 9; the file is ~510 lines
+  behind the live schema and carries three HAND-EDITED headers.
+- [ ] Drop the pre-migration client fallbacks that the applies made dead:
+  the `p_client_request_id` ladder and `createKeyParamUnsupported`
+  (`services/events.ts:26-32,352-370`), `preferredBoostUnsupported`. Decide
+  one consistent rule for the `MISSING`-set degradations in
+  `services/collections.ts:33`, `services/eventPlaybook.ts:24`, calendar and
+  host tools (they also cover a hosted project behind on migrations).
+- [ ] `npm run test:backend` — its collections block has printed SKIP until
+  now and has never executed.
+- [ ] The manual passes the plans deferred "until after apply":
+  `docs/EVENT_COLLECTIONS_PLAN.md` §8 steps 3-6 and
+  `docs/HOST_EVENT_PLAYBOOK_PLAN.md` P8.
+
+### Applied 2026-11-13 (playbook P5/P6)
+
+- [x] `supabase/migrations/20261113100000_event_host_playbook.sql` —
   per-event host checklist state (`event_host_playbook` + two merge RPCs;
-  playbook P5). **Not applied to the shared database**, which another
-  session owns. Validated on a throwaway native cluster
-  (`scripts/db-isolated.sh init`, 120 migrations + seed) with
-  `scripts/test-event-playbook.sql`: all checks pass, and the file is
-  idempotent on re-apply. The app works with or without it — without the
-  table, ticks stay on the device. After applying: `npm run backend:types`
-  (the entries are hand-written in `types/supabase.generated.ts` until
-  then), then re-run the test script.
-- [ ] `supabase/migrations/20261113110000_host_notice_optin.sql` — makes the
+  playbook P5). Validated on a throwaway cluster with
+  `scripts/test-event-playbook.sql` before it was applied; idempotent on
+  re-apply. The app works with or without it — without the table, ticks stay
+  on the device.
+- [x] `supabase/migrations/20261113110000_host_notice_optin.sql` — makes the
   two host cron notices **opt-in** (playbook P6). 20261110160000 gates them
   on `businesses.notifications_enabled`, which defaults TRUE, so applying
-  that file alone would start pushing to every existing host unasked. This
-  adds `host_day_of_notice` / `host_post_event_notice` (both DEFAULT false)
-  and re-creates `send_host_event_notices()` to require them. **Apply after
-  20261110160000.** Validated on the throwaway cluster with
-  `scripts/test-host-notice-optin.sql` (an opted-out host gets nothing; an
-  opted-in host gets one of each; re-runs send no duplicates; the master
-  switch still wins); idempotent on re-apply. Until it is applied the
-  Settings switches stay hidden and no host notice is sent.
+  that file alone would have started pushing to every existing host unasked.
+  This adds `host_day_of_notice` / `host_post_event_notice` (both DEFAULT
+  false) and re-creates `send_host_event_notices()` to require them. Applied
+  after 20261110160000, as required. Validated with
+  `scripts/test-host-notice-optin.sql`. **Live consequence:** the Settings
+  switches are now visible and the `host_event_notices` cron is active, but
+  no host has opted in (0 of 1 businesses), so nothing is being sent. The
+  switches have never been exercised against a real backend.
+
+### Applied 2026-11-10 (host onboarding Stages 1–7)
+
+Eight files, `20261110100000` … `20261110170000`, recorded on the shared DB.
+This tracker never mentioned them in any state — the gap is closed here.
+Details per stage in `docs/HOST_ONBOARDING_PLAN.md` §10-§20.
+
+- [x] `…100000_profile_intent` · `…110000_host_setup_foundations`
+  (`host_type`, `location_kind`, `host_terms_current_version`,
+  `onboarding_completed_at`) · `…120000_event_type_presets`
+  (`events.event_type`) · `…130000_host_onboarding_status`
+- [x] `…140000_host_trust_foundations` (`standing`,
+  `host_verification_requests`, `admin_set_host_standing`) ·
+  `…150000_publish_requires_guidelines` · `…160000_host_lifecycle_notifications`
+  · `…170000_stop_hosting` (`archived_at`, `archive_business`,
+  `reopen_business`)
+- **Behaviour changes now live:** publishing requires the host to have
+  accepted the current guidelines (the client catches `guidelines_required`
+  and retries after Accept), and archived hosts cannot publish. Two
+  regression suites broke on exactly this and were repaired 2026-11-14
+  (`scripts/test-attendance-rpcs.sql`, `scripts/test-host-lifecycle.sql`).
 
 Owner authorized the following migrations for the local database on
 2026-11-08. All four were applied in one transaction and recorded in migration
@@ -349,11 +623,29 @@ fresh or hosted database (see docs/CATEGORIES_AND_SERIES_PLAN.md §7):
   after the taxonomy file. Opt-in "new event in your interests near you".
 
 **Regression suite for the categories/series stack:**
-`scripts/test-categories-series.sql` (rollback-only, ASSERT-based). Run it
-on a scratch copy after applying all 202611091* migrations; see the header.
-On 2026-11-09 it and the four existing suites (host tools, calendar,
-attendance, insights) all passed on a fresh copy with every prepared
-migration applied.
+`scripts/test-categories-series.sql` (rollback-only, ASSERT-based); see the
+header. Run it in a throwaway isolated environment, never against the shared
+cluster (Ground rules).
+
+### SQL suite status (2026-11-14)
+
+All twelve `scripts/test-*.sql` suites were run against the stack's own
+Postgres image in a throwaway container loaded with all 121 migrations + seed.
+**11 pass, no crashes.** Three were repaired in that pass:
+
+- `scripts/test-collections.sql` — asserted an anon refusal by *calling* the
+  function, which segfaulted the cluster (Ground rules); now checks
+  `has_function_privilege`. First time this suite has ever completed on the
+  Supabase engine: 15/15 blocks.
+- `scripts/test-attendance-rpcs.sql` — accepts the host guidelines
+  (`20261110150000`) inside its rolled-back transaction; back to 49/49.
+- `scripts/test-host-lifecycle.sql` — opts its fixture host into the notices
+  that `20261113110000` made opt-in.
+
+The twelfth, `scripts/test-event-insights.sql` `[5.2]`, fails **only** in a
+shim-built isolated environment, whose blanket `GRANT ALL` undoes the
+migration's `REVOKE`; it passes against the real schema. Not a defect — the
+shim is the thing to fix (Ground rules).
 
 **Scratch database name collision (found 2026-11-09).** This worktree and a
 sibling are both named `oak`, so both sessions defaulted to
@@ -372,12 +664,39 @@ PUBLIC` + explicit grants to `authenticated` for RPCs; require a session for
 
 ## Needs a product decision
 
+- [ ] **[decision]** **Toasts over the onboarding progress label.** An error
+  toast is positioned at `insets.top + 16` and can cover the "Step N of 6"
+  label during the onboarding flow (flow 9). Fixing it is a design call, not
+  a bug fix: either move toasts to the bottom inside full-screen flows, or
+  shift the toast band down globally, or move the step label. Changing it
+  blind would contradict the reviewed onboarding behaviour (a failed step
+  save deliberately shows an error toast, pinned by 57 onboarding checks).
 - [ ] **[decision]** Approval-mode events when RSVPs are closed (same trigger
   in `20261103170000`): should pending requests still be approvable after
   the host closes RSVPs? Genuinely product-specific — left open.
 - [ ] **[decision]** Features not started: invite-only events
   (`event_invites`), all-day/multi-day events, "My reports" screen, dark
   mode, real billing periods, real view/share analytics.
+- [ ] **[decision]** Host tools Phase 4, never started and previously missing
+  from this list (`docs/HOST_TOOLS_PLAN.md` §11): attendee **check-in + QR**
+  (`checked_in`, `host_checkin_attendee`), **CSV export**
+  (`export_event_attendees`), **`event_sections`**, and **co-hosts**
+  (`business_members`, also blocking "transfer of ownership" in host
+  onboarding Stage 7). The rest of that phase shipped elsewhere: event-type
+  presets in `20261110120000`, insights in `20261104100000`, weekday
+  recurrence and occurrence exceptions in the Nov 9 set.
+- [ ] **[decision]** Collections, before any further work there
+  (`docs/EVENT_COLLECTIONS_PLAN.md` §6-§7): rule editor vs. collapsing
+  `category_ids[]` to a single column, the full Interests merge, and the four
+  Phase F defaults. These were meant to be settled *before* the migration was
+  applied; it is applied, so they are now overdue rather than blocking.
+- [ ] **[decision]** Discovery modes: all six choices in
+  `docs/DISCOVERY_MODES_PLAN.md` §6 (names, novelty weighting, default
+  radius, whether to ship "Just added" degraded or wait for the server sort,
+  Surprise-me location prompt). Nothing is built.
+- [ ] **[decision]** Categories D1 (`docs/CATEGORIES_AND_SERIES_PLAN.md` §7
+  Phase D): whether a future start date that is not itself an occurrence
+  should be returned as the next date.
 
 ### Decided 2026-11-08 (common practice for event/social apps)
 - **Connection banner over headers:** keep. It ignores touches, and the same
@@ -412,6 +731,89 @@ never exposed, so the hash isn't reversible in practice).
 ---
 
 # Done log
+
+## 2026-11-14 — flows 5–9 (the last agent-doable testing passes)
+
+The UI/UX flow list is now finished on the web/fake-backend side. New suites,
+all green on the first full run after their fixtures were corrected:
+
+- [x] **Flow 5, attendee journey** — `suiteAttendee.mjs` 14/14.
+- [x] **Flow 6, premium lifecycle** — `suitePremium.mjs` 19/19, including the
+  lapse across Create and the premium screens.
+- [x] **Flow 7, privacy from outside** — `suitePrivacy.mjs` 15/15. Worth
+  noting: with "share future events" off the app does not even request the
+  list, so the choice cannot leak through a loading state.
+- [x] **Flow 8, account management** — `suiteAccount.mjs` 10/10.
+- [x] **Flow 9, visual sweep (automatable half)** — `suiteVisual.mjs` 68/68
+  across 11 screens × 390/1280 px, 22 screenshots for the human comparison,
+  plus `scripts/design-token-audit.mjs` for the spacing/radius inventory
+  (1,025 literals; the old "~550 + ~180" estimate was close).
+- [x] **Two flow-9 "known items" resolved:** the teal switch is **stale**
+  (every Switch already sets a brand `trackColor` — now pinned by a computed
+  -style assertion); the onboarding toast overlap is a **design decision**,
+  moved to "Needs a product decision" rather than guessed at.
+
+**No application defects were found in flows 5–9.** Every failure in this
+pass was in my own fixtures or assertions (a missing `waitlist_mode`, the
+`waitlist` payload shape, "No **Active** Subscription" matching a naive
+regex, the real section heading being "Events I'm Planning to Attend",
+unblock sitting behind a confirm, and `/saved` not being the route — it is
+`/saved-events`). Each was corrected and re-run.
+
+**Full verification after the pass:** 17 browser suites, **1,009 checks**, 0
+failures; 12/12 SQL suites on the Supabase image; 1,048 unit tests; app and
+admin typecheck, lint (0 errors) and the admin build (21 pages) all clean.
+
+
+## 2026-11-14 — flow 4 (report → moderation → outcome) + the admin build
+
+- [x] **The admin app did not build.** `next build` failed on
+  `/categories/new`: *"A 'use server' file can only export async functions,
+  found object"* — `admin/app/(dashboard)/categories/actions.ts` exported the
+  `INITIAL_CATEGORY_STATE` constant (and its type) from a `'use server'`
+  module. Both moved to the plain `./shared.ts` the file already imports;
+  `CategoryForm.tsx` imports them from there now. The build has been broken
+  since the categories pages landed on **2026-11-09** — the "compiles all 21
+  routes" check in the Nov 8 batch predates them, and nothing re-ran it.
+  After the fix: **21 pages generated, 25 routes**, admin typecheck and lint
+  clean. (Typecheck alone never caught this: it is a Next build-time rule.)
+- [x] **Flow 4 suite** — `suiteModeration.mjs`, 34/34, five scenarios:
+  R1 event report + duplicate, R2 chat-message report via long-press +
+  duplicate (the harness now synthesises a long press), R3 the reporter's
+  `report_update` notification opening the event, R4 a banned account refused
+  on write with the suspension message while keeping read access (the
+  "banned users can still browse" decision, now actually exercised), R5 the
+  removed-from-chat and suspended-in-chat notices.
+- [x] **Fake backend learned `complaints`** (POST, with the per-target unique
+  violation) so every report path in the app can be driven without a database.
+- Not covered, still open: the admin moderator actions themselves (manual
+  login) and a real `report_update` arriving from the server trigger.
+
+
+## 2026-11-14 — flow 3 (notification routing) + host-tools API regression
+
+- [x] **Pushes routed host notices to the wrong screen.** `app/_layout.tsx`
+  resolved a tapped push with its own copy of the pre-playbook inline rule
+  (`eventId` → `/event/<id>`), so a host tapping "your event is today" or the
+  post-event summary from a *push* landed on the public attendee page, and the
+  verification / standing notices landed on the notification centre instead of
+  Settings — the in-app list had been fixed on Nov 13 (P6) but the push path
+  was not switched. Both now resolve through `utils/notificationRoute`:
+  `notificationRoute` gained the push-only `kind: 'chat'` hint and a
+  configurable fallback (in-app → Discover, push → the notification centre, or
+  a promotion's `myapp://` deep link), and the pure push-payload→route step is
+  `routeFromPushData`, unit-tested under node. `tests/notificationRoute.test.ts`
+  now cross-checks every type between the two entry points (10 tests).
+- [x] **Flow 3 suite** — `suiteNotifications.mjs`, N1 route per type, N2 tap
+  marks read + destination renders: 55/55. Screenshots per type. Device half
+  (real push taps, channels) stays on the device list.
+- [x] **`scripts/regress-host-tools.mjs` run for the first time since the
+  Nov 9–13 migrations**: 19/19 PostgREST-shape checks (named-arg overloads,
+  undefined-key dropping, return decoding) against a private PostgREST bound
+  to the isolated PG17 container (`scripts/pg17-isolated.sh init`, fixture via
+  `apply`, container joined to a private docker network, PostgREST on a
+  verified-free port). Recipe in the review doc.
+
 
 ## 2026-11-08 — final review of everything done today
 

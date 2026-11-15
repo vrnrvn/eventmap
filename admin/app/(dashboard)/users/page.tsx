@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { UsersTable } from './UsersTable';
 import { Pagination, pageFromParams, pageRange } from '../Pagination';
-import { SearchForm, escapeLike } from '../SearchForm';
+import { SearchForm, escapeLike, uuidPrefixRange } from '../SearchForm';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -24,9 +24,15 @@ export default async function UsersPage({
     .range(from, to);
 
   if (q) {
-    // A pasted user id (from logs, reports) finds that user directly; the
-    // old client-side filter matched ids too.
-    query = UUID_RE.test(q) ? query.eq('id', q) : query.ilike('name', `%${escapeLike(q)}%`);
+    // A pasted user id (from logs, reports) finds that user directly, and a
+    // pasted *prefix* of one (the first block or two) finds the ids that start
+    // with it, as the old client-side filter did. Anything else is a name.
+    const range = UUID_RE.test(q) ? null : uuidPrefixRange(q);
+    query = UUID_RE.test(q)
+      ? query.eq('id', q)
+      : range
+        ? query.gte('id', range.lo).lte('id', range.hi)
+        : query.ilike('name', `%${escapeLike(q)}%`);
   }
 
   const { data: users, count } = await query;
@@ -41,7 +47,7 @@ export default async function UsersPage({
   return (
     <div>
       <h1 className="mb-6 text-2xl font-semibold text-zinc-900">Users</h1>
-      <SearchForm action="/users" placeholder="Search by name..." defaultValue={q} />
+      <SearchForm action="/users" placeholder="Search by name, or paste an id or its first characters..." defaultValue={q} />
       <UsersTable key={`${page}:${q}`} users={users ?? []} bannedSet={bannedSet} />
       <Pagination page={page} count={count} basePath="/users" query={q ? { q } : undefined} />
     </div>

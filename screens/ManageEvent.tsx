@@ -92,6 +92,7 @@ import { Avatar } from '@/components/Avatar';
 import { ChatModerationSheet } from '@/components/ChatModerationSheet';
 import { confirmAction } from '@/utils/confirm';
 import { notify } from '@/utils/notify';
+import { blockedOffline } from '@/utils/requireOnline';
 import { classifyRsvpError } from '@/utils/rsvpErrors';
 import { formatEventDate, formatEventWhen } from '@/utils/formatEventWhen';
 import { describeEventTime, formatInZone, getDeviceTimeZone, isValidTimeZone } from '@/utils/timezone';
@@ -541,6 +542,7 @@ export default function ManageEvent() {
   const handleRemoveAttendee = useCallback(
     async (attendee: HostAttendee) => {
       if (!id || removingId) return;
+      if (blockedOffline('remove attendees')) return;
       const ok = await confirmAction({
         title: 'Remove attendee',
         message: `Remove ${attendee.name} from this event? Their RSVP is dropped, they're blocked from the chat and from rejoining, and they'll be notified. You can allow them back later from the Removed list.`,
@@ -573,6 +575,7 @@ export default function ManageEvent() {
   const handleUnbanAttendee = useCallback(
     async (attendee: HostAttendee) => {
       if (!id || removingId) return;
+      if (blockedOffline('lift a ban')) return;
       const ok = await confirmAction({
         title: 'Allow back',
         message: `Let ${attendee.name} join this event again? This also lifts their chat block. They will need to RSVP themselves.`,
@@ -600,6 +603,7 @@ export default function ManageEvent() {
   const handleReviewRequest = useCallback(
     async (attendee: HostAttendee, decision: 'approve' | 'decline') => {
       if (!id || removingId) return;
+      if (blockedOffline('review requests')) return;
       const ok = await confirmAction({
         title: decision === 'approve' ? 'Approve request' : 'Decline request',
         message:
@@ -640,6 +644,7 @@ export default function ManageEvent() {
   const handlePromoteAttendee = useCallback(
     async (attendee: HostAttendee) => {
       if (!id || removingId) return;
+      if (blockedOffline('promote from the waitlist')) return;
       const ok = await confirmAction({
         title: 'Move to going',
         message: `Give ${attendee.name} a spot? They skip the rest of the waitlist and get a notification that they're in.`,
@@ -697,6 +702,7 @@ export default function ManageEvent() {
       successText: string
     ) => {
       if (!id) return;
+      if (blockedOffline('change event settings')) return;
       setSavingSettings(true);
       try {
         await hostToolsService.setEventSettings(id, settings);
@@ -716,6 +722,7 @@ export default function ManageEvent() {
 
   const handleSaveCapacity = useCallback(async () => {
     if (!id || !event) return;
+    if (blockedOffline('change the capacity')) return;
     const trimmed = capacityDraft.trim();
     const next = trimmed === '' ? null : Number(trimmed);
     if (next !== null && (!Number.isInteger(next) || next <= 0)) {
@@ -771,6 +778,7 @@ export default function ManageEvent() {
 
   const handleSendAnnouncement = useCallback(async () => {
     if (!id) return;
+    if (blockedOffline('send an announcement. Your text stays here')) return;
     const body = announceBody.trim();
     if (!body) return;
     const audienceCount =
@@ -833,6 +841,7 @@ export default function ManageEvent() {
   const updateChatMode = useCallback(
     async (settings: { mode?: ChatMode; openPolicy?: 'two_going' | 'any_going' }) => {
       if (!id) return;
+      if (blockedOffline('change the chat mode')) return;
       setSavingChat(true);
       try {
         await eventChatService.setMode(id, settings);
@@ -850,6 +859,7 @@ export default function ManageEvent() {
   const updateChatSettings = useCallback(
     async (settings: { locked?: boolean; slowModeSeconds?: ChatSlowModeSeconds }) => {
       if (!id) return;
+      if (blockedOffline('change chat settings')) return;
       setSavingChat(true);
       try {
         await eventChatService.setSettings(id, settings);
@@ -868,6 +878,7 @@ export default function ManageEvent() {
   // ── Lifecycle actions ─────────────────────────────────────────────────────
   const handleCancelEvent = useCallback(async () => {
     if (!id || !event) return;
+    if (blockedOffline('cancel this event')) return;
     const ok = await confirmAction({
       title: 'Cancel event',
       message:
@@ -888,6 +899,7 @@ export default function ManageEvent() {
 
   const handleNotifyFollowers = useCallback(async () => {
     if (!id || !event) return;
+    if (blockedOffline('notify your followers')) return;
     const ok = await confirmAction({
       title: 'Notify followers',
       message: `Send your followers an in-app notification about "${event.title}"? Followers who were already notified won't get a duplicate.`,
@@ -905,6 +917,7 @@ export default function ManageEvent() {
 
   const handlePublish = useCallback(async () => {
     if (!id || !event) return;
+    if (blockedOffline('publish this event')) return;
     const ok = await confirmAction({
       title: 'Publish event',
       message:
@@ -935,6 +948,7 @@ export default function ManageEvent() {
 
   const handlePostpone = useCallback(async () => {
     if (!id || !event) return;
+    if (blockedOffline('postpone this event')) return;
     const ok = await confirmAction({
       title: 'Postpone event',
       message:
@@ -954,6 +968,7 @@ export default function ManageEvent() {
 
   const handleDuplicate = useCallback(async () => {
     if (!id || !event) return;
+    if (blockedOffline('duplicate this event')) return;
     const ok = await confirmAction({
       title: 'Duplicate event',
       message: 'Create a draft copy with the same details, links and photos, dated a week later? You can edit it before publishing.',
@@ -977,6 +992,7 @@ export default function ManageEvent() {
   const handleToggleUnlisted = useCallback(
     async (unlisted: boolean) => {
       if (!id) return;
+      if (blockedOffline('unlist or relist this event')) return;
       setSavingSettings(true);
       try {
         await eventsService.updateEvent(id, { visibility: unlisted ? 'unlisted' : 'public' });

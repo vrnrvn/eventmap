@@ -1,3 +1,14 @@
+-- HOW TO RUN (rule since 2026-11-14): in a throwaway container on the stack's
+-- own Postgres 17 image, never against the shared cluster —
+--
+--   scripts/pg17-isolated.sh init            # all migrations + seed
+--   scripts/pg17-isolated.sh suites          # every scripts/test-*.sql
+--   scripts/pg17-isolated.sh apply <this file>
+--
+-- Any `scripts/db-scratch.sh` recipe further down is the pre-2026-11-14 way:
+-- it copies the database INSIDE the shared cluster, where a crashed backend
+-- restarts every other session's connections. Do not use it without the
+-- owner's explicit go-ahead. See docs/ISSUES.md "Ground rules".
 -- Regression suite for the host-tools stack (migrations 20261103100000–170000).
 --
 -- Runs ONLY against an isolated scratch copy; everything happens inside one

@@ -1,19 +1,3 @@
-// HAND-EDITED 2026-11-13 (host event playbook P6): businesses
-// host_day_of_notice / host_post_event_notice from the unapplied migration
-// 20261113110000.
-//
-// HAND-EDITED 2026-11-13 (host event playbook P5): event_host_playbook plus
-// set_event_playbook_item / dismiss_event_playbook_stage from the unapplied
-// migration 20261113100000. Regenerate with `npm run backend:types` once it
-// is applied.
-//
-// HAND-EDITED 2026-11-10 (host onboarding Stages 1–2): businesses host columns,
-// nullable location, profiles.intent, get_user_business SETOF, and
-// host_terms_current_version from the unapplied migrations 20261110100000 and
-// 20261110110000; events.event_type (20261110120000) and
-// get_host_onboarding_status (20261110130000); standing, verification
-// requests and their RPCs (20261110140000); archived_at + archive/reopen
-// (20261110170000). Regenerate with `npm run backend:types` once they are applied.
 export type Json =
   | string
   | number
@@ -221,9 +205,9 @@ export type Database = {
           host_type: string
           id: string
           last_reset_date: string
-          location_kind: string
           lat: number | null
           lng: number | null
+          location_kind: string
           logo_url: string | null
           name: string
           notifications_enabled: boolean | null
@@ -253,9 +237,9 @@ export type Database = {
           host_type?: string
           id?: string
           last_reset_date?: string
-          location_kind?: string
           lat?: number | null
           lng?: number | null
+          location_kind?: string
           logo_url?: string | null
           name: string
           notifications_enabled?: boolean | null
@@ -285,9 +269,9 @@ export type Database = {
           host_type?: string
           id?: string
           last_reset_date?: string
-          location_kind?: string
           lat?: number | null
           lng?: number | null
+          location_kind?: string
           logo_url?: string | null
           name?: string
           notifications_enabled?: boolean | null
@@ -313,59 +297,42 @@ export type Database = {
       }
       categories: {
         Row: {
+          color: string | null
           created_at: string
+          description: string
           icon_key: string
           id: string
+          is_active: boolean
           label: string
           slug: string
           sort_order: number
+          synonyms: string[]
         }
         Insert: {
+          color?: string | null
           created_at?: string
+          description?: string
           icon_key: string
           id?: string
+          is_active?: boolean
           label: string
           slug: string
           sort_order?: number
+          synonyms?: string[]
         }
         Update: {
+          color?: string | null
           created_at?: string
+          description?: string
           icon_key?: string
           id?: string
+          is_active?: boolean
           label?: string
           slug?: string
           sort_order?: number
+          synonyms?: string[]
         }
         Relationships: []
-      }
-      event_host_playbook: {
-        Row: {
-          dismissed_stages: string[]
-          event_id: string
-          ticked: string[]
-          updated_at: string
-        }
-        Insert: {
-          dismissed_stages?: string[]
-          event_id: string
-          ticked?: string[]
-          updated_at?: string
-        }
-        Update: {
-          dismissed_stages?: string[]
-          event_id?: string
-          ticked?: string[]
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "event_host_playbook_event_id_fkey"
-            columns: ["event_id"]
-            isOneToOne: true
-            referencedRelation: "events"
-            referencedColumns: ["id"]
-          },
-        ]
       }
       collection_items: {
         Row: {
@@ -830,6 +797,35 @@ export type Database = {
           },
         ]
       }
+      event_host_playbook: {
+        Row: {
+          dismissed_stages: string[]
+          event_id: string
+          ticked: string[]
+          updated_at: string
+        }
+        Insert: {
+          dismissed_stages?: string[]
+          event_id: string
+          ticked?: string[]
+          updated_at?: string
+        }
+        Update: {
+          dismissed_stages?: string[]
+          event_id?: string
+          ticked?: string[]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_host_playbook_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: true
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       event_interactions: {
         Row: {
           created_at: string
@@ -907,6 +903,53 @@ export type Database = {
           },
         ]
       }
+      event_occurrence_exceptions: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          event_id: string
+          id: string
+          kind: string
+          new_end: string | null
+          new_start: string | null
+          note: string | null
+          occurrence_date: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          event_id: string
+          id?: string
+          kind: string
+          new_end?: string | null
+          new_start?: string | null
+          note?: string | null
+          occurrence_date: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          event_id?: string
+          id?: string
+          kind?: string
+          new_end?: string | null
+          new_start?: string | null
+          note?: string | null
+          occurrence_date?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_occurrence_exceptions_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       event_photos: {
         Row: {
           created_at: string
@@ -943,6 +986,7 @@ export type Database = {
         Row: {
           event_id: string
           kind: string
+          occurrence_start: string
           reminder_minutes: number
           sent_at: string
           user_id: string
@@ -950,6 +994,7 @@ export type Database = {
         Insert: {
           event_id: string
           kind?: string
+          occurrence_start?: string
           reminder_minutes: number
           sent_at?: string
           user_id: string
@@ -957,6 +1002,7 @@ export type Database = {
         Update: {
           event_id?: string
           kind?: string
+          occurrence_start?: string
           reminder_minutes?: number
           sent_at?: string
           user_id?: string
@@ -1082,6 +1128,7 @@ export type Database = {
           age_restriction: string
           business_id: string
           category_id: string
+          client_request_id: string | null
           cover_image_url: string | null
           created_at: string
           description: string
@@ -1114,6 +1161,7 @@ export type Database = {
           age_restriction?: string
           business_id: string
           category_id: string
+          client_request_id?: string | null
           cover_image_url?: string | null
           created_at?: string
           description?: string
@@ -1146,6 +1194,7 @@ export type Database = {
           age_restriction?: string
           business_id?: string
           category_id?: string
+          client_request_id?: string | null
           cover_image_url?: string | null
           created_at?: string
           description?: string
@@ -1270,6 +1319,32 @@ export type Database = {
           },
         ]
       }
+      host_notifications_sent: {
+        Row: {
+          event_id: string
+          kind: string
+          sent_at: string
+        }
+        Insert: {
+          event_id: string
+          kind: string
+          sent_at?: string
+        }
+        Update: {
+          event_id?: string
+          kind?: string
+          sent_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "host_notifications_sent_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       host_verification_requests: {
         Row: {
           business_id: string
@@ -1307,7 +1382,22 @@ export type Database = {
           status?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "host_verification_requests_business_id_fkey"
+            columns: ["business_id"]
+            isOneToOne: false
+            referencedRelation: "businesses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "host_verification_requests_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       notifications: {
         Row: {
@@ -1659,6 +1749,48 @@ export type Database = {
           },
         ]
       }
+      rsvp_occurrences: {
+        Row: {
+          created_at: string
+          event_id: string
+          occurrence_date: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_id: string
+          occurrence_date: string
+          status: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          event_id?: string
+          occurrence_date?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rsvp_occurrences_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rsvp_occurrences_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rsvps: {
         Row: {
           created_at: string
@@ -1819,6 +1951,14 @@ export type Database = {
         Args: { p_reason?: string; p_user_id: string }
         Returns: undefined
       }
+      admin_category_stats: {
+        Args: never
+        Returns: {
+          category_id: string
+          total_events: number
+          upcoming_events: number
+        }[]
+      }
       admin_count_pending_chat_reports: { Args: never; Returns: number }
       admin_dismiss_chat_reports: {
         Args: { p_message_id: string }
@@ -1865,6 +2005,10 @@ export type Database = {
           sender_name: string
         }[]
       }
+      admin_reorder_categories: {
+        Args: { p_ids: string[] }
+        Returns: undefined
+      }
       admin_reset_business_event_limit: {
         Args: { p_business_id: string }
         Returns: undefined
@@ -1877,6 +2021,10 @@ export type Database = {
         Args: { p_message_id: string }
         Returns: boolean
       }
+      admin_review_verification: {
+        Args: { p_decision: string; p_note?: string; p_request_id: string }
+        Returns: undefined
+      }
       admin_set_business_premium: {
         Args: { p_business_id: string; p_is_premium: boolean }
         Returns: undefined
@@ -1885,16 +2033,12 @@ export type Database = {
         Args: { p_business_id: string; p_verified: boolean }
         Returns: undefined
       }
-      archive_business: { Args: never; Returns: number }
-      admin_review_verification: {
-        Args: { p_decision: string; p_note?: string; p_request_id: string }
-        Returns: undefined
-      }
       admin_set_host_standing: {
         Args: { p_business_id: string; p_reason?: string; p_standing: string }
         Returns: undefined
       }
       admin_unban_user: { Args: { p_user_id: string }; Returns: undefined }
+      archive_business: { Args: never; Returns: number }
       block_event_chat_user: {
         Args: {
           p_duration_minutes?: number
@@ -1938,6 +2082,7 @@ export type Database = {
           p_address: string
           p_business_id: string
           p_category_id: string
+          p_client_request_id?: string
           p_cover_image_url?: string
           p_description: string
           p_end_datetime: string
@@ -1962,6 +2107,10 @@ export type Database = {
       dismiss_event_chat_reports: {
         Args: { p_message_id: string }
         Returns: number
+      }
+      dismiss_event_playbook_stage: {
+        Args: { p_event_id: string; p_stage: string }
+        Returns: Json
       }
       duplicate_event: { Args: { p_event_id: string }; Returns: string }
       ensure_profile_exists: {
@@ -1991,6 +2140,10 @@ export type Database = {
             Returns: boolean
           }
       event_is_open_for_rsvp: { Args: { p_event_id: string }; Returns: boolean }
+      event_next_effective_occurrence: {
+        Args: { p_event_id: string; p_now: string }
+        Returns: string
+      }
       event_next_occurrence:
         | {
             Args: {
@@ -2009,6 +2162,20 @@ export type Database = {
             }
             Returns: string
           }
+        | {
+            Args: {
+              p_is_recurring: boolean
+              p_now: string
+              p_recurrence_pattern: Json
+              p_start_datetime: string
+              p_timezone: string
+            }
+            Returns: string
+          }
+      event_recurrence_matches: {
+        Args: { p_day: string; p_pattern: Json; p_start_local: string }
+        Returns: boolean
+      }
       event_requires_approval: {
         Args: { p_event_id: string }
         Returns: boolean
@@ -2041,14 +2208,6 @@ export type Database = {
           p_offset?: number
           p_sort?: string
         }
-        Returns: Json
-      }
-      get_event_collection_membership: {
-        Args: { p_event_id: string }
-        Returns: Json
-      }
-      get_events_collection_membership: {
-        Args: { p_event_ids: string[] }
         Returns: Json
       }
       get_event_attendees_page: {
@@ -2137,6 +2296,10 @@ export type Database = {
           unread_count: number
         }[]
       }
+      get_event_collection_membership: {
+        Args: { p_event_id: string }
+        Returns: Json
+      }
       get_event_details: { Args: { event_uuid: string }; Returns: Json }
       get_event_host_attendees_page: {
         Args: {
@@ -2153,8 +2316,29 @@ export type Database = {
         Args: { p_days?: number; p_event_id: string }
         Returns: Json
       }
+      get_events_collection_membership: {
+        Args: { p_event_ids: string[] }
+        Returns: Json
+      }
       get_host_events_counts: { Args: { p_event_ids: string[] }; Returns: Json }
       get_host_onboarding_status: { Args: never; Returns: Json }
+      get_occurrence_attendees_page: {
+        Args: {
+          p_date: string
+          p_event_id: string
+          p_limit?: number
+          p_offset?: number
+        }
+        Returns: Json
+      }
+      get_occurrence_going_counts: {
+        Args: { p_dates: string[]; p_event_id: string }
+        Returns: {
+          going_count: number
+          occurrence_date: string
+          waitlist_count: number
+        }[]
+      }
       get_profiles_display: { Args: { user_ids: string[] }; Returns: Json }
       get_public_profile: { Args: { user_id_param: string }; Returns: Json }
       get_ranked_events: {
@@ -2162,6 +2346,7 @@ export type Database = {
           category_ids?: string[]
           end_date?: string
           p_offset?: number
+          p_preferred_category_ids?: string[]
           radius_km?: number
           result_limit?: number
           search_query?: string
@@ -2205,7 +2390,44 @@ export type Database = {
       }
       get_user_business: {
         Args: never
-        Returns: Database["public"]["Tables"]["businesses"]["Row"][]
+        Returns: {
+          address: string | null
+          archived_at: string | null
+          category: string
+          contact_email: string | null
+          created_at: string
+          description: string
+          events_created_this_month: number
+          google_reviews_url: string | null
+          host_day_of_notice: boolean
+          host_post_event_notice: boolean
+          host_terms_accepted_at: string | null
+          host_terms_version: number | null
+          host_type: string
+          id: string
+          last_reset_date: string
+          lat: number | null
+          lng: number | null
+          location_kind: string
+          logo_url: string | null
+          name: string
+          notifications_enabled: boolean | null
+          onboarding_completed_at: string | null
+          owner_id: string
+          social_handles: Json | null
+          standing: string
+          standing_reason: string | null
+          standing_updated_at: string | null
+          subscription_expires_at: string | null
+          subscription_tier: string
+          verified: boolean
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "businesses"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       get_user_calendar: {
         Args: {
@@ -2216,7 +2438,7 @@ export type Database = {
         }
         Returns: Json
       }
-      get_user_collections: { Args: Record<PropertyKey, never>; Returns: Json }
+      get_user_collections: { Args: never; Returns: Json }
       get_user_going_events: {
         Args: {
           p_limit?: number
@@ -2225,10 +2447,6 @@ export type Database = {
           user_id_param: string
         }
         Returns: Json
-      }
-      get_user_past_event_count: {
-        Args: { user_id_param: string }
-        Returns: number
       }
       get_user_past_events: {
         Args: {
@@ -2310,25 +2528,81 @@ export type Database = {
         Args: { p_event_id: string }
         Returns: number
       }
+      notify_interested_for_event: {
+        Args: { p_event_id: string }
+        Returns: number
+      }
+      notify_occurrence_change: {
+        Args: {
+          p_body: string
+          p_data: Json
+          p_event: Database["public"]["Tables"]["events"]["Row"]
+          p_title: string
+        }
+        Returns: number
+      }
+      occurrence_going_count: {
+        Args: { p_date: string; p_event_id: string }
+        Returns: number
+      }
+      occurrence_guard: {
+        Args: { p_date: string; p_event_id: string }
+        Returns: {
+          accessibility_notes: string | null
+          address: string
+          age_restriction: string
+          business_id: string
+          category_id: string
+          client_request_id: string | null
+          cover_image_url: string | null
+          created_at: string
+          description: string
+          end_datetime: string
+          event_type: string | null
+          id: string
+          is_recurring: boolean
+          lat: number
+          lng: number
+          max_attendees: number | null
+          price_label: string | null
+          publish_state: string
+          recurrence_pattern: Json | null
+          rsvp_closed: boolean
+          rsvp_mode: string
+          start_datetime: string
+          status: string
+          status_note: string | null
+          ticket_url: string | null
+          timezone: string | null
+          title: string
+          updated_at: string
+          visibility: string
+          waitlist_mode: string
+          what_to_bring: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "events"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       postpone_event: {
         Args: { p_event_id: string; p_note?: string }
         Returns: Json
       }
+      promote_occurrence_waitlist: {
+        Args: { p_date: string; p_event_id: string }
+        Returns: number
+      }
       publish_event: { Args: { p_event_id: string }; Returns: Json }
+      push_channel_for_type: { Args: { p_type: string }; Returns: string }
       refresh_event_rsvp_counts: {
         Args: { p_event_id: string }
         Returns: undefined
       }
       reopen_business: { Args: never; Returns: undefined }
       reorder_collections: { Args: { p_ids: string[] }; Returns: undefined }
-      dismiss_event_playbook_stage: {
-        Args: { p_event_id: string; p_stage: string }
-        Returns: Json
-      }
-      set_event_playbook_item: {
-        Args: { p_done: boolean; p_event_id: string; p_item: string }
-        Returns: Json
-      }
       reschedule_event: {
         Args: {
           p_address?: string
@@ -2341,6 +2615,17 @@ export type Database = {
         }
         Returns: Json
       }
+      reschedule_occurrence: {
+        Args: {
+          p_date: string
+          p_event_id: string
+          p_new_end: string
+          p_new_start: string
+          p_note?: string
+          p_notify?: boolean
+        }
+        Returns: Json
+      }
       reset_monthly_event_counter: {
         Args: { business_uuid: string }
         Returns: undefined
@@ -2349,18 +2634,19 @@ export type Database = {
         Args: { p_message_id: string }
         Returns: boolean
       }
+      restore_occurrence: {
+        Args: { p_date: string; p_event_id: string; p_notify?: boolean }
+        Returns: Json
+      }
       send_event_announcement: {
         Args: { p_audience?: string; p_body: string; p_event_id: string }
         Returns: Json
       }
       send_event_reminders: { Args: never; Returns: undefined }
+      send_host_event_notices: { Args: never; Returns: undefined }
       send_promotional_notification: {
         Args: { p_promotion_id: string }
         Returns: number
-      }
-      submit_verification_request: {
-        Args: { p_evidence_url: string; p_note?: string }
-        Returns: string
       }
       set_event_chat_mode: {
         Args: {
@@ -2386,9 +2672,34 @@ export type Database = {
         }
         Returns: undefined
       }
+      set_event_playbook_item: {
+        Args: { p_done: boolean; p_event_id: string; p_item: string }
+        Returns: Json
+      }
+      set_occurrence_rsvp: {
+        Args: { p_date: string; p_event_id: string; p_status: string }
+        Returns: Json
+      }
+      skip_occurrence: {
+        Args: {
+          p_date: string
+          p_event_id: string
+          p_note?: string
+          p_notify?: boolean
+        }
+        Returns: Json
+      }
+      split_series_from: {
+        Args: { p_date: string; p_event_id: string }
+        Returns: string
+      }
       stash_removed_chat_body: {
         Args: { p_message_id: string }
         Returns: undefined
+      }
+      submit_verification_request: {
+        Args: { p_evidence_url: string; p_note?: string }
+        Returns: string
       }
       track_event_interaction: {
         Args: { p_event_id: string; p_kind: string }

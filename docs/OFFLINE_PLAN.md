@@ -2,8 +2,12 @@
 
 Status: written 2026-11-05. Steps 0-7 and the no-dependency part of step 8
 implemented the same day, followed by a full regression pass (see the
-implementation log); the rest is a proposal. Issues found along the way are
-tracked in `docs/ISSUES.md` ("Offline and poor-connection work"). It covers
+implementation log); the rest is a proposal. Issues found along the way were
+tracked in a "Offline and poor-connection work" section of `docs/ISSUES.md`
+that has since moved to
+[`docs/archive/ISSUES-history-2026-10-30_to_11-07.md`](archive/ISSUES-history-2026-10-30_to_11-07.md)
+(from line 927); the remaining offline items live in the current
+`docs/ISSUES.md` under "Offline leftovers" and the device list. It covers
 the ROADMAP item "Offline and poor-connection UX": the user should be able to
 open the app and browse what they have seen before (their plans, saved
 events, recently viewed events, the last discover area, their profile) with
@@ -410,8 +414,11 @@ right away. Steps 1-3 are the foundation for everything after. Batch steps
 3. **Warm-up prefetch:** deferred. Leaning Wi-Fi only when it is built.
 4. **Web offline:** web stays online-only (it still gets the banner and
    in-session caching). No PWA / service worker.
-5. **DB changes (step 9):** prepared only, under `supabase/pending/`, and
-   never applied during this effort (see §4).
+5. **DB changes (step 9):** prepared only and never applied during this
+   effort (see §4). *Correction 2026-11-14:* `supabase/pending/` was never
+   created. The idempotency half landed as a normal migration,
+   `20261108100000_event_create_idempotency.sql`, which the owner applied on
+   2026-11-08; the photo-dedupe half was never written.
 
 ## 7. Testing
 - **Unit (vitest):**
@@ -499,8 +506,12 @@ failed refresh keeps the data and shows a "Couldn't refresh …" toast.
       refresh your profile" toast after an offline refocus
     - saved events keep both rows after an offline refocus
 - **Not done in step 0:** the event-create idempotency key and photo dedupe
-  (DB, step 9, prepared later under `supabase/pending/`). The EditEvent
-  reschedule re-send moves to step 6.
+  (DB, step 9). *Correction 2026-11-14:* idempotency shipped as
+  `20261108100000_event_create_idempotency.sql` (applied 2026-11-08); photo
+  dedupe was never written, and the Nov 8 review concluded a unique
+  `(event_id, url)` constraint would never fire because every upload gets a
+  unique URL — the real fix shipped in `eventsService.addEventPhoto`. The
+  EditEvent reschedule re-send moves to step 6.
 
 ### Step 1: connectivity foundations (2026-11-05)
 - **`utils/networkErrors.ts`:** `classifyError` → `network | timeout |
@@ -991,6 +1002,13 @@ failed refresh keeps the data and shows a "Couldn't refresh …" toast.
   prefetch, the vendored Google markerclusterer (`scripts/vendor-map.mjs`
   downloads it). Location fallback and remembering the last map area were
   already covered in steps 0 and 4.
+  *Correction 2026-11-14:* `expo-image` **was** installed the next day
+  (`package.json`, `~3.0.11`) and is used in ten files including
+  `screens/EventDetail.tsx` and `app/(tabs)/discover.tsx`; whether the disk
+  cache / prefetch behaviour from §3.10 is actually configured was not
+  re-checked. The clusterer is still loaded from unpkg
+  (`utils/googleMapHtml.ts:178`) and sits under the deferred map-provider
+  decision. `MAP_HTML_VERSION` is now 11, not 9.
 
 **Final regression pass.**
 - **Coverage:** 547 unit tests, typecheck and lint diff are clean. The web

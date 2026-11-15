@@ -17,19 +17,8 @@ import { rpcArgs } from './rpcArgs';
  * mid-request): the event may exist even though the call failed.
  */
 const uncertainCreates = new Set<string>();
-/**
- * Set once the server shows it doesn't know p_preferred_category_ids
- * (20261109110000 not applied): later pages skip the boost instead of
- * failing first and retrying every time.
- */
-let preferredBoostUnsupported = false;
-/** Set once the server shows it doesn't know p_client_request_id (pending migration). */
-let createKeyParamUnsupported = false;
 /** How far back a retry looks for the event an uncertain attempt created. */
 const RECOVERY_WINDOW_MS = 30 * 60 * 1000;
-
-const isMissingFunction = (err: { code?: string } | null | undefined) =>
-  err?.code === '42883' || err?.code === 'PGRST202';
 
 export type CreateEventResult = {
   id: string;
@@ -150,7 +139,8 @@ export const eventsService = {
     filters: Partial<FilterOptions> = {},
     page: { limit: number; offset: number }
   ): Promise<{ items: RankedEvent[]; hasMore: boolean }> {
-    const args = {
+    // p_preferred_category_ids (20261109110000) defaults to NULL = no boost.
+    const args = rpcArgs('get_ranked_events', {
       user_lat: userLat,
       user_lng: userLng,
       radius_km: filters.radiusKm || 50,
@@ -160,23 +150,11 @@ export const eventsService = {
       search_query: filters.searchQuery || undefined,
       result_limit: page.limit,
       p_offset: page.offset,
-    };
-    const preferred = filters.preferredCategories?.length ? filters.preferredCategories : null;
-    const callRanked = (withBoost: boolean) =>
-      supabase.rpc(
-        'get_ranked_events',
-        // The boost argument is only known after 20261109110000; cast until
-        // types/supabase.generated.ts is regenerated from that schema.
-        (withBoost ? { ...args, p_preferred_category_ids: preferred } : args) as typeof args
-      );
-    const boost = preferred != null && !preferredBoostUnsupported;
-    let { data, error } = await callRanked(boost);
-    if (error && boost && isMissingFunction(error)) {
-      // PostgREST matches functions by argument names, so an unknown name is
-      // PGRST202 and nothing ran: retry without the boost.
-      preferredBoostUnsupported = true;
-      ({ data, error } = await callRanked(false));
-    }
+      p_preferred_category_ids: filters.preferredCategories?.length
+        ? filters.preferredCategories
+        : null,
+    });
+    const { data, error } = await supabase.rpc('get_ranked_events', args);
     if (error) throw error;
     const items = (data || []) as RankedEvent[];
     return { items, hasMore: items.length >= page.limit };
@@ -349,27 +327,13 @@ export const eventsService = {
       p_publish_state: eventData.publishState ?? 'published',
     });
 
-    // p_client_request_id exists only once the pending idempotency migration
-    // is applied (it isn't in the generated types yet). PostgREST resolves by
-    // argument names, so an unknown name is PGRST202 and nothing ran; retry
-    // without it and remember for the session.
-    let res;
-    if (eventData.requestKey && !createKeyParamUnsupported) {
-      const withKey = supabase.rpc.bind(supabase) as unknown as (
-        f: 'create_event_with_limit_check',
-        a: typeof args & { p_client_request_id: string }
-      ) => ReturnType<typeof supabase.rpc<'create_event_with_limit_check'>>;
-      res = await withKey('create_event_with_limit_check', {
-        ...args,
-        p_client_request_id: eventData.requestKey,
-      });
-      if (isMissingFunction(res.error)) {
-        res = await supabase.rpc('create_event_with_limit_check', args);
-        if (!isMissingFunction(res.error)) createKeyParamUnsupported = true;
-      }
-    } else {
-      res = await supabase.rpc('create_event_with_limit_check', args);
-    }
+    // 20261108100000 is applied, so the server dedupes on p_client_request_id:
+    // a repeated key returns the existing event instead of creating a second
+    // one (and without spending another monthly slot).
+    const res = await supabase.rpc('create_event_with_limit_check', {
+      ...args,
+      p_client_request_id: eventData.requestKey ?? undefined,
+    });
     if (res.error) throw res.error;
 
     const eventId = res.data;

@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-nativ
 import { Star } from '@/components/icons.generated';
 import { Avatar } from '@/components/Avatar';
 import { notify } from '@/utils/notify';
+import { blockedOffline } from '@/utils/requireOnline';
 import { Colors, Spacing, Typography } from '@/constants/theme';
 import type { ReviewWithProfile } from '@/services/reviews';
 
@@ -21,6 +22,8 @@ export function ReviewCard({ review, isOwner, onRespond, onReport, canReport }: 
 
   const handleSubmitResponse = async () => {
     if (!onRespond || !responseText.trim()) return;
+    // Keeps the draft in the editor; an early resolve would read as saved.
+    if (blockedOffline('post your response')) return;
     setSaving(true);
     try {
       await onRespond(review.id, responseText.trim());

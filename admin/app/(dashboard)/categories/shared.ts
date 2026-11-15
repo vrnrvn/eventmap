@@ -1,3 +1,25 @@
+import type { CategoryFormErrors, CategoryInput } from '@/lib/categoryForm';
+
+/**
+ * useActionState's state for the category form.
+ *
+ * Lives here rather than in actions.ts because that file is 'use server', and
+ * a server-action module may only export async functions — exporting the
+ * constant from there broke `next build` on /categories/new with "A 'use
+ * server' file can only export async functions, found object" (found and
+ * fixed 2026-11-14; the admin app had not been built since these pages
+ * landed on 2026-11-09).
+ */
+export type CategoryActionState = {
+  errors: CategoryFormErrors;
+  /** Whole-form failure (permissions, duplicate slug…). */
+  message: string | null;
+  /** Echoed back so the form keeps what was typed after a failed submit. */
+  values: CategoryInput | null;
+};
+
+export const INITIAL_CATEGORY_STATE: CategoryActionState = { errors: {}, message: null, values: null };
+
 /** Row shape the categories pages work with (new columns optional pre-migration). */
 export type AdminCategory = {
   id: string;

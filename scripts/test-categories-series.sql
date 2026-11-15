@@ -1,3 +1,14 @@
+-- HOW TO RUN (rule since 2026-11-14): in a throwaway container on the stack's
+-- own Postgres 17 image, never against the shared cluster —
+--
+--   scripts/pg17-isolated.sh init            # all migrations + seed
+--   scripts/pg17-isolated.sh suites          # every scripts/test-*.sql
+--   scripts/pg17-isolated.sh apply <this file>
+--
+-- Any `scripts/db-scratch.sh` recipe further down is the pre-2026-11-14 way:
+-- it copies the database INSIDE the shared cluster, where a crashed backend
+-- restarts every other session's connections. Do not use it without the
+-- owner's explicit go-ahead. See docs/ISSUES.md "Ground rules".
 -- Regression suite for the categories + recurring-series stack
 -- (migrations 20261109100000 … 20261109170000; docs/CATEGORIES_AND_SERIES_PLAN.md).
 --
@@ -121,10 +132,15 @@ SELECT '91000000-0000-4000-8000-000000000010'::uuid, biz, 'Weekly Jam', 'fixture
        date_trunc('minute', now()) - interval '7 days' + interval '180 minutes',
        37.7749, -122.4194, 'x', 'active', 'published', 'public', true, '{"frequency":"weekly","interval":1}', 'UTC', 2, 'auto'
 FROM ctx;
+-- The fixture event above is zoned 'UTC', so these dates must be UTC days too.
+-- Casting a timestamptz straight to date uses the *session* time zone: on a
+-- cluster whose session zone is not UTC (a native Postgres rather than the
+-- Supabase container) this made the suite fail after ~19:00 local with
+-- `invalid_occurrence` at restore_occurrence.
 CREATE TEMP TABLE d AS
-SELECT (now() + interval '60 minutes')::date AS d1,
-       (now() + interval '60 minutes' + interval '7 days')::date AS d2,
-       (now() + interval '60 minutes' + interval '14 days')::date AS d3;
+SELECT ((now() + interval '60 minutes') AT TIME ZONE 'UTC')::date AS d1,
+       ((now() + interval '60 minutes' + interval '7 days') AT TIME ZONE 'UTC')::date AS d2,
+       ((now() + interval '60 minutes' + interval '14 days') AT TIME ZONE 'UTC')::date AS d3;
 INSERT INTO rsvps (event_id, user_id, status) SELECT '91000000-0000-4000-8000-000000000010', a, 'going' FROM ctx;
 UPDATE profiles SET event_reminder_enabled = true, event_reminder_minutes = 60 WHERE id IN (SELECT a FROM ctx UNION SELECT b FROM ctx UNION SELECT host FROM ctx);
 

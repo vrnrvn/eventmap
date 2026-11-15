@@ -1,6 +1,12 @@
 # Host onboarding plan
 
-Status: written 2026-11-10. This is a proposal only; nothing here is built yet.
+Status: written 2026-11-10; **Stages 1–7 were built that same day and all eight
+migrations (`20261110100000`–`20261110170000`) are applied** to the shared
+local database (verified 2026-11-14). Header corrected 2026-11-14 — it said
+"nothing here is built yet", which was true only for the hour the plan was
+written. Still open: Stage 8 (growth), the Stage 6 leftovers in §18, transfer
+of ownership in §19, type regeneration, and every device/native pass (§20).
+Hosted databases have never been checked.
 It ties together `docs/ONBOARDING_PLAN.md` (attendee onboarding),
 `docs/HOST_TOOLS_PLAN.md` (Manage event hub, attendance, publishing, time
 zones) and `docs/CATEGORIES_AND_SERIES_PLAN.md` (categories, series). Those

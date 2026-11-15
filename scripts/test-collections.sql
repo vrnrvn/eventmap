@@ -1,3 +1,14 @@
+-- HOW TO RUN (rule since 2026-11-14): in a throwaway container on the stack's
+-- own Postgres 17 image, never against the shared cluster —
+--
+--   scripts/pg17-isolated.sh init            # all migrations + seed
+--   scripts/pg17-isolated.sh suites          # every scripts/test-*.sql
+--   scripts/pg17-isolated.sh apply <this file>
+--
+-- Any `scripts/db-scratch.sh` recipe further down is the pre-2026-11-14 way:
+-- it copies the database INSIDE the shared cluster, where a crashed backend
+-- restarts every other session's connections. Do not use it without the
+-- owner's explicit go-ahead. See docs/ISSUES.md "Ground rules".
 -- Regression suite for private event collections
 -- (migration 20261112100000_event_collections.sql; docs/EVENT_COLLECTIONS_PLAN.md).
 --
@@ -17,6 +28,15 @@
 -- Needs the local seed: one premium business with an owner and two other
 -- profiles. RLS is exercised by switching to the `authenticated` role, so the
 -- API roles must be able to reach the public schema as they can on Supabase.
+--
+-- NEVER provoke a "permission denied for function" error while the current
+-- role is anon / authenticated / service_role. On the Supabase Postgres image
+-- (17.6.1.106, `supautils.hint_roles = anon, authenticated, service_role`)
+-- that error segfaults the backend, and Postgres then crash-restarts every
+-- connection in the cluster — the shared database included. A plain role gets
+-- a normal error, which is why this only ever bites through these suites.
+-- Assert `has_function_privilege(...)` instead of calling the function.
+-- Reproduced and root-caused 2026-11-14; see docs/REVIEW_AND_ROADMAP_2026-11-14.md.
 BEGIN;
 SET LOCAL client_min_messages = notice;
 
@@ -174,8 +194,13 @@ BEGIN
   ASSERT pg_temp.raises(format($q$INSERT INTO collection_items (collection_id, event_id) VALUES (%L, %L)$q$, v_manual, f.e_sports), '%row-level security%'),
     '[1.19] cannot pin into someone else''s collection';
   ASSERT json_array_length(get_collection_events(v_manual)) = 0, '[1.20] someone else''s collection reads as empty';
-  PERFORM pg_temp.as_anon();
-  ASSERT pg_temp.raises('SELECT get_user_collections()', '%permission denied%'), '[1.21] anonymous callers are refused outright';
+  -- Checked as a privilege, never by calling the function as anon: on the
+  -- Supabase Postgres image, a "permission denied for function" error raised
+  -- while the current role is anon / authenticated / service_role segfaults
+  -- the backend and crash-restarts the entire cluster (supautils.hint_roles).
+  -- See the header of this file.
+  ASSERT NOT has_function_privilege('anon', 'public.get_user_collections()', 'EXECUTE'),
+    '[1.21] anonymous callers are refused outright';
   PERFORM pg_temp.as_super();
   RAISE NOTICE 'PASS: creating collections';
 END $$;
@@ -440,8 +465,9 @@ BEGIN
   ASSERT json_array_length(get_events_collection_membership('{}'::uuid[])) = 0, '[12.4] empty input';
   PERFORM pg_temp.as_user(f.b);
   ASSERT json_array_length(get_events_collection_membership(ARRAY[f.e_music1])) = 0, '[12.5] scoped to the caller';
-  PERFORM pg_temp.as_anon();
-  ASSERT pg_temp.raises(format($q$SELECT get_events_collection_membership(ARRAY[%L::uuid])$q$, f.e_music1), '%permission denied%'), '[12.6] anon refused';
+  -- Privilege check rather than an anon call; see the note at [1.21].
+  ASSERT NOT has_function_privilege('anon', 'public.get_events_collection_membership(uuid[])', 'EXECUTE'),
+    '[12.6] anon refused';
   PERFORM pg_temp.as_super();
   RAISE NOTICE 'PASS: batched membership';
 END $$;

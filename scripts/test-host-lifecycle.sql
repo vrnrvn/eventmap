@@ -1,3 +1,14 @@
+-- HOW TO RUN (rule since 2026-11-14): in a throwaway container on the stack's
+-- own Postgres 17 image, never against the shared cluster —
+--
+--   scripts/pg17-isolated.sh init            # all migrations + seed
+--   scripts/pg17-isolated.sh suites          # every scripts/test-*.sql
+--   scripts/pg17-isolated.sh apply <this file>
+--
+-- Any `scripts/db-scratch.sh` recipe further down is the pre-2026-11-14 way:
+-- it copies the database INSIDE the shared cluster, where a crashed backend
+-- restarts every other session's connections. Do not use it without the
+-- owner's explicit go-ahead. See docs/ISSUES.md "Ground rules".
 -- Regression suite for 20261110160000_host_lifecycle_notifications.sql and
 -- 20261110170000_stop_hosting.sql.
 -- Self-contained, rolled back. Run ONLY against an isolated database.
@@ -39,6 +50,22 @@ WHERE email LIKE 'lc-%@test.local' ON CONFLICT (id) DO NOTHING;
 UPDATE profiles SET is_admin = true WHERE id = '50000000-0000-4000-8000-00000000000a';
 INSERT INTO businesses (id, owner_id, name, category, address, lat, lng, description, host_terms_version, host_terms_accepted_at)
 VALUES ('51000000-0000-4000-8000-000000000001', '50000000-0000-4000-8000-000000000001', 'LC Bar', 'Other', '1 Main', 1, 2, 'Desc', 1, now());
+
+-- 20261113110000 made the two host notices opt-in (both columns DEFAULT
+-- false), so a host that has not opted in now receives nothing. Opt the
+-- fixture host in; the opt-out path has its own suite
+-- (scripts/test-host-notice-optin.sql). Guarded so this suite still runs on a
+-- database that predates that migration.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'businesses'
+               AND column_name = 'host_day_of_notice') THEN
+    EXECUTE 'UPDATE businesses
+                SET host_day_of_notice = true, host_post_event_notice = true
+              WHERE id = ''51000000-0000-4000-8000-000000000001''';
+  END IF;
+END $$;
 
 -- ── Day-of and post-event notices ──────────────────────────────────────────
 -- In window: starts in 3 hours. Out of window: starts in 10 hours.

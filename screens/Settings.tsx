@@ -36,6 +36,7 @@ import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/con
 import { clearOnboardingDraft } from '@/utils/onboardingDraft';
 import { confirmAction } from '@/utils/confirm';
 import { notify, notifyConfirm } from '@/utils/notify';
+import { blockedOffline } from '@/utils/requireOnline';
 import { authService } from '@/services/auth';
 import { deleteAccount, AccountDeletionUnavailableError } from '@/services/account';
 import { supabase } from '@/services/supabase';
@@ -187,6 +188,19 @@ export default function SettingsScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const [emailForm, setEmailForm] = useState({ open: false, value: '', saving: false });
+  // OAuth-only accounts (Google / Facebook) have no password to change; the
+  // reset screen already skips the current-password step for them, so only
+  // the label was wrong (re-opened 2026-11-14). Default true keeps the old
+  // wording until the identities are known.
+  const [hasPassword, setHasPassword] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    authService
+      .hasPasswordIdentity()
+      .then((v) => { if (!cancelled) setHasPassword(v); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [user?.id]);
   const [deletingAccount, setDeletingAccount] = useState(false);
 
   useFocusEffect(
@@ -325,6 +339,7 @@ export default function SettingsScreen() {
 
   const handleSaveUser = async () => {
     if (!user || !validateUser()) return;
+    if (blockedOffline('save your profile. Your edits stay on this screen')) return;
     setSaving('user');
     try {
       await profilesService.updateProfile(user.id, {
@@ -354,6 +369,7 @@ export default function SettingsScreen() {
 
   const handleSaveBusiness = async () => {
     if (!userBusiness || !validateBusiness()) return;
+    if (blockedOffline('save your business details. Your edits stay on this screen')) return;
     setSaving('business');
     try {
       await businessesService.updateBusiness(userBusiness.id, {
@@ -431,6 +447,7 @@ export default function SettingsScreen() {
     value: boolean | number | null
   ) => {
     if (!user) return;
+    if (blockedOffline('change notification settings')) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const next = { ...notificationForm, [field]: value };
     setNotificationForm(next);
@@ -462,6 +479,7 @@ export default function SettingsScreen() {
 
   const handleBusinessNotificationToggle = async (value: boolean) => {
     if (!userBusiness) return;
+    if (blockedOffline('change business notifications')) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const prev = businessNotificationForm;
     setBusinessNotificationForm({ ...prev, notificationsEnabled: value });
@@ -485,6 +503,7 @@ export default function SettingsScreen() {
     value: boolean
   ) => {
     if (!userBusiness) return;
+    if (blockedOffline('change host notices')) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const prev = businessNotificationForm;
     setBusinessNotificationForm({ ...prev, [field]: value });
@@ -504,6 +523,7 @@ export default function SettingsScreen() {
     value: boolean
   ) => {
     if (!user) return;
+    if (blockedOffline('change privacy settings')) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const next = { ...privacyForm, [field]: value };
     setPrivacyForm(next);
@@ -567,6 +587,7 @@ export default function SettingsScreen() {
 
   const handleRestartOnboarding = async () => {
     if (!user) return;
+    if (blockedOffline('restart setup')) return;
     const ok = await confirmAction({
       title: 'Redo setup?',
       message: 'Walk through the setup steps again. Your current answers are kept and shown as defaults.',
@@ -588,6 +609,7 @@ export default function SettingsScreen() {
   };
 
   const handleChangeEmail = async () => {
+  if (blockedOffline('change your email')) return;
     const newEmail = emailForm.value.trim();
     if (!/\S+@\S+\.\S+/.test(newEmail)) {
       notify.error('Please enter a valid email address.');
@@ -1804,14 +1826,18 @@ export default function SettingsScreen() {
                   onPress={handleChangePassword}
                   activeOpacity={0.7}
                   accessibilityRole="button"
-                  accessibilityLabel="Change password"
+                  accessibilityLabel={hasPassword ? 'Change password' : 'Set a password'}
                 >
                   <View style={[styles.fieldIcon, { backgroundColor: accentSoft }]}>
                     <KeyRound size={16} color={accentColor} />
                   </View>
                   <View style={styles.privacyContent}>
-                    <Text style={styles.privacyTitle}>Change password</Text>
-                    <Text style={styles.privacyDesc}>Set a new password for your account</Text>
+                    <Text style={styles.privacyTitle}>{hasPassword ? 'Change password' : 'Set a password'}</Text>
+                    <Text style={styles.privacyDesc}>
+                      {hasPassword
+                        ? 'Set a new password for your account'
+                        : 'You signed in with Google or Facebook. Add a password to sign in with email too.'}
+                    </Text>
                   </View>
                   <ChevronRight size={18} color={Colors.text.tertiary} />
                 </TouchableOpacity>

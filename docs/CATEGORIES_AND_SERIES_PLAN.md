@@ -1,8 +1,13 @@
 # Event categories and recurring series plan
 
 Status: written 2026-11-09. Phases A–F implemented the same day (see §7, "Implementation log");
-E and F have listed remainders. All seven migrations are prepared but
-unapplied; the client works without them. §8 lists status and the open
+E and F have listed remainders. **All eight migrations (`20261109100000`–
+`20261109170000`) are applied** to the shared local database (verified
+2026-11-14). Header corrected 2026-11-14 — it said "seven migrations …
+prepared but unapplied"; there are eight files and §8 already recorded the
+apply. Type regeneration (§8) is still outstanding, and the E-R1 server half
+is still open — the collections migration later reused the plain
+`event_next_occurrence` in three more places. §8 lists status and the open
 gaps found along the way.
 Companion to `docs/HOST_TOOLS_PLAN.md` (host tooling) and
 `docs/ONBOARDING_PLAN.md` (where `preferred_categories` came from).

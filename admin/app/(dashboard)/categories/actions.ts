@@ -4,18 +4,8 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { CATEGORY_ICON_KEYS } from '@/lib/categoryIcons';
-import { hasErrors, readCategoryForm, type CategoryFormErrors, type CategoryInput } from '@/lib/categoryForm';
-import { describeWriteError } from './shared';
-
-export type CategoryActionState = {
-  errors: CategoryFormErrors;
-  /** Whole-form failure (permissions, duplicate slug…). */
-  message: string | null;
-  /** Echoed back so the form keeps what was typed after a failed submit. */
-  values: CategoryInput | null;
-};
-
-export const INITIAL_CATEGORY_STATE: CategoryActionState = { errors: {}, message: null, values: null };
+import { hasErrors, readCategoryForm } from '@/lib/categoryForm';
+import { describeWriteError, type CategoryActionState } from './shared';
 
 /**
  * Create (id null) or update a category. Writes go through the admin's own

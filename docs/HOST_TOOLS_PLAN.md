@@ -1,7 +1,13 @@
 # Host organisation tools plan
 
-Status: written 2026-11-03. Phase 1 foundations started the same day (see
-"Implementation log" at the end). The rest is a proposal. This is
+Status: written 2026-11-03. Phases 1–3 were built (see "Implementation log"
+at the end) and **every `20261103*` and `20261104*` migration is applied** to
+the shared local database (verified 2026-11-14). Header and the apply
+checklist corrected 2026-11-14: they still said "prepared, none applied".
+Phase 4 remains the open scope, minus the parts that shipped elsewhere (see
+that section). Note also that §1 "What exists today" describes the state in
+early November and has drifted — e.g. the Create tab is no longer gated on
+`hasBusiness`, and `host_remove_attendee` is now called from the hub. This is
 a review of what hosts can do today and a proposal for a coherent set of
 organisation tools covering attendance, details, time zones, moderation and
 communication, sized for small meetups through large venue events.
@@ -386,7 +392,7 @@ Prepared, not applied: `20261103130000_event_settings_and_announcements.sql`.
 
 ## 11. Status and what remains (as of 2026-11-03)
 
-### Delivered in Phase 1 (client shipped; four migrations prepared, none applied)
+### Delivered in Phase 1 (client shipped; the four migrations are applied)
 
 | Area | Client | DB file (unapplied) |
 | --- | --- | --- |
@@ -399,12 +405,12 @@ Prepared, not applied: `20261103130000_event_settings_and_announcements.sql`.
 | Announce to attendees | done | `20261103130000` |
 | Shared primitives: `SegmentedControl`, `SettingsSection`, `SettingsRow` | done | — |
 
-### Apply checklist (for whoever owns the shared DB)
+### Apply checklist (status 2026-11-14)
 
-1. Apply `20261103100000` → `110000` → `120000` → `130000` in order (each re-applies idempotently; validated on scratch after a fresh dump).
-2. `npm run backend:types`; replace `untypedRpc` casts in `services/hostTools.ts` and `services/events.ts` with typed `supabase.rpc`.
-3. Decide on `get_user_past_event_count()` (hand-applied, no file) and file it.
-4. Push channels / icons for `host_announcement` on Android if a dedicated channel is wanted (currently `default`).
+1. [x] Apply `20261103100000` → `110000` → `120000` → `130000` in order — **done**; recorded in `schema_migrations`.
+2. [~] `npm run backend:types` — **still outstanding** (the types are ~510 lines behind the live schema). The second half, replacing the `untypedRpc` casts in `services/hostTools.ts` and `services/events.ts` with typed `supabase.rpc`, was **done on 2026-11-08**; no `untypedRpc` remains in `services/`.
+3. [ ] Decide on `get_user_past_event_count()` — **still open**. It exists on the shared DB with no migration file, so a fresh or hosted database will not have it.
+4. [ ] Push channels / icons for `host_announcement` on Android — **still open**; it routes to the catch-all `events` channel (`20261108130000`). The app now creates four channels, so a dedicated one is a choice, not a gap.
 
 ### Phase 2 — Time zones (plan §4D) — delivered 2026-11-03, see ISSUES.md "Phase 2"
 
@@ -424,11 +430,32 @@ Prepared, not applied: `20261103130000_event_settings_and_announcements.sql`.
 
 ### Phase 4 — Presets, check-in, export, sections, recurrence, insights (plan §3, §4B, §4E, §4H; 16–22 h)
 
-- Event-size presets at creation (prefill only).
-- Check-in (`checked_in` RSVP status, `host_checkin_attendee`, rotating QR via `expo-camera`), CSV export (`export_event_attendees`), both premium.
-- `event_sections` (agenda / line-up / FAQ), premium, max 10.
-- Recurrence: `byWeekday`, `count`, per-occurrence overrides (skip / move one date); reminders keyed off the next occurrence. Per-occurrence RSVP stays a separate decision (plan §9 Q6).
-- Real insights from `event_views`; server-side tier gate on analytics RPCs.
+Status corrected 2026-11-14: **over half of this phase shipped under other
+plans**, so the remaining scope is smaller than the 16–22 h estimate.
+
+Already delivered elsewhere:
+
+- [x] Event-type presets at creation — host onboarding Stage 3,
+  `20261110120000_event_type_presets` (`events.event_type`,
+  `utils/eventPresets.ts`, `components/EventPresetPicker.tsx`).
+- [x] Recurrence `byWeekday` / `count` and per-occurrence overrides —
+  `20261109130000_recurrence_patterns_v2`, `20261109140000_occurrence_exceptions`
+  (named `occurrence_exceptions`, not `event_occurrence_overrides`), with
+  reminders keyed off the effective occurrence.
+- [x] Per-occurrence RSVP — built in `20261109150000_rsvp_occurrences`, so §9
+  Q6 was answered by building it, not by deferring it.
+- [x] Real insights and the server-side tier gate — `20261104100000_event_insights`
+  (`get_event_insights`, `get_business_analytics`, both premium-gated
+  server-side); `screens/EventInsights.tsx`.
+
+Still not started — this is the actual remaining Phase 4:
+
+- [ ] Check-in: `checked_in` RSVP status, `host_checkin_attendee`, rotating QR
+  via `expo-camera`. Premium. Also blocks the playbook's "check-in" step
+  (`docs/HOST_EVENT_PLAYBOOK_PLAN.md` §3.1) and the analytics plan's check-in
+  rate.
+- [ ] CSV export (`export_event_attendees`). Premium.
+- [ ] `event_sections` (agenda / line-up / FAQ). Premium, max 10.
 
 ### Cross-cutting, any phase
 

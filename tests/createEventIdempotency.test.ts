@@ -151,18 +151,22 @@ describe('createEvent idempotency', () => {
     expect(eventsService.hasUncertainCreate('key-d')).toBe(false);
   });
 
-  it('falls back to the pre-migration shape when the server does not know the key', async () => {
-    state.rpcImpl = (_fn, args) =>
-      'p_client_request_id' in args
-        ? { data: null, error: { code: 'PGRST202', message: 'no function' } }
-        : { data: 'evt-plain', error: null };
-    const res = await eventsService.createEvent(input('key-e'));
-    expect(res.id).toBe('evt-plain');
-    // Remembered for the session: the next create skips the doomed call.
-    state.rpcCalls = [];
-    await eventsService.createEvent(input('key-f'));
+  // 20261108100000 is applied, so the key always goes to the server and the
+  // server dedupes on it. The old probe-and-retry fallback (one doomed call
+  // on PGRST202, then a keyless retry remembered for the session) was removed
+  // on 2026-11-14: it cost a round trip and, when it fired, silently gave up
+  // idempotency — which is what produced duplicate events in the first place.
+  it('always sends the request key in a single call', async () => {
+    await eventsService.createEvent(input('key-e'));
     expect(state.rpcCalls).toHaveLength(1);
-    expect(state.rpcCalls[0].args).not.toHaveProperty('p_client_request_id');
+    expect(state.rpcCalls[0].args).toMatchObject({ p_client_request_id: 'key-e' });
+  });
+
+  it('omits the key only when the caller did not supply one', async () => {
+    const { requestKey: _omitted, ...noKey } = input('key-f');
+    await eventsService.createEvent(noKey);
+    expect(state.rpcCalls).toHaveLength(1);
+    expect(state.rpcCalls[0].args.p_client_request_id).toBeUndefined();
   });
 });
 

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { CATEGORY_ICON_KEYS } from '@/lib/categoryIcons';
 import { formatSynonyms, normalizeHex, slugify, whiteContrast, type CategoryInput } from '@/lib/categoryForm';
 import { CategoryGlyph } from './CategoryGlyph';
-import { INITIAL_CATEGORY_STATE, type CategoryActionState } from './actions';
+import { INITIAL_CATEGORY_STATE, type CategoryActionState } from './shared';
 import { FALLBACK_COLOR, type AdminCategory } from './shared';
 
 type Props = {

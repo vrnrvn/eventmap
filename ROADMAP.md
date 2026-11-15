@@ -15,29 +15,45 @@ This is ongoing product work. Estimates exclude the local setup already implemen
 Original estimate: approximately 30-44 hours for the items above, before recent
 work; their current status and remaining effort need review.
 
+## Shipped since this roadmap was written
+
+Status verified 2026-11-14. The remaining work for each is tracked in
+`docs/ISSUES.md` and `docs/REVIEW_AND_ROADMAP_2026-11-14.md`, not here.
+
+- **Host analytics** — built. `screens/EventInsights.tsx`, business analytics,
+  `get_event_insights` / `get_business_analytics` (`20261104100000`, applied).
+  Plan and open items: `docs/ANALYTICS_AND_CALENDAR_PLAN.md`.
+- **Personal event calendar** — built. `screens/Calendar.tsx`, `app/calendar.tsx`,
+  `get_user_calendar` (`20261104110000`, applied). Open: a `webcal://` feed and
+  a device run of `.maestro/calendar.yaml`.
+- **Offline and poor-connection UX** — built, steps 0-8 of
+  `docs/OFFLINE_PLAN.md` (connectivity layer, persisted cache, pending-write
+  queue, chat outbox). Verified on web only; never on a device. Note: RSVPs are
+  deliberately **not** queued offline (plan §6 decision 1), contrary to the
+  original wording of this entry.
+- **Event collections** — Phases A-F built 2026-11-12; migration
+  `20261112100000` applied. Remaining: the §6-§7 product decisions and the
+  §8 steps 3-6 verification. `docs/EVENT_COLLECTIONS_PLAN.md`.
+- **Host event playbook** — P1-P7 built 2026-11-13; both migrations
+  (`20261113100000`, `20261113110000`) applied. Remaining: type regeneration
+  and a real-device pass (P8). `docs/HOST_EVENT_PLAYBOOK_PLAN.md`.
+- **Host onboarding** (not previously listed here) — Stages 1-7 built
+  2026-11-10; all eight `20261110*` migrations applied. Remaining in
+  `docs/HOST_ONBOARDING_PLAN.md` §18-§20: appeals queue, verified badge on
+  Discover cards, transfer of ownership, Stage 8 growth.
+
 ## Additional ideas
 
-- **Host analytics:** Give hosts useful event-level aggregates, such as views,
-  RSVPs, waitlist conversions, and attendance trends, while respecting privacy.
-- **Personal event calendar:** Show joined and interested events in an agenda or
-  calendar, with conflict indicators and quick access to event details.
-- **Offline and poor-connection UX:** Cache recently viewed event details and
-  make failed or pending actions, including joins and messages, clear to users.
 - **Host workflow UI review:** keep `scripts/fake-backend-e2e/suiteHostUi.mjs`
   green as host screens change (labels, 44 px targets, 320 px layout,
   host-type wording), and extend it to large widths, font scaling and native.
-- **Event collections:** Let users organize saved events into named lists, such
-  as plans for a weekend or venues to explore. Planned in
-  `docs/EVENT_COLLECTIONS_PLAN.md`; Phase A (data layer) done 2026-11-12.
-- **Host event playbook:** A per-event, phase-aware checklist (before
-  publishing, lead-up, day of, after) that ticks itself from server facts and
-  points hosts at the right tool. Planned in `docs/HOST_EVENT_PLAYBOOK_PLAN.md`
-  (22-31 h; P1-P7 done 2026-11-13, only the owner's apply step remains; two
-  migrations prepared and unapplied).
 - **Discovery modes:** "Surprise me", "My neighbourhood" and "Just added"
   browse modes on Discover, built on the ranked-events RPC and the browse
   centre. Planned in `docs/DISCOVERY_MODES_PLAN.md` (20-30 h; 15-22 h without the
-  server sort change).
+  server sort change). Proposal only — nothing built, and the six decisions in
+  §6 are open.
+- **Host tools Phase 4:** attendee check-in + QR, CSV export, event sections
+  and co-hosts (`business_members`). `docs/HOST_TOOLS_PLAN.md` §11.
 
 These ideas have not yet been scoped or estimated. Hosted deployment, production
 payments, device push, and store releases remain separate decisions.

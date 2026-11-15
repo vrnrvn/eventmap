@@ -4,6 +4,14 @@ import { ChevronDown, Mail } from '@/components/icons.generated';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { Colors, Typography } from '@/constants/theme';
 import { a11yState } from '@/utils/accessibility';
+
+/**
+ * Bump this when the FAQ content below changes (it is the date shown in the
+ * footer). It was a hardcoded string that read "November 1, 2026" — a date in
+ * the future when it was written — until 2026-11-14; the value here is the
+ * file's last content change in git.
+ */
+const FAQ_LAST_UPDATED = '2026-11-08';
 const subtleBorderColor = Colors.border.light;
 
 // Enable LayoutAnimation on Android
@@ -206,7 +214,7 @@ export default function FAQScreen() {
         ))}
 
         <Text style={styles.footerNote}>
-          Last updated: November 1, 2026
+          Last updated: {new Date(FAQ_LAST_UPDATED).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
         </Text>
       </ScrollView>
     </View>

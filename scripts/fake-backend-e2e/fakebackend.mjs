@@ -187,6 +187,22 @@ export function makeRouter(data, { unknown = [], overrides = {} } = {}) {
       case 'rpc/get_event_chat_unread_counts': return { json: (body(r).event_ids || body(r).p_event_ids || []).map((id) => ({ event_id: id, unread_count: 3 })) };
       case 'rpc/mark_event_chat_read': case 'rpc/track_event_view': return { json: null };
       case 'user_blocks': return { json: [] };
+      // Reports (complaints): every report path in the app inserts here —
+      // event, business, user, review and chat message. One per reporter per
+      // target; a repeat is the unique violation the screens translate into
+      // "you've already reported this" (flow 4).
+      case 'complaints': {
+        if (r.method !== 'POST') return { json: [] };
+        const b = body(r);
+        data.complaints ??= new Set();
+        const key = `${b.target_type}:${b.target_id}`;
+        if (data.complaints.has(key)) {
+          return { status: 409, json: { code: '23505', message: 'duplicate key value violates unique constraint "complaints_reporter_id_target_type_target_id_key"',
+            details: null, hint: null } };
+        }
+        data.complaints.add(key);
+        return { status: 201, json: [] };
+      }
       case 'rpc/get_business_review_summary': return { json: [{ average: 4.5, review_count: 12 }] };
       case 'rpc/get_business_follower_counts': return { json: (body(r).p_business_ids || []).map((id) => ({ business_id: id, follower_count: 42 })) };
       case 'businesses': return one(data.biz, r);

@@ -207,8 +207,8 @@ a working device-local path first, so nothing waits on a migration.
 | **P2. Manage hub card** | `components/EventPlaybookCard.tsx` + `hooks/useEventPlaybook.ts` joining the event row, `get_event_host_overview` and the local store; collapsed/expanded, tick, dismiss, target→route map | 5–7 h | **done 2026-11-13** |
 | **P3. Pre-publish readiness** | The "before" list inside `EventPreviewSheet`, live as the host edits; Edit screen parity | 2–3 h | **done 2026-11-13** |
 | **P4. My Events pill + cross-ticks** | `playbookPillLabel` per row, deep link into the hub card, auto-tick the account checklist's share/manage/capacity/announce items | 3–4 h | **done 2026-11-13** |
-| **P5. Server persistence** (SQL prepared, not applied) | `events.host_playbook jsonb` + `set_event_playbook` RPC, `services/eventPlaybook.ts` with `isMissingDbFunction` fallback to P1's store, hand-written types, fake-backend double, `scripts/test-event-playbook.sql` | 3–4 h | **built 2026-11-13, migration unapplied** |
-| **P6. Host notifications** (SQL prepared, not applied) | Day-of host reminder and post-event summary, deep links, Settings opt-in (owner: off by default, consent first) | 3–5 h | **built 2026-11-13, migration unapplied** |
+| **P5. Server persistence** (SQL applied 2026-11-13) | `events.host_playbook jsonb` + `set_event_playbook` RPC, `services/eventPlaybook.ts` with `isMissingDbFunction` fallback to P1's store, hand-written types, fake-backend double, `scripts/test-event-playbook.sql` | 3–4 h | **built 2026-11-13; migration applied (verified 2026-11-14)** |
+| **P6. Host notifications** (SQL applied 2026-11-13) | Day-of host reminder and post-event summary, deep links, Settings opt-in (owner: off by default, consent first) | 3–5 h | **built 2026-11-13; migration applied (verified 2026-11-14)** |
 | **P7. Polish + carried findings** | A11y pass, `suiteHostUi.mjs` scenarios, post-publish sheet hand-off line, plus the three findings in §8 (Edit scroll-to-field, `formToPreviewEvent` publish state, fold `previewGaps` into the checklist) | 3–5 h | **done 2026-11-13** |
 | **P8. Apply and verify** (owner) | Apply P5/P6 SQL, `npm run backend:types`, `npm run test:backend`, manual pass | 1 h | |
 
@@ -403,10 +403,11 @@ Also tracked in `docs/ISSUES.md` (Low), each pointing here.
 
 ### P5 — server persistence, 2026-11-13 (this worktree, uncommitted)
 
-**The shared database was not touched.** The migration is written and left
-unapplied; it was validated on a throwaway native cluster
-(`scripts/db-isolated.sh init` → 120 migrations + seed, destroyed
-afterwards), never on the shared instance.
+**At the time of writing the shared database was not touched:** the migration
+was validated on a throwaway native cluster (`scripts/db-isolated.sh init` →
+120 migrations + seed, destroyed afterwards), never on the shared instance.
+**It has since been applied** to the shared local database and recorded in
+migration history (verified 2026-11-14).
 
 - `supabase/migrations/20261113100000_event_host_playbook.sql` —
   `event_host_playbook` (one row per event: `ticked`, `dismissed_stages`)
@@ -458,11 +459,14 @@ their checklist on the device.
 
 ### P6 — host notifications, 2026-11-13 (this worktree, uncommitted)
 
-**The shared database was not touched.** Both migrations below stay
-unapplied; everything was validated on a throwaway native cluster
-(`scripts/db-isolated.sh`, 121 migrations + seed, destroyed afterwards).
+**At the time of writing the shared database was not touched:** everything
+below was validated on a throwaway native cluster (`scripts/db-isolated.sh`,
+121 migrations + seed, destroyed afterwards). **Both migrations have since
+been applied** to the shared local database (verified 2026-11-14), so the
+Settings switches are now visible and the notice cron is live — though no
+host has opted in yet, so nothing is being sent.
 
-**What was already there.** Migration 20261110160000 (unapplied, from Stage
+**What was already there.** Migration 20261110160000 (from Stage
 6 of the onboarding plan) already delivers both notices —
 `send_host_event_notices()` on a 15-minute cron, deduped in
 `host_notifications_sent`. P6 did not need to rebuild that. But it gates on

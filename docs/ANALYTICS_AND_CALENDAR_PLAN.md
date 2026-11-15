@@ -1,7 +1,13 @@
 # Host analytics and personal calendar plan
 
-Status: written 2026-11-04. Proposal only; nothing implemented, nothing applied
-to any database. Covers two roadmap items: **host analytics** (a host sees real
+Status: written 2026-11-04; **everything in this plan was implemented the same
+day and all five migrations (`20261104090000`, `…100000`, `…110000`,
+`…120000`, `…130000`) are applied** to the shared local database (verified
+2026-11-14). Header corrected 2026-11-14 — it still said "proposal only;
+nothing implemented". Still open: the `webcal://` feed, a device run of
+`.maestro/calendar.yaml`, and the check-in rate (needs host tools Phase 4).
+The handoff item "drop the `untypedRpc` casts" was done on 2026-11-08.
+Covers two roadmap items: **host analytics** (a host sees real
 stats for each event and across events) and a **personal events calendar** (an
 attendee sees their upcoming events in a calendar/agenda view).
 

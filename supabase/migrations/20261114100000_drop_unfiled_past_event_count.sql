@@ -1,0 +1,27 @@
+-- Remove the unfiled get_user_past_event_count() (docs/HOST_TOOLS_PLAN.md §11
+-- item 3; review 2026-11-14).
+--
+-- This function exists on the shared local database but in no migration file,
+-- so it has been the one object making a fresh or hosted database differ from
+-- the shared one. It came from a parallel worktree's
+-- 20261029100000_profile_attendance_and_privacy.sql, which was never merged:
+-- this branch shipped 20261029110000_profile_attendance_history.sql for the
+-- same ground (see docs/archive/FOLLOW_UPS-2026-10-29.md, "Parallel migration
+-- in another worktree"). The leftover was hand-applied and then stranded.
+--
+-- Verified unreferenced on 2026-11-14 before writing this file:
+--   * no client, admin, script or test calls it (repo-wide search);
+--   * no other database function references it (pg_proc.prosrc);
+--   * no RLS policy, view, trigger or column default references it.
+-- Its behaviour is also redundant: it returns 0 unless auth.uid() matches the
+-- argument, and the attendance history RPCs this branch did ship already give
+-- the owner their own past-event counts.
+--
+-- Dropping rather than filing it converges every database on the file set. If
+-- it should be kept instead, replace this file with one that CREATEs it — do
+-- not simply delete this migration, or the drift returns.
+--
+-- Idempotent and safe in both directions: on a fresh or hosted database the
+-- function never existed and this is a no-op.
+
+DROP FUNCTION IF EXISTS public.get_user_past_event_count(uuid);

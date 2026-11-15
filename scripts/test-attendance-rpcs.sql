@@ -1,3 +1,14 @@
+-- HOW TO RUN (rule since 2026-11-14): in a throwaway container on the stack's
+-- own Postgres 17 image, never against the shared cluster —
+--
+--   scripts/pg17-isolated.sh init            # all migrations + seed
+--   scripts/pg17-isolated.sh suites          # every scripts/test-*.sql
+--   scripts/pg17-isolated.sh apply <this file>
+--
+-- Any `scripts/db-scratch.sh` recipe further down is the pre-2026-11-14 way:
+-- it copies the database INSIDE the shared cluster, where a crashed backend
+-- restarts every other session's connections. Do not use it without the
+-- owner's explicit go-ahead. See docs/ISSUES.md "Ground rules".
 -- Exercise the profile attendance RPCs against an isolated scratch database.
 -- Runs entirely inside one transaction and rolls back, so the scratch copy is
 -- left untouched. Intended usage:
@@ -43,6 +54,22 @@ $$;
 \set biz   '20000000-0000-4000-8000-000000000001'
 \set ev1   '30000000-0000-4000-8000-000000000001'
 \set ev2   '30000000-0000-4000-8000-000000000002'
+
+-- 20261110150000 refuses to publish an event unless the host has accepted the
+-- current guidelines, and several fixtures below insert published events while
+-- impersonating a host. Accept them for every business inside this rolled-back
+-- transaction. Guarded so the suite still runs on a database that predates
+-- 20261110110000 (which adds the column).
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'businesses'
+               AND column_name = 'host_terms_version') THEN
+    EXECUTE 'UPDATE businesses
+                SET host_terms_version = host_terms_current_version(),
+                    host_terms_accepted_at = COALESCE(host_terms_accepted_at, now())';
+  END IF;
+END $$;
 
 -- Disposable fixtures (ids in a 3f.. block that the seed never uses)
 \set past_ev     '3f000000-0000-4000-8000-000000000001'

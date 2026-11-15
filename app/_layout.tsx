@@ -25,6 +25,7 @@ import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { Typography } from '@/constants/theme';
 import { setupNotificationResponseHandlers } from '@/services/pushNotifications';
 import { runOrQueue } from '@/services/pendingWrites';
+import { routeFromPushData } from '@/utils/notificationRoute';
 import { router } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { BrandedSplashScreen } from '@/components/BrandedSplashScreen';
@@ -38,27 +39,10 @@ import { PERSISTED_QUERY } from '@/utils/queryPersistence';
 import { queryKeys } from '@/hooks/queryKeys';
 
 function resolveNotificationPath(data: Record<string, unknown> | null | undefined): string {
-  if (!data || typeof data !== 'object') {
-    return '/(tabs)/notifications';
-  }
-  const eventId = data.eventId;
-  const businessId = data.businessId;
-  const linkUrl = data.linkUrl;
-
-  if (typeof eventId === 'string' && eventId.length > 0) {
-    const isChat = data.kind === 'chat' || data.type === 'chat_message' || data.type === 'chat_mention';
-    const messageId = typeof data.messageId === 'string' ? data.messageId : null;
-    const chatPath = messageId ? `/event-chat/${eventId}?messageId=${messageId}` : `/event-chat/${eventId}`;
-    return isChat ? chatPath : `/event/${eventId}`;
-  }
-  if (typeof businessId === 'string' && businessId.length > 0) {
-    return `/business/${businessId}`;
-  }
-  if (typeof linkUrl === 'string' && linkUrl.startsWith('myapp://')) {
-    const parsed = Linking.parse(linkUrl);
-    return parsed.path ? `/${parsed.path}` : '/(tabs)/notifications';
-  }
-  return '/(tabs)/notifications';
+  // Same rule as the in-app list (utils/notificationRoute): host notices go
+  // to the hub, chat to the thread, profile-level host notices to Settings.
+  // A promotion's deep link is the fallback when the push points nowhere.
+  return routeFromPushData(data, (url) => Linking.parse(url).path);
 }
 
 /**

@@ -39,7 +39,7 @@ _layout.tsx (root)
 - **`contexts/`**: Global state providers; consume via `useContext()`
 - **`components/`**: Reusable UI; prefer compound components (ref-forwarding with `useImperativeHandle` for modals/maps)
 - **`constants/theme.ts`**: Single source of truth for Colors, Spacing, Typography, BorderRadius (no hardcoded values)
-- **`types/database.ts`**: Auto-generated Supabase TypeScript definitions; regenerate after schema changes
+- **`types/supabase.generated.ts`**: generated from the live schema via `npm run backend:types`; regenerate after applying migrations. **`types/database.ts`** is hand-written app-facing types, not generated — edit it by hand. (Corrected 2026-11-14; the generated file is currently stale, see its header.)
 - **`hooks/`**: Custom hooks like `useFrameworkReady` (checks if fonts/app initialized)
 
 ### Services Pattern (Critical)
@@ -97,7 +97,7 @@ async getRankedEvents(userLat, userLng, filters) {
 - **RLS Policies**: All tables have `enable_rls = true`; anonymous users can read events, but only owners can write
 - **Database Functions**: Written in PL/pgSQL; used for complex operations (event creation, limit checking, ranking)
 - **Storage**: `event-images` bucket accessible to authenticated users; 5MB file limit
-- **Realtime**: Not currently used; consider for live event updates if needed
+- **Realtime**: in use — event chat, `event_rsvp_counts` live counts on Event Detail, and the `rsvps` publication. Channel names must be unique per subscriber (two open copies of one event page otherwise share a channel and unsubscribe each other).
 - **Relationships**: Use foreign keys; types reflect via `Database['public']['Tables'][table]['Row']`
 
 ## Testing & Debugging

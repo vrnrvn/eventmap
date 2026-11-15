@@ -215,9 +215,16 @@ export default function DiscoverScreen() {
     }, durationMs);
   }, []);
 
+  // Initial load, re-run only when the signed-in user or their saved home
+  // area changes — those are the only profile fields loadInitialData reads.
+  // Keying on the profile *object* re-ran this on every identity change
+  // (focus refresh, any Settings save, onboarding flag flips): categories and
+  // events were refetched, the location permission re-requested and the map
+  // recentred for no reason (re-opened 2026-11-14, docs/ISSUES.md).
   useEffect(() => {
     loadInitialData();
-  }, [profile]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.id, profile?.lat, profile?.lng]);
 
 
   useEffect(() => {

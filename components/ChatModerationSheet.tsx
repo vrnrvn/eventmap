@@ -14,6 +14,7 @@ import {
 import { alpha, Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 import { a11yState } from '@/utils/accessibility';
+import { blockedOffline } from '@/utils/requireOnline';
 
 type Props = {
   eventId: string;
@@ -112,6 +113,7 @@ export function ChatModerationSheet({
   }, [visible, load]);
 
   const unblock = async (user: ChatBlockedUser) => {
+    if (blockedOffline('lift a chat block')) return;
     setBusyUser(user.userId);
     try {
       await eventChatService.unblockUser(eventId, user.userId);
@@ -126,6 +128,7 @@ export function ChatModerationSheet({
   };
 
   const removeReported = async (item: ChatReportedMessage) => {
+    if (blockedOffline('remove messages')) return;
     setBusyMessage(item.message_id);
     try {
       const deleted = await eventChatService.deleteMessage(item.message_id);
@@ -141,6 +144,7 @@ export function ChatModerationSheet({
   };
 
   const keepReported = async (item: ChatReportedMessage) => {
+    if (blockedOffline('dismiss reports')) return;
     setBusyMessage(item.message_id);
     try {
       await eventChatService.dismissReports(item.message_id);

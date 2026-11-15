@@ -395,6 +395,28 @@ export default function BusinessDetail() {
               </TouchableOpacity>
             ))}
           </View>
+        ) : isOwner ? (
+          // The owner's own venue page with nothing upcoming: say so and point
+          // at Create instead of silently showing no section (re-opened
+          // 2026-11-14; visitors still see nothing here, as before).
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Upcoming Events</Text>
+            <Text style={styles.eventDate}>No upcoming events yet. This is where visitors will see them.</Text>
+            <TouchableOpacity
+              style={styles.eventCard}
+              onPress={() => router.push('/(tabs)/create' as never)}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Create an event"
+            >
+              <Calendar size={20} color={Colors.primary} />
+              <View style={styles.eventInfo}>
+                <Text style={styles.eventTitle}>Create an event</Text>
+                <Text style={styles.eventDate}>It shows up here as soon as it is published</Text>
+              </View>
+              <Text style={styles.viewEvent}>Create</Text>
+            </TouchableOpacity>
+          </View>
         ) : null}
 
         {/* About */}

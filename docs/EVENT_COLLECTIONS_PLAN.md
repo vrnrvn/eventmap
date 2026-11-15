@@ -1,8 +1,14 @@
 # Private event collections plan
 
-Status: written 2026-11-12. Phase A (data foundation) implemented the same
-day; see §9. The migration is prepared but NOT applied to the shared local
-database. Companion to
+Status: written 2026-11-12. **Phases A–F were all implemented that day (see
+§9) and the migration `20261112100000` is applied** to the shared local
+database (verified 2026-11-14). Header corrected 2026-11-14 — it said only
+Phase A was done and the migration was unapplied. §8's Phase G runbook steps
+1-2 are therefore complete; **steps 3-6 (type regeneration, the SQL suites,
+`npm run test:backend`, the manual pass, hosted databases) remain**, as do the
+§6-§7 product decisions that were meant to be settled before the apply.
+The §9 log still says "uncommitted"; the work is committed in `88fa4d2`.
+Companion to
 `docs/CATEGORIES_AND_SERIES_PLAN.md` (categories, recurring series) and
 `docs/ANALYTICS_AND_CALENDAR_PLAN.md` Part 2 (personal calendar), which
 this feature sits between. Picks up the "Event collections" idea from
