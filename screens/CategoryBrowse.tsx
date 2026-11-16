@@ -35,11 +35,14 @@ import { useScreenState } from '@/hooks/useScreenState';
 import { eventsService } from '@/services/events';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { EventListItem } from '@/components/EventListItem';
+import { CompareCheckbox } from '@/components/CompareCheckbox';
+import { CompareTray } from '@/components/CompareTray';
+import { useCompareSelection } from '@/hooks/useCompareSelection';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { FreshnessNote, OfflineState } from '@/components/ui/QueryStates';
 import { Button } from '@/components/ui/Button';
-import { Heart, MapPin, Share2 } from '@/components/icons.generated';
+import { ArrowLeftRight, Heart, MapPin, Share2 } from '@/components/icons.generated';
 import { findCategoryBySlug, getCategoryWebUrl } from '@/utils/categoryBrowse';
 import { categoryTint, presentCategory } from '@/utils/categoryPresentation';
 import { DATE_PRESETS, type DatePresetKey } from '@/utils/datePresets';
@@ -60,7 +63,18 @@ const WIDE_RADIUS_KM = 100;
 /** Presets offered here ('custom' needs the search overlay's picker). */
 const PRESET_KEYS: DatePresetKey[] = ['any', 'today', 'tomorrow', 'weekend', 'week', 'month'];
 
-const BrowseRow = memo(function BrowseRow({ event }: { event: RankedEvent }) {
+const BrowseRow = memo(function BrowseRow({
+  event,
+  compareActive = false,
+  compareSelected = false,
+  onToggleCompare,
+}: {
+  event: RankedEvent;
+  /** Compare mode (plan §3.1): a checkbox in the row's action slot. */
+  compareActive?: boolean;
+  compareSelected?: boolean;
+  onToggleCompare?: (event: RankedEvent) => void;
+}) {
   const when = event.next_start_datetime || event.start_datetime;
   const display = describeEventDateTime(when, event.timezone);
   const meta: string[] = [];
@@ -76,6 +90,16 @@ const BrowseRow = memo(function BrowseRow({ event }: { event: RankedEvent }) {
         thumbnailUrl={event.cover_image_url}
         metaLines={meta}
         badge={event.user_rsvp === 'going' ? { label: 'Going', tone: 'success' } : null}
+        rightAction={
+          compareActive ? (
+            <CompareCheckbox
+              selected={compareSelected}
+              title={event.title}
+              disabled={event.status === 'cancelled'}
+              onToggle={() => onToggleCompare?.(event)}
+            />
+          ) : undefined
+        }
         onPress={() => router.push(`/event/${event.id}` as never)}
         accessibilityLabel={`${event.title}, ${display.primary}${event.business_name ? `, ${event.business_name}` : ''}`}
       />
@@ -98,6 +122,8 @@ export default function CategoryBrowseScreen() {
   const [preset, setPreset] = useState<DatePresetKey>('any');
   const [radiusKm, setRadiusKm] = useState(DEFAULT_RADIUS_KM);
   const [pulling, setPulling] = useState(false);
+  const compare = useCompareSelection();
+  const [trayHeight, setTrayHeight] = useState(0);
 
   const range = useMemo(() => DATE_PRESETS.find((p) => p.key === preset)?.build() ?? null, [preset]);
 
@@ -325,6 +351,18 @@ export default function CategoryBrowseScreen() {
         title={presentation.label}
         right={
           <View style={styles.headerActions}>
+            {state === 'content' && events.length >= 2 ? (
+              <TouchableOpacity
+                onPress={() => (compare.active ? compare.exit() : compare.setActive(true))}
+                accessibilityRole="button"
+                accessibilityLabel={compare.active ? 'Exit compare mode' : 'Compare events'}
+                {...a11yState({ selected: compare.active }, 'button')}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                style={[styles.headerBtn, compare.active && styles.headerBtnActive]}
+              >
+                <ArrowLeftRight size={20} color={compare.active ? Colors.primary : Colors.text.primary} />
+              </TouchableOpacity>
+            ) : null}
             <TouchableOpacity
               onPress={showOnMap}
               accessibilityRole="button"
@@ -349,7 +387,15 @@ export default function CategoryBrowseScreen() {
       <FlatList
         data={state === 'content' ? events : []}
         keyExtractor={(e) => e.id}
-        renderItem={({ item }) => <BrowseRow event={item} />}
+        renderItem={({ item }) => (
+          <BrowseRow
+            event={item}
+            compareActive={compare.active}
+            compareSelected={compare.isSelected(item.id)}
+            onToggleCompare={(e) => compare.toggle(e)}
+          />
+        )}
+        extraData={compare.items}
         ListHeaderComponent={header}
         ListEmptyComponent={empty}
         ListFooterComponent={
@@ -360,16 +406,18 @@ export default function CategoryBrowseScreen() {
         }}
         onEndReachedThreshold={0.5}
         refreshControl={<RefreshControl refreshing={pulling} onRefresh={onRefresh} />}
-        contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.xl }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + Spacing.xl + trayHeight }}
       />
+      <CompareTray onHeight={setTrayHeight} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.background.primary },
-  headerActions: { flexDirection: 'row', gap: Spacing.sm },
-  headerBtn: { padding: Spacing.xs },
+  headerActions: { flexDirection: 'row', gap: Spacing.sm, alignItems: 'center' },
+  headerBtn: { padding: Spacing.xs, borderRadius: BorderRadius.md },
+  headerBtnActive: { backgroundColor: Colors.primarySoft },
   hero: {
     flexDirection: 'row',
     alignItems: 'center',

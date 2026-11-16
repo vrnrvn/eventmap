@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, ViewStyle, StyleProp } from 'react-native';
-import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { Colors, FontScaleCaps, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { a11yState } from '@/utils/accessibility';
 
 export type SegmentOption<T extends string> = {
@@ -41,7 +41,7 @@ export function SegmentedControl<T extends string>({ options, value, onChange, s
             {...a11yState({ selected: active })}
             accessibilityLabel={option.accessibilityLabel ?? option.label}
           >
-            <Text style={[styles.text, active && styles.textActive]} numberOfLines={1}>
+            <Text style={[styles.text, active && styles.textActive]} numberOfLines={1} maxFontSizeMultiplier={FontScaleCaps.control}>
               {option.label}
               {countLabel ? <Text style={styles.count}>{countLabel}</Text> : null}
             </Text>

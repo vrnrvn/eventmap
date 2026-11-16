@@ -9,7 +9,7 @@ import {
   StyleProp,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Colors, Typography, BorderRadius, Spacing } from '@/constants/theme';
+import { Colors, FontScaleCaps, Typography, BorderRadius, Spacing } from '@/constants/theme';
 import { a11yState } from '@/utils/accessibility';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'destructive';
@@ -78,7 +78,7 @@ export function Button({
     <>
       <View style={[styles.content, loading && styles.contentHidden]}>
         {icon ? <View style={styles.icon}>{icon}</View> : null}
-        <Text style={labelStyle} numberOfLines={1}>
+        <Text style={labelStyle} numberOfLines={1} maxFontSizeMultiplier={FontScaleCaps.control}>
           {label}
         </Text>
       </View>

@@ -1,5 +1,21 @@
 # Migration work waiting for the owner
 
+**Owner checklist, 2026-11-15 (the full list is at the top of `docs/ISSUES.md`):**
+
+1. Item 0 below — the hosted-database inventory. Read-only; do it first.
+2. Item 2 below — `20261115100000_get_events_compare.sql` was applied locally
+   on 2026-11-15 and generated types were refreshed. Client cutover remains
+   deferred (decision D7).
+3. Only after item 0 has a row for a hosted project: apply the missing files
+   there in version order, security set (`20261030*`) first.
+4. After any apply: `PG17_NAME=x scripts/pg17-isolated.sh init && … suites`
+   on a throwaway container, never the shared cluster.
+
+**Local apply update, 2026-11-15:** the local database records 123 migrations,
+through `20261115100000`; types were regenerated and 13 isolated SQL suites
+passed. Hosted databases have not been checked or changed. Earlier status and
+runbook entries below are retained as historical context.
+
 **Local apply update, 2026-11-14:** migration `20261114100000` was applied
 and recorded in the local Supabase database. Types were refreshed to match.
 Hosted databases have not been checked or changed. Item 2 remains unwritten;
@@ -16,22 +32,118 @@ applied; no session writes to the shared database (see `docs/ISSUES.md`
 
 **State verified read-only on 2026-11-14:** the shared local database has
 **121** migrations recorded and the repository now holds **122** files, so
-exactly one prepared file is unapplied. Confirm before and after with:
+at that time exactly one prepared file was unapplied. Confirm with:
 
 ```sql
 select count(*) as applied, max(version) as latest
   from supabase_migrations.schema_migrations;
 ```
 
-| Before applying | After item 1 |
-| --- | --- |
-| 121 / `20261113110000` | 122 / `20261114100000` |
+| Before applying | After item 1 | After item 2 |
+| --- | --- | --- |
+| 121 / `20261113110000` | 122 / `20261114100000` | 123 / `20261115100000` |
+
+**2026-11-15:** the repository holds **123** files and all 123 are now applied locally.
 
 Hosted or production databases have **never** been checked. If one exists,
 run the same query against it first — in particular for the Oct 30 security
 set (`20261030100000`, `…101000`, `…102000`, `…107000`).
 
 ---
+
+## 0. Before anything else — the hosted-database inventory (decision D10, 2026-11-15)
+
+No hosted or production project's migration state has **ever** been checked.
+The comparison RPC below is the first new function a client feature would
+depend on, so this inventory is a prerequisite of applying it anywhere but
+locally — and it is owner work: it needs the hosted project's connection.
+
+Run against **each** hosted project (read-only; nothing here writes):
+
+```sql
+-- 1. What is recorded
+select count(*) as applied, max(version) as latest
+  from supabase_migrations.schema_migrations;
+
+-- 2. Which repository files are NOT recorded (paste the version list from
+--    `ls supabase/migrations | cut -c1-14` into the VALUES list)
+with files(version) as (values ('20261015100000'), ('…'))
+select version from files
+except select version from supabase_migrations.schema_migrations
+order by 1;
+
+-- 3. The Oct 30 security set in particular
+select version from supabase_migrations.schema_migrations
+ where version in ('20261030100000','20261030101000','20261030102000','20261030107000');
+```
+
+Record the three answers per project in this file under a dated heading.
+Expected outcomes and what each means:
+
+| Finding | Meaning | Next step |
+| --- | --- | --- |
+| Count = repository file count, nothing missing | In step with the repo | Apply new files in order as they land |
+| Files missing, security set present | Behind but safe | Apply the missing files in version order on a maintenance window |
+| **Security set missing** | Admin / premium self-grant and storage-ownership holes are open | Apply those four first, before any feature migration |
+| Recorded versions that are not files | Hand-applied drift | Diff the live objects against the repo before anything else |
+
+Until this table has a row per hosted project, items 2+ below are **local
+only**.
+
+---
+
+## 2. Applied locally — `20261115100000_get_events_compare.sql`
+
+**What:** one RPC, `get_events_compare(p_event_ids uuid[], p_lat, p_lng)`,
+returning up to four events by id with host name / logo / verified, category
+label / slug, going / save / waitlist counts, the viewer's RSVP and save,
+distance from the given point (`calculate_distance`) and the **effective**
+next date (`event_next_effective_occurrence`). Visibility mirrors
+`get_event_details`: `SECURITY DEFINER`, drafts only for the owner or an
+admin, unlisted events returned by id, cancelled / postponed returned with
+their status, unknown ids silently absent. Duplicates collapse, nulls are
+ignored, caller order is kept, a fifth distinct id raises `too_many_events`.
+Callable by `anon` and `authenticated` (a shared comparison link opens
+signed-out). ROADMAP.md "Phase 8 in detail"; docs/EVENT_COMPARISON_PLAN.md §8.
+
+**Why it is not urgent:** the client does **not** call it (decision D7,
+2026-11-15: the four cached per-event calls are not a user-visible problem;
+cut over when usage says otherwise). Nothing breaks without it. It also
+fixes E-R1 for this surface only.
+
+**Validated 2026-11-15** on a throwaway container from the stack's own
+Postgres 17 image (`PG17_NAME=… scripts/pg17-isolated.sh init`, 123
+migrations + seed): applies cleanly in order; `scripts/test-events-compare.sql`
+passes all five blocks (grants, shape and order, distance and next date,
+visibility for viewer / other user / owner / anon, input hygiene and the cap);
+**all 13 SQL suites pass**; re-applying the file is a no-op (one function
+afterwards). Container destroyed afterwards. The shared local database was
+not touched during that validation; it recorded 122 migrations at the time.
+
+**Not done, by design:** no client change (D7), no numeric price columns
+(D3 still open — D8 says they ride this file only if D3 is a yes), no
+PostgREST shape check (needs a private PostgREST bound to the container;
+part of the cutover, below), no `npm run backend:types` (regenerate after the
+apply, not before).
+
+**Apply (owner, local first):**
+
+```sh
+npx supabase migration up --local          # records 20261115100000
+npm run backend:types                      # then regenerate types
+PG17_NAME=x scripts/pg17-isolated.sh init && PG17_NAME=x scripts/pg17-isolated.sh suites
+```
+
+Hosted: **only after item 0's inventory has a row for that project.**
+
+**Cutover, when D7 flips (agent work, ~2 h):** `hooks/useCompareEvents.ts`
+gains a single `useQuery` keyed `['event','compare', idsKey, lat, lng]` that
+calls the RPC and fans each row into the per-event `eventDetails` cache
+entries, keeping the event page warm; `useEffectiveNextDates` becomes
+unnecessary there because the RPC returns the effective date; a
+`suiteCompare` scenario asserts one `POST rpc/get_events_compare` instead of
+four details calls; the fake backend learns the RPC. No probe-and-retry
+fallback (docs/ISSUES.md client/schema policy).
 
 ## 1. Applied locally — `20261114100000_drop_unfiled_past_event_count.sql`
 

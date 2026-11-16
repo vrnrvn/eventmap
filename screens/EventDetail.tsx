@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { blockedOffline } from '@/utils/requireOnline';
 import {
+  ActivityIndicator,
   View,
   Text,
   StyleSheet,
@@ -36,8 +37,9 @@ import {
   type PublicAttendee,
   EventStatus,
 } from '@/types/database';
-import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { alpha, Colors, FontScaleCaps, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { notify, notifyConfirm } from '@/utils/notify';
+import { selectionHaptic, successHaptic } from '@/utils/haptics';
 import { ImageViewer } from '@/components/ImageViewer';
 import { Button } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ui/ErrorState';
@@ -599,7 +601,19 @@ export default function EventDetail() {
       const result = await socialService.createOrUpdateRsvp(id, status);
       invalidateLists();
       if (result === 'requested') {
-        notify.success('Request sent. The host will review it.');
+        successHaptic();
+        notify.success("Request sent. The host usually replies within a day — we'll let you know either way.");
+      } else if (result === 'going') {
+        successHaptic();
+        // A join used to land silently (review J4). The two things a new
+        // attendee wants next are the calendar entry and the chat; the
+        // calendar is the one that expires if forgotten, so it gets the action.
+        notify.withAction("You're going. Add it to your calendar?", {
+          label: 'Add',
+          onPress: () => handleOpenCalendar(),
+        });
+      } else {
+        selectionHaptic();
       }
       setDetails((d) =>
         d
@@ -647,6 +661,7 @@ export default function EventDetail() {
     setSaving(true);
     try {
       await socialService.deleteRsvp(id);
+      selectionHaptic();
       invalidateLists();
       setDetails((d) =>
         d
@@ -674,6 +689,7 @@ export default function EventDetail() {
     setSaving(true);
     try {
       const position = await socialService.joinWaitlist(id);
+      successHaptic();
       setDetails((d) =>
         d
           ? {
@@ -1978,17 +1994,29 @@ export default function EventDetail() {
                 disabled: user
                   ? saving || hasJoinedEvent || hasRequested || eventClosed || (eventFull && !canWaitlist)
                   : eventClosed || eventFull,
+                busy: saving,
               })}
               accessibilityLabel={
-                canWaitlist
+                saving
+                  ? 'Saving your RSVP'
+                  : canWaitlist
                   ? onWaitlist
                     ? `You're number ${waitlist?.position} on the waitlist. Leave waitlist`
                     : 'Event full. Join the waitlist'
                   : undefined
               }
             >
-              <Text style={styles.joinButtonText}>
-                {eventCancelled
+              <Text style={styles.joinButtonText} maxFontSizeMultiplier={FontScaleCaps.control}>
+                {/* In flight: say so. The button is disabled and the re-entry
+                    guard makes a second tap harmless, but on a slow connection
+                    an unchanged label reads as an ignored tap (review J1). */}
+                {saving
+                  ? hasJoinedEvent || hasRequested
+                    ? 'Updating…'
+                    : canWaitlist && !onWaitlist
+                      ? 'Joining waitlist…'
+                      : 'Joining…'
+                  : eventCancelled
                   ? 'Event cancelled'
                   : eventEnded
                   ? hasJoinedEvent
@@ -2011,14 +2039,16 @@ export default function EventDetail() {
                     : !user
                       ? 'Sign in to join'
                       : hasJoinedEvent
-                        ? 'Event Joined'
+                        ? "You're going"
                         : approvalMode
                             ? 'Request to join'
                             : maxAttendees != null
                               ? `Join Event (${details.rsvp_count} / ${maxAttendees})`
                               : 'Join Event'}
               </Text>
-              {eventClosed || (eventFull && !canWaitlist) ? null : hasJoinedEvent ? (
+              {saving ? (
+                <ActivityIndicator size="small" color={Colors.white} />
+              ) : eventClosed || (eventFull && !canWaitlist) ? null : hasJoinedEvent ? (
                 <Text style={styles.joinArrow}>✓</Text>
               ) : (
                 <ArrowRight size={22} color={Colors.white} />
@@ -2040,7 +2070,7 @@ export default function EventDetail() {
                   accessibilityRole="button"
                   accessibilityLabel="Cancel your request to join"
                 >
-                  <Text style={styles.secondaryActionText}>Cancel request</Text>
+                  <Text style={styles.secondaryActionText} maxFontSizeMultiplier={FontScaleCaps.control}>Cancel request</Text>
                 </TouchableOpacity>
               ) : hasJoinedEvent ? (
                 <TouchableOpacity
@@ -2051,13 +2081,12 @@ export default function EventDetail() {
                   accessibilityRole="button"
                   accessibilityLabel="Leave event"
                 >
-                  <Text style={styles.secondaryActionText}>Leave</Text>
+                  <Text style={styles.secondaryActionText} maxFontSizeMultiplier={FontScaleCaps.control}>Leave</Text>
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity
                   style={[
                     styles.secondaryActionButton,
-                    styles.secondaryActionIcon,
                     details.user_rsvp === 'interested' && styles.secondaryActionActive,
                   ]}
                   onPress={() =>
@@ -2069,18 +2098,36 @@ export default function EventDetail() {
                   accessibilityLabel={details.user_rsvp === 'interested' ? 'Remove interest' : 'Mark as interested'}
                   {...a11yState({ selected: details.user_rsvp === 'interested' }, 'button')}
                 >
-                  <Star
-                    size={22}
-                    color={details.user_rsvp === 'interested' ? Colors.text.inverse : Colors.primary}
-                    fill={details.user_rsvp === 'interested' ? Colors.text.inverse : 'transparent'}
-                  />
+                  {/* Labelled, not icon-only (review J6): the star's meaning
+                      used to live in a hint line that only sometimes rendered. */}
+                  <View style={styles.secondaryActionInner}>
+                    <Star
+                      size={20}
+                      color={details.user_rsvp === 'interested' ? Colors.text.inverse : Colors.primary}
+                      fill={details.user_rsvp === 'interested' ? Colors.text.inverse : 'transparent'}
+                    />
+                    <Text
+                      style={[
+                        styles.secondaryActionText,
+                        details.user_rsvp === 'interested' && styles.secondaryActionTextActive,
+                      ]}
+                      maxFontSizeMultiplier={FontScaleCaps.control}
+                    >
+                      Interested
+                    </Text>
+                  </View>
                 </TouchableOpacity>
               )
             ) : null}
           </View>
           {user && !eventClosed && !hasJoinedEvent ? (
             <Text style={styles.bottomActionHint}>
-              {canWaitlist
+              {/* A pending request came first in this chain deliberately: it
+                  otherwise fell through to "Tap the star", which is not what
+                  someone waiting on a host needs to read (review J9). */}
+              {hasRequested
+                ? "The host usually replies within a day. You'll get a notification either way."
+                : canWaitlist
                 ? onWaitlist
                   ? `We'll notify you the moment a spot opens. ${waitlist?.count ?? 0} waiting.`
                   : `${waitlist?.count ?? 0} ${waitlist?.count === 1 ? 'person is' : 'people are'} waiting. You'll be notified when a spot opens.`
@@ -2401,6 +2448,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    // 44 px floor: at paddingVertical 8 these chips measured ~34 px with no
+    // hitSlop, below the target the a11y suites assert elsewhere (review J7).
+    minHeight: 44,
     paddingVertical: 8,
     paddingHorizontal: Spacing.md,
     borderRadius: BorderRadius.round,
@@ -2819,12 +2869,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  secondaryActionIcon: {
-    paddingHorizontal: 0,
-    width: 58,
+  secondaryActionInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   secondaryActionActive: {
     backgroundColor: Colors.primary,
+  },
+  secondaryActionTextActive: {
+    color: Colors.text.inverse,
   },
   secondaryActionText: {
     color: Colors.primary,

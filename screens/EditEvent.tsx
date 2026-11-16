@@ -58,6 +58,8 @@ import {
   validateExtras,
   type EventExtrasDraft,
 } from '@/components/EventExtrasFields';
+import { EventPriceFields } from '@/components/EventPriceFields';
+import { splitExtrasErrors } from '@/utils/eventPrice';
 import { eventLocationStore } from '@/stores/eventLocationStore';
 import { useCategories } from '@/hooks/useCategories';
 import { CategorySelectGrid } from '@/components/CategorySelectGrid';
@@ -117,6 +119,7 @@ const EDIT_FIELD_SECTION: Record<string, string> = {
   endDatetime: 'datetime',
   recurrenceEnd: 'datetime',
   maxAttendees: 'capacity',
+  price: 'price',
   extras: 'extras',
   links: 'links',
 };
@@ -538,7 +541,11 @@ export default function EditEvent() {
     if (Object.keys(linkIssues).length > 0) e.links = 'Fix the links below';
     const extraIssues = validateExtras(formData.extras);
     setExtrasErrors(extraIssues);
-    if (Object.keys(extraIssues).length > 0) {
+    // Price and tickets have their own block (review C3); only the rest
+    // lives under the collapsed row, so only the rest should expand it.
+    const { price: priceIssues, rest: otherIssues } = splitExtrasErrors(extraIssues);
+    if (Object.keys(priceIssues).length > 0) e.price = 'Check the price and tickets fields';
+    if (Object.keys(otherIssues).length > 0) {
       e.extras = 'Check the fields under More options';
       setShowExtras(true);
     }
@@ -1115,12 +1122,25 @@ export default function EditEvent() {
           error={errors.maxAttendees}
         />
 
+        <View onLayout={captureSection('price')} />
+        <Text style={styles.label}>Price &amp; tickets</Text>
+        <EventPriceFields
+          priceLabel={formData.extras.priceLabel}
+          ticketUrl={formData.extras.ticketUrl}
+          errors={extrasErrors}
+          onChange={(next) => {
+            setExtrasErrors({});
+            setFormData((f) => ({ ...f, extras: { ...f.extras, ...next } }));
+          }}
+        />
+        {errors.price ? <Text style={styles.errorText}>{errors.price}</Text> : null}
+
         <TouchableOpacity
           style={styles.dateButton}
           onPress={() => setShowExtras((v) => !v)}
           accessibilityRole="button"
           {...a11yState({ expanded: showExtras })}
-          accessibilityLabel="More options: visibility, tickets, age, accessibility"
+          accessibilityLabel="More options: visibility, age, accessibility, what to bring"
         >
           <Text style={styles.dateButtonText}>More options</Text>
           <ChevronRight
@@ -1134,6 +1154,7 @@ export default function EditEvent() {
           <EventExtrasFields
             value={formData.extras}
             errors={extrasErrors}
+            hidePriceAndTickets
             onChange={(extras) => {
               setExtrasErrors({});
               setFormData((f) => ({ ...f, extras }));

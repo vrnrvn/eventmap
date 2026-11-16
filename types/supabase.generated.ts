@@ -2320,6 +2320,10 @@ export type Database = {
         Args: { p_event_ids: string[] }
         Returns: Json
       }
+      get_events_compare: {
+        Args: { p_event_ids: string[]; p_lat?: number; p_lng?: number }
+        Returns: Json
+      }
       get_host_events_counts: { Args: { p_event_ids: string[] }; Returns: Json }
       get_host_onboarding_status: { Args: never; Returns: Json }
       get_occurrence_attendees_page: {

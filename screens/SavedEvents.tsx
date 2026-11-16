@@ -28,12 +28,16 @@ import { Button } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { FreshnessNote, OfflineState } from '@/components/ui/QueryStates';
 import { EventListItem } from '@/components/EventListItem';
+import { CompareCheckbox } from '@/components/CompareCheckbox';
+import { CompareTray } from '@/components/CompareTray';
+import { useCompareSelection } from '@/hooks/useCompareSelection';
 import { formatDistance } from '@/utils/formatEventWhen';
 import { describeEventDateTime } from '@/utils/timezone';
 import { RankedEvent } from '@/types/database';
 import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
 import {
   ArrowLeft,
+  ArrowLeftRight,
   Bookmark,
   BookmarkX,
   ChevronRight,
@@ -57,6 +61,9 @@ const SavedEventRow = memo(function SavedEventRow({
   onAddToCollection,
   nextIso,
   collectionCount = 0,
+  compareActive = false,
+  compareSelected = false,
+  onToggleCompare,
 }: {
   event: RankedEvent;
   onUnsave: (event: RankedEvent) => void;
@@ -66,6 +73,10 @@ const SavedEventRow = memo(function SavedEventRow({
   nextIso?: string;
   /** How many of the viewer's collections hold this event (batched RPC). */
   collectionCount?: number;
+  /** Compare mode (plan §3.1): the row's actions give way to a checkbox. */
+  compareActive?: boolean;
+  compareSelected?: boolean;
+  onToggleCompare?: (event: RankedEvent) => void;
 }) {
   const cancelled = event.status === 'cancelled';
   const ended = !!event.has_ended;
@@ -106,6 +117,14 @@ const SavedEventRow = memo(function SavedEventRow({
         }
         metaLines={metaLines}
         rightAction={
+          compareActive ? (
+            <CompareCheckbox
+              selected={compareSelected}
+              title={event.title}
+              disabled={ended || cancelled}
+              onToggle={() => onToggleCompare?.(event)}
+            />
+          ) : (
           <View style={styles.rowActions}>
             {onAddToCollection && !ended && !cancelled ? (
               <TouchableOpacity
@@ -129,6 +148,7 @@ const SavedEventRow = memo(function SavedEventRow({
               <Bookmark size={14} color={Colors.primary} fill={Colors.primary} />
             </TouchableOpacity>
           </View>
+          )
         }
         onPress={() => router.push(`/event/${event.id}` as never)}
         accessibilityLabel={`${event.title}, ${display.primary}${display.secondary ? `, ${display.secondary}` : ''}${ended ? ', ended' : ''}`}
@@ -169,6 +189,8 @@ export default function SavedEvents() {
     isEmpty: events.length === 0,
   });
   const nextById = useEffectiveNextDates(events);
+  const compare = useCompareSelection();
+  const [trayHeight, setTrayHeight] = useState(0);
   const loading = screenState === 'loading';
   // Only the pull gesture drives the RefreshControl; background refetches
   // (focus, invalidation, foreground) must not animate the list.
@@ -272,9 +294,15 @@ export default function SavedEvents() {
         onAddToCollection={collectionsAvailable ? openCollections : undefined}
         nextIso={nextById.get(item.id)}
         collectionCount={collectionCounts?.get(item.id)?.length ?? 0}
+        compareActive={compare.active}
+        compareSelected={compare.isSelected(item.id)}
+        onToggleCompare={(e) => compare.toggle(e, nextById.get(e.id))}
       />
     ),
-    [handleUnsave, nextById, collectionsAvailable, openCollections, collectionCounts]
+    // compare.items / compare.active change identity on every selection
+    // change, which is what re-renders the ticked rows.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [handleUnsave, nextById, collectionsAvailable, openCollections, collectionCounts, compare.active, compare.items]
   );
 
   const renderSectionHeader = useCallback(
@@ -316,16 +344,31 @@ export default function SavedEvents() {
             </Text>
           </View>
         </View>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => router.push('/collections' as never)}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="Open collections"
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <FolderHeart size={20} color={Colors.text.primary} />
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          {events.length >= 2 ? (
+            <TouchableOpacity
+              style={[styles.backBtn, compare.active && styles.headerBtnActive]}
+              onPress={() => (compare.active ? compare.exit() : compare.setActive(true))}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={compare.active ? 'Exit compare mode' : 'Compare events'}
+              {...a11yState({ selected: compare.active }, 'button')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <ArrowLeftRight size={20} color={compare.active ? Colors.primary : Colors.text.primary} />
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => router.push('/collections' as never)}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Open collections"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <FolderHeart size={20} color={Colors.text.primary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {loading ? (
@@ -355,7 +398,7 @@ export default function SavedEvents() {
           contentContainerStyle={[
             styles.scrollContent,
             events.length === 0 && styles.scrollContentEmpty,
-            { paddingBottom: insets.bottom + 40 },
+            { paddingBottom: insets.bottom + 40 + trayHeight },
           ]}
           showsVerticalScrollIndicator={false}
           refreshControl={
@@ -423,6 +466,7 @@ export default function SavedEvents() {
           }
         />
       )}
+      <CompareTray onHeight={setTrayHeight} />
       <AddToCollectionSheet event={collectionTarget} onClose={() => setCollectionTarget(null)} />
     </View>
   );
@@ -474,6 +518,14 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background.primary,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+  },
+  headerBtnActive: {
+    backgroundColor: Colors.primarySoft,
   },
   headerCenter: {
     flexDirection: 'row',

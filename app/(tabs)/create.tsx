@@ -21,8 +21,10 @@ import DateTimePicker, {
   DateTimePickerAndroid,
 } from '@react-native-community/datetimepicker';
 import {
+  Check,
   ChevronRight,
   ChevronDown,
+  ListChecks,
   MapPin,
   Sparkles,
 } from '@/components/icons.generated';
@@ -75,10 +77,11 @@ import {
 import { eventsService } from '@/services/events';
 import { useCategories } from '@/hooks/useCategories';
 import { businessesService } from '@/services/businesses';
-import { alpha, Colors, Shadows, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { alpha, Colors, FontScaleCaps, Shadows, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { eventLocationStore } from '@/stores/eventLocationStore';
 import { parseRecurrenceEndDate, type RecurrenceOption } from '@/utils/recurrence';
 import { notify, notifyConfirm } from '@/utils/notify';
+import { successHaptic } from '@/utils/haptics';
 import { withShiftedEnd } from '@/utils/eventDatetime';
 import { getDeviceTimeZone, pickerDateToInstant, zoneDisplayLabel } from '@/utils/timezone';
 import { TimeZonePicker } from '@/components/TimeZonePicker';
@@ -90,6 +93,9 @@ import {
 } from '@/components/EventExtrasFields';
 import { a11yState, announce } from '@/utils/accessibility';
 import { validationSummary } from '@/utils/validationSummary';
+import { progressLine, requiredFieldStatus } from '@/utils/eventFormProgress';
+import { splitExtrasErrors } from '@/utils/eventPrice';
+import { EventPriceFields } from '@/components/EventPriceFields';
 import { uuidv4 } from '@/utils/uuid';
 
 const DEFAULT_LOCATION = { lat: 37.7749, lng: -122.4194 };
@@ -105,10 +111,14 @@ const FIELD_SECTION: Record<string, string> = {
   startDatetime: 'datetime',
   endDatetime: 'datetime',
   maxAttendees: 'capacity',
+  price: 'price',
   links: 'links',
   recurrenceEnd: 'datetime',
   location: 'location',
 };
+
+/** Until the bar reports its own height: progress line, buttons, draft link. */
+const ACTION_BAR_FALLBACK_HEIGHT = 150;
 
 const TITLE_MAX = 100;
 const DESCRIPTION_MAX = 2000;
@@ -137,6 +147,9 @@ export default function CreateScreen() {
   const [loading, setLoading] = useState(false);
   /** "Uploading photo 2 of 5…" while photos go up; null otherwise. */
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+  // Measured, not guessed: the scroll content pads by this so the last field
+  // clears the sticky action bar on every phone (review C1).
+  const [actionBarHeight, setActionBarHeight] = useState(ACTION_BAR_FALLBACK_HEIGHT);
   const isPremiumBusiness = userBusiness?.subscription_tier === 'premium';
   // Monthly quota, shown up front so hosts don't fill the whole form before
   // learning they're out of events. The server re-checks on publish.
@@ -311,6 +324,35 @@ export default function CreateScreen() {
   // Deliberately not memoised: it must see the current form. A useCallback
   // here once captured the first render's empty form, so guided Publish
   // always failed validation.
+  const publishBlocked = atEventLimit || publishingPaused;
+  const progress = useMemo(
+    () =>
+      requiredFieldStatus({
+        title: formData.title,
+        description: formData.description,
+        categoryId: formData.categoryId,
+        startInFuture: pickerDateToInstant(formData.startDatetime, formData.timezone).getTime() > Date.now(),
+        endAfterStart: formData.endDatetime > formData.startDatetime,
+        placeMissing: eventNeedsExplicitPlace(userBusiness, {
+          address: formData.address,
+          placeChosen: venueChosenRef.current,
+        }),
+      }),
+    // venueChosenRef is a ref; it only flips alongside an address change,
+    // which is in the deps.
+    [
+      formData.title,
+      formData.description,
+      formData.categoryId,
+      formData.startDatetime,
+      formData.endDatetime,
+      formData.timezone,
+      formData.address,
+      userBusiness,
+    ]
+  );
+  const progressText = progressLine(progress);
+
   const handlePublishPress = () => {
     if (!showGuide) {
       void handleSubmit('publish');
@@ -572,7 +614,11 @@ export default function CreateScreen() {
     if (Object.keys(linkIssues).length > 0) e.links = 'Fix the links below';
     const extraIssues = validateExtras(formData.extras);
     setExtrasErrors(extraIssues);
-    if (Object.keys(extraIssues).length > 0) {
+    // Price and tickets have their own card now; only the rest lives under
+    // the collapsed row, so only the rest should expand it.
+    const { price: priceIssues, rest: otherIssues } = splitExtrasErrors(extraIssues);
+    if (Object.keys(priceIssues).length > 0) e.price = 'Check the price and tickets fields';
+    if (Object.keys(otherIssues).length > 0) {
       e.extras = 'Check the fields under More options';
       setShowExtras(true);
     }
@@ -782,6 +828,10 @@ export default function CreateScreen() {
               : 'Event created. Your earlier attempt had already gone through.'
         );
       }
+      // Publishing is the host's big moment and the one action in this screen
+      // that cannot be undone by a tap; it had no confirmation beyond the
+      // sheet (review C9). No-op on web.
+      successHaptic();
       // Keep the quota pill current for the next event.
       void refreshSubscription();
       rememberLastCategory(userBusiness?.id, formData.categoryId);
@@ -872,7 +922,7 @@ export default function CreateScreen() {
         style={styles.scroll}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 40 },
+          { paddingTop: insets.top + 16, paddingBottom: actionBarHeight + Spacing.lg },
         ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
@@ -955,17 +1005,13 @@ export default function CreateScreen() {
                 <Text style={styles.guideDismiss}>Hide</Text>
               </TouchableOpacity>
             </View>
-            {FIRST_EVENT_STEPS.map((step, i) => (
-              <View key={step.key} style={styles.guideStep}>
-                <Text style={styles.guideStepNum}>{i + 1}</Text>
-                <View style={styles.fieldContent}>
-                  <Text style={styles.guideStepTitle}>{step.title}</Text>
-                  <Text style={styles.guideStepHint}>{step.short}</Text>
-                </View>
-              </View>
-            ))}
+            {/* One line, not a list: the same three steps are already the
+                inline "Step N of 3" hints inside their sections, so the card
+                only has to say they exist (review C8). */}
             <Text style={styles.guideFootnote}>
-              Everything else is optional. You can edit the event after publishing.
+              {FIRST_EVENT_STEPS.map((step) => step.title.toLowerCase()).join(', ')} — the
+              hints below walk you through each. Everything else is optional and can be
+              edited after publishing.
             </Text>
           </View>
         ) : null}
@@ -1051,25 +1097,6 @@ export default function CreateScreen() {
           <Text style={styles.guideInlineHint}>Step 2 of 3 · {FIRST_EVENT_STEPS[1].hint}</Text>
         ) : null}
         <View style={styles.card}>
-          <TouchableOpacity
-            style={styles.dateRow}
-            activeOpacity={0.6}
-            onPress={() => setTzPickerOpen(true)}
-            accessibilityRole="button"
-            accessibilityLabel={`Time zone: ${zoneDisplayLabel(formData.timezone, formData.startDatetime)}. Change`}
-          >
-            <View style={styles.dateTextBlock}>
-              <Text style={styles.dateLabel}>Time zone</Text>
-              <Text style={styles.dateValue}>{zoneDisplayLabel(formData.timezone, formData.startDatetime)}</Text>
-              <Text style={styles.locationNote}>
-                {formData.timezone === getDeviceTimeZone()
-                  ? 'Your device zone. Times below are entered in it.'
-                  : 'Times below are entered in this zone, not your device zone.'}
-              </Text>
-            </View>
-            <ChevronRight size={18} color={Colors.text.tertiary} />
-          </TouchableOpacity>
-          <View style={styles.fieldSeparator} />
           {/* Start */}
           <TouchableOpacity
             style={styles.dateRow}
@@ -1216,6 +1243,29 @@ export default function CreateScreen() {
 
           <View style={styles.fieldSeparator} />
 
+          {/* Time zone sits under the times it applies to (review C7): the
+              two fields every host needs come first, the zone qualifies them. */}
+          <TouchableOpacity
+            style={styles.dateRow}
+            activeOpacity={0.6}
+            onPress={() => setTzPickerOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={`Time zone: ${zoneDisplayLabel(formData.timezone, formData.startDatetime)}. Change`}
+          >
+            <View style={styles.dateTextBlock}>
+              <Text style={styles.dateLabel}>Time zone</Text>
+              <Text style={styles.dateValue}>{zoneDisplayLabel(formData.timezone, formData.startDatetime)}</Text>
+              <Text style={styles.zoneNote}>
+                {formData.timezone === getDeviceTimeZone()
+                  ? 'Times above are in your device zone.'
+                  : 'Times above are in this zone, not your device zone.'}
+              </Text>
+            </View>
+            <ChevronRight size={18} color={Colors.text.tertiary} />
+          </TouchableOpacity>
+
+          <View style={styles.fieldSeparator} />
+
           {/* Repeat (Premium only) */}
           <TouchableOpacity
             style={styles.dateRow}
@@ -1339,6 +1389,27 @@ export default function CreateScreen() {
           </View>
         </View>
 
+        {/* ── Section: Price & tickets (review C3/C4) ──
+            Out of the collapsed row: the attribute attendees compare on
+            hardest was one tap deeper than "Max attendees". */}
+        <Text style={styles.sectionLabel} onLayout={captureSection('price')}>Price &amp; tickets</Text>
+        <View style={styles.card}>
+          <View style={styles.fieldRow}>
+            <View style={styles.fieldContent}>
+              <EventPriceFields
+                priceLabel={formData.extras.priceLabel}
+                ticketUrl={formData.extras.ticketUrl}
+                errors={extrasErrors}
+                onChange={(next) => {
+                  setExtrasErrors({});
+                  setFormData((f) => ({ ...f, extras: { ...f.extras, ...next } }));
+                }}
+              />
+              {errors.price ? <Text style={styles.errorText}>{errors.price}</Text> : null}
+            </View>
+          </View>
+        </View>
+
         {/* ── Section: More options ── */}
         <Text style={styles.sectionLabel} onLayout={captureSection('extras')}>More options</Text>
         <View style={styles.card}>
@@ -1348,10 +1419,10 @@ export default function CreateScreen() {
             activeOpacity={0.6}
             accessibilityRole="button"
             {...a11yState({ expanded: showExtras })}
-            accessibilityLabel="More options: visibility, tickets, age, accessibility"
+            accessibilityLabel="More options: visibility, age, accessibility, what to bring"
           >
             <View style={styles.dateTextBlock}>
-              <Text style={styles.dateLabel}>Visibility, tickets, age, accessibility</Text>
+              <Text style={styles.dateLabel}>Visibility, age, accessibility, what to bring</Text>
               <Text style={styles.dateValue}>{showExtras ? 'Hide' : 'Show options'}</Text>
             </View>
             <ChevronRight
@@ -1368,6 +1439,7 @@ export default function CreateScreen() {
                   <EventExtrasFields
                     value={formData.extras}
                     errors={extrasErrors}
+                    hidePriceAndTickets
                     onChange={(extras) => {
                       setExtrasErrors({});
                       setFormData((f) => ({ ...f, extras }));
@@ -1402,7 +1474,7 @@ export default function CreateScreen() {
           <View style={styles.fieldRow}>
             <View style={styles.fieldContent}>
               <Text style={styles.locationNote}>
-                First image becomes the cover photo
+                The first photo is the cover. Tap &quot;Cover&quot; on another photo to make it the cover, or drag to reorder.
               </Text>
               <ImagePickerButton
                 images={formData.images}
@@ -1413,44 +1485,80 @@ export default function CreateScreen() {
           </View>
         </View>
 
-        {/* ── Submit ── */}
-        <Button
-          label={
-            uploadProgress ??
-            (publishingPaused ? 'Publishing paused' : atEventLimit ? 'Monthly limit reached' : 'Publish Event')
-          }
-          onPress={handlePublishPress}
-          loading={loading && !savingDraft}
-          disabled={atEventLimit || loading || publishingPaused}
-          size="lg"
-          fullWidth
-          gradient
-          icon={<Sparkles size={18} color="#FFFFFF" />}
-          style={styles.submitWrap}
-        />
-        <Button
-          label="Preview"
-          variant="secondary"
-          onPress={() => setPreviewOpen(true)}
-          disabled={loading}
-          fullWidth
-          accessibilityLabel="Preview how your event will look to attendees"
-          style={styles.draftWrap}
-        />
-        <Button
-          label="Save as draft"
-          variant="secondary"
-          onPress={() => void handleSubmit('draft')}
-          loading={savingDraft}
-          disabled={loading}
-          fullWidth
-          accessibilityLabel="Save as draft: only you can see it and it does not count toward your monthly events"
-          style={styles.draftWrap}
-        />
-        <Text style={styles.draftHint}>
-          Drafts are private and free; publish from Manage event when ready.
-        </Text>
       </ScrollView>
+
+      {/* ── Sticky actions (review C1) ──
+          One primary action, reachable from anywhere in the form, with the
+          preview beside it and the draft demoted to a text action. Replaces
+          three equal full-width buttons at the end of a nine-section scroll.
+          Same fixed-bar pattern as the event page's join bar. */}
+      <View
+        style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom, Spacing.sm) }]}
+        onLayout={(e) => setActionBarHeight(e.nativeEvent.layout.height)}
+      >
+        {/* Required-field progress (review C2): live, neutral in tone, and a
+            shortcut to the first gap. Upload progress borrows the line while
+            photos are going up — it used to sit in the button label, where the
+            spinner hid it. */}
+        <TouchableOpacity
+          style={styles.progressRow}
+          onPress={() => scrollToSection(FIELD_SECTION[progress.missing[0]?.key ?? ''] ?? 'basic')}
+          disabled={progress.ready || !!uploadProgress}
+          activeOpacity={0.7}
+          accessibilityRole={progress.ready || uploadProgress ? 'text' : 'button'}
+          accessibilityLabel={
+            uploadProgress ?? (progress.ready ? progressText : `${progressText}. Go to the first missing field`)
+          }
+        >
+          {progress.ready && !uploadProgress ? (
+            <Check size={16} color={Colors.successText} />
+          ) : (
+            <ListChecks size={16} color={Colors.text.secondary} />
+          )}
+          <Text
+            style={[styles.progressText, progress.ready && !uploadProgress && styles.progressTextReady]}
+            numberOfLines={1}
+            maxFontSizeMultiplier={FontScaleCaps.control}
+          >
+            {uploadProgress ?? progressText}
+          </Text>
+        </TouchableOpacity>
+        <View style={styles.actionRow}>
+          {/* Nothing to preview toward while publishing is blocked: the status
+              label gets the whole row instead of truncating next to Preview. */}
+          {publishBlocked ? null : (
+            <Button
+              label="Preview"
+              variant="secondary"
+              onPress={() => setPreviewOpen(true)}
+              disabled={loading}
+              accessibilityLabel="Preview how your event will look to attendees"
+            />
+          )}
+          <Button
+            label={publishingPaused ? 'Publishing paused' : atEventLimit ? 'Monthly limit reached' : 'Publish Event'}
+            onPress={handlePublishPress}
+            loading={loading && !savingDraft}
+            disabled={publishBlocked || loading}
+            gradient
+            icon={publishBlocked ? undefined : <Sparkles size={18} color="#FFFFFF" />}
+            style={styles.publishButton}
+          />
+        </View>
+        <TouchableOpacity
+          style={styles.draftLink}
+          onPress={() => void handleSubmit('draft')}
+          disabled={loading}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Save as draft: only you can see it and it does not count toward your monthly events"
+          {...a11yState({ disabled: loading, busy: savingDraft })}
+        >
+          {savingDraft ? <ActivityIndicator size="small" color={Colors.primary} /> : null}
+          <Text style={styles.draftLinkText} maxFontSizeMultiplier={FontScaleCaps.control}>{savingDraft ? 'Saving draft…' : 'Save as draft'}</Text>
+          <Text style={styles.draftLinkHint} maxFontSizeMultiplier={FontScaleCaps.control}> · private and free</Text>
+        </TouchableOpacity>
+      </View>
 
       <EventPreviewSheet
         visible={previewOpen}
@@ -1552,9 +1660,9 @@ const styles = StyleSheet.create({
   guideCard: {
     backgroundColor: Colors.primarySoft,
     borderRadius: BorderRadius.lg,
-    padding: 16,
-    marginBottom: 20,
-    gap: 12,
+    padding: Spacing.md,
+    marginBottom: Spacing.lg - 4,
+    gap: Spacing.sm,
   },
   guideHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   guideTitle: {
@@ -1574,27 +1682,9 @@ const styles = StyleSheet.create({
     fontFamily: Typography.labelFontFamilies.medium,
     color: Colors.primary,
   },
-  guideStep: { flexDirection: 'row', gap: 10 },
-  guideStepNum: {
-    width: 18,
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.labelFontFamilies.medium,
-    color: Colors.primary,
-  },
-  guideStepTitle: {
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.labelFontFamilies.medium,
-    color: Colors.text.primary,
-  },
-  guideStepHint: {
-    marginTop: 2,
-    fontSize: Typography.sizes.sm,
-    fontFamily: Typography.fontFamily,
-    color: Colors.text.secondary,
-    lineHeight: 19,
-  },
   guideFootnote: {
-    fontSize: Typography.sizes.xs,
+    fontSize: Typography.sizes.sm,
+    lineHeight: 20,
     fontFamily: Typography.fontFamily,
     // tertiary grey failed WCAG AA contrast on the pink card (axe).
     color: Colors.text.secondary,
@@ -1861,27 +1951,60 @@ const styles = StyleSheet.create({
   },
 
   /* ── Submit ── */
-  draftWrap: {
-    marginTop: Spacing.sm,
+  /* ── Sticky action bar ── */
+  actionBar: {
+    paddingTop: Spacing.sm,
+    paddingHorizontal: 20,
+    backgroundColor: Colors.background.primary,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border.light,
   },
-  draftHint: {
-    marginTop: Spacing.sm,
-    textAlign: 'center',
-    fontSize: Typography.sizes.xs,
+  progressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    minHeight: 32,
+    marginBottom: Spacing.xs,
+  },
+  progressText: {
+    flex: 1,
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.labelFontFamilies.medium,
+    color: Colors.text.secondary,
+  },
+  progressTextReady: {
+    color: Colors.successText,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm + 2,
+  },
+  publishButton: {
+    flex: 1,
+  },
+  draftLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    minHeight: 44,
+  },
+  draftLinkText: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    color: Colors.primary,
+  },
+  draftLinkHint: {
+    fontSize: Typography.sizes.sm,
     fontFamily: Typography.fontFamily,
     color: Colors.text.tertiary,
   },
-  submitWrap: {
-    marginTop: Spacing.xl,
-    ...Platform.select({
-      ios: {
-        shadowColor: Colors.primary,
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.3,
-        shadowRadius: 14,
-      },
-      android: { elevation: 8 },
-    }),
+  zoneNote: {
+    marginTop: 2,
+    fontSize: 12,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.tertiary,
   },
   /* ── No-business state ── */
 });

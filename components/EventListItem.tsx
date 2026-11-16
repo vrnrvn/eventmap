@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Image } from 'expo-image';
 import { CalendarDays } from '@/components/icons.generated';
-import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
+import { Colors, FontScaleCaps, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import { useImageFallback } from '@/hooks/useImageFallback';
 
 export type EventListItemBadge = {
@@ -115,29 +115,29 @@ export function EventListItem({
             )}
             <View style={styles.body}>
               <View style={styles.titleRow}>
-                <Text style={styles.title} numberOfLines={2}>
+                <Text style={styles.title} numberOfLines={2} maxFontSizeMultiplier={FontScaleCaps.cell}>
                   {title}
                 </Text>
                 {badge ? (
                   <View style={[styles.badge, { backgroundColor: tone.bg }]}>
-                    <Text style={[styles.badgeText, { color: tone.fg }]}>{badge.label}</Text>
+                    <Text style={[styles.badgeText, { color: tone.fg }]} maxFontSizeMultiplier={FontScaleCaps.control}>{badge.label}</Text>
                   </View>
                 ) : null}
                 {titleAccessory}
               </View>
               {subtitle ? (
-                <Text style={styles.subtitle} numberOfLines={1}>
+                <Text style={styles.subtitle} numberOfLines={1} maxFontSizeMultiplier={FontScaleCaps.control}>
                   {subtitle}
                 </Text>
               ) : null}
               <View style={styles.metaRow}>
                 {dateIcon ?? <CalendarDays size={12} color={Colors.text.tertiary} />}
-                <Text style={styles.metaText} numberOfLines={1}>
+                <Text style={styles.metaText} numberOfLines={1} maxFontSizeMultiplier={FontScaleCaps.control}>
                   {dateLine}
                 </Text>
               </View>
               {metaLines?.map((line, index) => (
-                <Text key={`${index}-${line}`} style={[styles.metaText, styles.extraMeta]} numberOfLines={1}>
+                <Text key={`${index}-${line}`} style={[styles.metaText, styles.extraMeta]} numberOfLines={1} maxFontSizeMultiplier={FontScaleCaps.control}>
                   {line}
                 </Text>
               ))}

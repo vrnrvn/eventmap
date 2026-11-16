@@ -138,6 +138,19 @@ export const LabelFont = {
   semibold: DMSansFont.semibold,
 } as const;
 
+/**
+ * `maxFontSizeMultiplier` caps for single-line UI text (review C10). Body copy
+ * scales freely; chips, buttons, table cells and truncating titles cap so a
+ * 200 % system font enlarges them without clipping or pushing controls off
+ * screen. WCAG 1.4.4 is met by the body text; these are the dense bits.
+ */
+export const FontScaleCaps = {
+  /** Buttons, chips, badges, meta lines, segmented controls. */
+  control: 1.5,
+  /** Table cells and titles that already truncate. */
+  cell: 1.4,
+} as const;
+
 export const Typography = {
   fontFamily: DMSansFont.regular,
   fontFamilies: DMSansFont,

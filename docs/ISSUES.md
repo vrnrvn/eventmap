@@ -30,11 +30,10 @@ archive.
   `POST /rpc/get_user_collections` through PostgREST returns a clean
   `401 / 42501` with no crash. **Not reachable over HTTP** — an earlier note
   here said it was; that was wrong.
-- **DB state (read-only check, 2026-11-14):** all **121** files in
-  `supabase/migrations/` are recorded in the shared local DB's
-  `schema_migrations`, and nothing is recorded that is not a file. Verify with:
+- **DB state (2026-11-15):** the local DB records **123** migrations,
+  including `20261115100000_get_events_compare.sql`. Verify with:
   `select count(*), max(version) from supabase_migrations.schema_migrations;`
-  → 121 / `20261113110000`. Any hosted/production project must be checked
+  → expected 123 / `20261115100000`. Any hosted/production project must be checked
   separately — in particular the Oct 30 security set (`20261030100000` admin
   self-grant, `…101000` premium self-grant, `…102000` storage ownership,
   `…107000` search_path). No hosted project has ever been checked.
@@ -110,14 +109,52 @@ archive.
 
 ---
 
-## Status at a glance (updated 2026-11-14)
+## Owner to-do after the 2026-11-15 roadmap (in order)
+
+Everything agent-doable is done and verified (see the Done log entry "final
+regression pass"). What is left needs you:
+
+1. **Review and commit** the working tree (44 changed or new files, nothing
+   committed by the sessions — your call on how to split it; the Done log
+   entries for phases 0-8 are a natural commit map).
+2. **Hosted-database inventory** — `docs/MIGRATIONS_PENDING.md` item 0, the
+   three read-only queries per hosted project. Prerequisite for any hosted
+   apply; never done.
+3. **Local comparison migration applied** — `20261115100000_get_events_compare.sql`
+   is recorded locally, types regenerated, and isolated SQL suites pass 13/13.
+   Nothing in the client depends on it yet (D7).
+4. **Install `axe-core` as a dev dependency** (`npm install --save-dev axe-core`)
+   so `suiteA11y` and `suiteHostUi` regain automated contrast and ARIA
+   coverage; the agent environment cannot install packages.
+5. **Device pass** — the list under "Device & manual testing", now including
+   the font-scaling caps at 200 % and the compare tray / table on a phone
+   (horizontal scroll vs. the Discover sheet's pan gesture, long-press
+   selection on iOS and Android, VoiceOver / TalkBack reading order in table
+   and cards mode).
+6. **Decisions still open:** D3 (numeric price columns — nothing waits on it),
+   J2 (optimistic RSVP), and the older product decisions listed below.
+
+## Status at a glance (updated 2026-11-15)
+
+**Final regression pass, 2026-11-15** (all foreground, no database touched):
+app + admin typecheck clean; app lint 0 errors / 7 warnings and admin lint 0 /
+2 (both the pre-existing baselines); **1,124 unit tests in 92 files**; admin
+`next build` 21 pages; **all 18 fake-backend browser suites green — 1,054
+checks, 0 failures** against one shared export (`suiteA11y` without axe);
+**13/13 SQL suites** on the isolated Postgres 17 engine (from the phase-8
+validation the same day). Design-token audit: **1,034 literals in 91 files**
+(was 1,025 — the nine new ones are in the compare and price components;
+tracked under Low). No application defects were found in the pass itself;
+one harness-process slip is recorded in the Done log.
+
+### Earlier snapshot (2026-11-14)
 
 A full documentation review ran on 2026-11-14; its findings, ranked, and the
 step-by-step plan to close them are in
 [`docs/REVIEW_AND_ROADMAP_2026-11-14.md`](REVIEW_AND_ROADMAP_2026-11-14.md).
 Headlines, all verified against the code and the database:
 
-- **Local migrations are applied.** All 122 migrations are recorded on the
+- **Local migrations are applied.** All 123 migrations are recorded on the
   local DB, including the Nov 10 host-onboarding set, collections
   (`20261112100000`) and both playbook files (`20261113100000`,
   `20261113110000`) that this tracker previously listed as "prepared, NOT
@@ -332,10 +369,70 @@ picker and permission prompts (flow 1); notification taps from a push
   `authenticator` role errors normally. The crash needs a superuser session,
   so it is confined to psql suites. No decision needed; no change to grants.
 
+### Create & join UX review (2026-11-15)
+
+Full review with file:line evidence in
+[`docs/CREATE_AND_JOIN_UX_REVIEW_2026-11-15.md`](CREATE_AND_JOIN_UX_REVIEW_2026-11-15.md);
+sequencing in `ROADMAP.md` → "Planned: event comparison + create/join UX".
+Items already listed elsewhere in this tracker (font scaling, publish-preview
+height, no bookmark on Discover cards) are not duplicated here.
+
+**Phase 0 — done 2026-11-15** (see the Done log):
+
+- [x] **J1** Join button had no in-flight state — no spinner, no `busy`, label
+  unchanged for the whole round trip.
+- [x] **J3 / C9** `utils/haptics.ts` was imported by two files, neither of
+  them join or publish.
+- [x] **J4** A successful "going" RSVP notified nothing and offered no next
+  step.
+- [x] **J7 / C5** Sub-44 px targets: the calendar / collection chips (~34 px,
+  no hitSlop) and the age chips (36 px).
+- [x] **J9** Approval mode gave no expectation of when the host replies.
+
+**Phase 2 — done 2026-11-15** (see the Done log):
+
+- [x] **C1** Publish / Preview / Save-as-draft were three stacked full-width
+  buttons at the end of a nine-section scroll, inside the ScrollView. Now a
+  sticky action bar with one primary.
+- [x] **C2** No signal of which required fields remained until Publish was
+  pressed. Now a live "Still needed: …" / "Ready to publish" line in the bar.
+- [x] **C7** The three-line time-zone row led the Date & Time section. Now
+  under Starts/Ends.
+- [x] **C8** The first-event card repeated the three inline hints as a list.
+  Now one sentence.
+
+**Phase 3 — done 2026-11-15** (see the Done log):
+
+- [x] **C3 / C4** Price and the tickets link sat behind the collapsed "More
+  options" row with no "Free" shortcut. Now their own section on Create and
+  Edit with a Free / Paid chip pair (`components/EventPriceFields.tsx`). The
+  column stays free text; the structured version is decision D3 below.
+
+**Open:**
+
+- [ ] **J2** Joining is not optimistic while saving is — two adjacent controls
+  on the same screen behave differently under latency. Needs a decision
+  (optimistic RSVP vs. accept the wait) rather than a fix. **[decision]**
+**Phase 7 — done 2026-11-15** (see the Done log):
+
+- [x] **J5 / J6** "You're going" replaces "Event Joined"; Interested is a
+  labelled pill.
+- [x] **J8** Save from Discover cards (also closes the Low item "Discover/search
+  cards have no bookmark" below).
+- [x] **C6 withdrawn** — the Cover badge and "Make cover" action already
+  existed in `components/ImagePickerButton.tsx`; only Create's hint was
+  misleading, and it now names the control.
+- [x] **C10, targeted:** `FontScaleCaps` applied to single-line controls,
+  chips, list rows, the compare surfaces, Create's action bar and the join
+  bar. Device verification still pending (web reports `fontScale` 1).
+
 ### Low (worth doing when nearby)
-- [ ] **Design tokens:** measured 2026-11-14 with
-  `node scripts/design-token-audit.mjs` — **1,025 literals in 87 files**:
-  spacing 272 on-scale + 573 off-scale, radius 45 on-scale + 135 off-scale.
+- [ ] **Design tokens:** measured 2026-11-15 with
+  `node scripts/design-token-audit.mjs` — **1,034 literals in 91 files**:
+  spacing 275 on-scale + 579 off-scale, radius 45 on-scale + 135 off-scale.
+  (2026-11-14: 1,025 in 87 files; the nine added since are in the new
+  compare and price components — `components/compare/*`, `CompareTray`,
+  `EventPriceFields` — mostly `paddingHorizontal: 18` and `gap: 6`.)
   On-scale values are a mechanical swap to the token; off-scale ones need a
   judgement call. Worst files: `app/(tabs)/profile.tsx` (87),
   `app/(onboarding)/index.tsx` (85), `screens/EventDetail.tsx` (58),
@@ -359,8 +456,9 @@ picker and permission prompts (flow 1); notification taps from a push
   actions still exceed a 320 px-wide phone's 425 px viewport, so the detail
   card stays below the fold. A real fix is a redesign (segmented view, or a
   smaller preview card), not another reorder.
-- [ ] Discover/search cards have no bookmark (save is on the event page
-  only). Common in event apps; small feature, not a bug.
+- [x] ~~Discover/search cards have no bookmark~~ — **done 2026-11-15**
+  (roadmap phase 7, J8): a bookmark on every Discover card; search results
+  reuse the same card.
 
 #### Re-opened 2026-11-14 — still open in code, dropped by the Nov 8 rebuild
 
@@ -412,6 +510,11 @@ against the current code. Archive line numbers in brackets.
   anywhere (large-font never tested); reduce-motion honoured in 2 of 9
   animated files. The Nov 8 pass fixed three *other* contrast items.
   [A:1408-1429]
+- [ ] **`useScreenReaderEnabled()` is always true on web** — react-native-web's
+  `AccessibilityInfo.isScreenReaderEnabled()` resolves `true` unconditionally.
+  Harmless for its timing use in `components/AppToast.tsx`; anything that
+  would change *layout* on it must also check `Platform.OS !== 'web'` (done in
+  `screens/CompareEvents.tsx`). Documented on the hook 2026-11-15.
 - [ ] **Realtime still carries the anon key while a session is stale** —
   `utils/sessionGate.ts:52` never blocks realtime by design. [A:1007]
 - [ ] **Maestro airplane-mode flows were never written** (OFFLINE_PLAN §7);
@@ -694,6 +797,18 @@ PUBLIC` + explicit grants to `authenticated` for RPCs; require a session for
   `docs/DISCOVERY_MODES_PLAN.md` §6 (names, novelty weighting, default
   radius, whether to ship "Just added" degraded or wait for the server sort,
   Surprise-me location prompt). Nothing is built.
+- [ ] **[decision]** Event comparison, the six choices in
+  `docs/EVENT_COMPARISON_PLAN.md` §7. Foundations (phase 1) are built and are
+  decision-free. By the roadmap phase that needs each: phase 4 wants **D1**
+  (session-only tray) and **D5** (cap of 4); phase 5 wants **D4** (large
+  font forces cards mode); phase 6 wants **D2** (is `/compare?ids=…`
+  shareable, given unlisted events) and **D6** (a third control in the
+  Discover header). **All five were decided by the owner on 2026-11-15:** D1
+  session-only, D5 cap of 4, D4 yes (toggle stays), D2 yes (minus unlisted
+  events the opener could not see), D6 long-press only. **D3** (numeric
+  `price_min` / `currency` / `is_free` columns, **[DB]**) decides whether the
+  free-text price parser and phase 3's Free chip are permanent or interim;
+  nothing waits on it.
 - [ ] **[decision]** Categories D1 (`docs/CATEGORIES_AND_SERIES_PLAN.md` §7
   Phase D): whether a future start date that is not itself an occurrence
   should be returned as the next date.
@@ -731,6 +846,225 @@ never exposed, so the hash isn't reversible in practice).
 ---
 
 # Done log
+
+## 2026-11-15 — final regression pass over the whole roadmap
+
+One clean run over the finished tree rather than the per-phase runs.
+
+- **Static:** app typecheck clean; `npm run typecheck:admin` clean; app lint
+  0 errors / 7 warnings (the Nov 8 baseline, unchanged by eight phases of
+  work); admin eslint 0 / 2 (baseline); **1,124 unit tests in 92 files**;
+  admin `next build` 21 pages generated.
+- **Browser, 18/18 suites green against one fake-backend export, 1,054
+  checks:** A 21 · B 46 · C 13 · D 30 · F 25 · A11y 168 (no axe) · Host 92 ·
+  HostUi 174 · Onboarding 57 · Collections 168 · Notifications 55 ·
+  Moderation 34 · Attendee 14 · Premium 19 · Privacy 15 · Account 10 ·
+  Visual 68 · Compare 45. The export was built once with run.sh's dead-backend
+  safety checks and every suite ran in the foreground against it.
+- **SQL:** 13/13 on the isolated PG17 container (phase 8, same day); not
+  re-run — nothing changed in `supabase/` since.
+- **Visual set (flow 9's human half):** the 22 captures were reviewed as a
+  set for the screens this roadmap touched — Discover (chips are pills again at
+  both widths), Create (sticky bar), event page, Saved. Nothing out of place.
+- **Found:** no application defects. One **process slip**: the Visual suite,
+  run concurrently with five other suites, exceeded the foreground limit and
+  the harness backgrounded it; it was stopped at once, no orphaned Chrome was
+  left, and it passed 68/68 re-run alone. Rule going forward: at most four
+  browser suites at a time, Visual on its own.
+- **Not run:** `npm audit` (no dependency changed since the Nov 8 count of
+  34), axe-based checks (needs `axe-core`, owner item 4).
+
+## 2026-11-15 — roadmap phase 8: the comparison RPC, applied locally
+
+- [x] **`20261115100000_get_events_compare.sql`** written and validated on the
+  isolated PG17 container (123 migrations + seed): clean apply, idempotent
+  re-apply, **13/13 SQL suites** including the new
+  `scripts/test-events-compare.sql` (5 blocks). Visibility mirrors
+  `get_event_details`; up to 4 distinct ids; viewer state included (D9);
+  callable by anon and authenticated. **Applied locally only** — listed as
+  `docs/MIGRATIONS_PENDING.md` item 2 with the apply and cutover steps.
+- [x] **Hosted-database inventory runbook** (D10) — `docs/MIGRATIONS_PENDING.md`
+  item 0; owner work, prerequisite for any hosted apply.
+- [ ] **Client cutover deferred (D7)** until the comparison has real usage; the
+  `useCompareEvents` batch path is specified in item 2. No code change now, per
+  the client/schema policy (no targeting an unapplied RPC, no fallbacks).
+- [x] **[DB]** The local database records all **123** repository migrations.
+
+## 2026-11-15 — roadmap phase 7: the remaining review items
+
+- [x] **J8 bookmark on Discover cards**, with the card restructured so the
+  host button and bookmark are siblings of the press area rather than
+  touchables nested in a touchable (the custom-action workaround is gone).
+- [x] **J5 / J6** "You're going"; labelled Interested pill.
+- [x] **C6 withdrawn** — already implemented in `ImagePickerButton`
+  (`handleMakeCover`, Cover badge, `makeCover` a11y action). Create's photo
+  hint now says so. The review had not opened the picker.
+- [x] **C10 targeted font-scaling pass** — `FontScaleCaps` in the theme,
+  applied to the dense single-line surfaces. First `maxFontSizeMultiplier`
+  in the app. **[device]** to verify at 200 %.
+- [x] GOING badge on Discover cards now `Colors.successText` (contrast
+  leftover from the theme audit).
+
+**Verification:** typecheck clean, **1,124 unit tests in 92 files**, lint 0
+errors / 7 warnings (baseline), and against one shared fake-backend export:
+`suiteVisual` **68/68**, `suiteAttendee` **14/14**, `suiteCompare` **45/45**,
+`suiteModeration` **34/34** (its R4 still taps "Mark as interested"), plus a
+scripted walk: a card bookmark tap → exactly one `POST saves` and the label
+flipping to "Remove … from saved events"; host buttons reachable as their own
+elements; the Interested pill and "You're going" rendering; Create's new cover
+hint present. No database touched.
+
+## 2026-11-15 — roadmap phase 6: reach and verification
+
+- [x] **Discover long-press** selects a card for comparison (D6): "COMPARING"
+  badge, "selected for comparison" in the label, and the same toggle as a
+  custom accessibility action for screen readers. Tray above the tab bar;
+  bottom sheet and FAB lift by its height.
+- [x] **Shareable `/compare?ids=` link** (D2): `utils/compareLink.ts` (9
+  tests) keeps unlisted events out of a link and drops, on open, unlisted
+  events the viewer never saw plus anything the server does not return, with
+  one toast counting the drops. Share control on the compare screen.
+- [x] **`suiteCompare.mjs`** — 45 checks across tray, table, actions, cards,
+  Discover long-press, the shared link, and a11y/layout at 320 and 390 px.
+  README row added.
+- [x] Found by the suite and fixed: the header "Exit compare mode" left the
+  tray and selection up; it now exits fully like the tray's ×.
+- [x] **Pre-existing, web only, fixed while here:** the Discover filter chips
+  rendered as ~100 px circles. react-native-web gives every ScrollView
+  `flexGrow: 1`, so inside the fixed-height header the chip strip grew to the
+  leftover space and stretched the pill-radius chips. `flexGrow: 0` on the
+  strip and `alignItems: 'center'` on its row; native never grew it. Visible
+  in the phase-2 `suiteVisual` capture, so not introduced by this work.
+
+**Verification:** typecheck clean, **1,124 unit tests in 92 files**, lint 0
+errors / 7 warnings (baseline), `suiteCompare` **45/45**. No database touched.
+
+## 2026-11-15 — roadmap phase 5: the comparison screen
+
+- [x] **Side-by-side table** (`components/compare/CompareTable.tsx`): sticky
+  attribute column, pinned header and footer following the body's horizontal
+  scroll, measured row heights, ★ best cells, per-cell spoken labels.
+- [x] **Identical-row collapse** in both modes; **details fetch**
+  (`hooks/useCompareEvents.ts`, same key as the event page, effective next
+  dates for series); **per-column Join / Save**
+  (`components/compare/CompareActions.tsx`) writing through the event page's
+  own service calls and query keys. `joinActionFor` joins only the plain
+  case and hands every second-step state to the event page.
+- [x] **D4**: cards by default under a screen reader (native) or large text,
+  toggle always available.
+- [x] Found and fixed: react-native-web's `isScreenReaderEnabled()` always
+  resolves true (now native-only for layout decisions; hook documented); a
+  nested touchable in the table header (caught by the AST guard); a
+  truncated mode toggle.
+
+**Verification:** typecheck clean, **1,116 unit tests in 91 files**, lint 0
+errors / 7 warnings (baseline), scripted headless walk of table → actions →
+scroll sync → collapse → cards with zero runtime errors. No database touched.
+A fake-backend suite for the comparison (`suiteCompare.mjs`) is phase 6.
+
+## 2026-11-15 — roadmap phase 4: the compare tray
+
+- [x] **Compare mode + tray** on Saved events, Collection detail and Category
+  browse: header toggle, per-row 44 px checkbox in the `rightAction` slot
+  (row tap still opens the event), dock with thumbnails / remove / exit / one
+  CTA, refusal toast and announcement at the cap of 4, list padding by the
+  tray's measured height. `stores/compareStore.ts` (mode added, 14 tests),
+  `hooks/useCompareSelection.ts`, `components/CompareCheckbox.tsx`,
+  `components/CompareTray.tsx`.
+- [x] **`/compare` first cut** (`screens/CompareEvents.tsx`): cards mode on
+  the tray's snapshots with ★ best marks, Open / Remove per card, Clear, and
+  a two-events-minimum empty state. Table mode, identical-row collapse, the
+  details fetch and per-column actions are phase 5.
+
+**Verification:** typecheck clean, **1,112 unit tests in 91 files**, lint 0
+errors / 7 warnings (baseline), `suiteCollections` **168/168**, `suiteB`
+**46/46**, scripted headless walk of the tray (mode → tick → cap → compare)
+with no runtime errors. No database touched. One process note: a combined
+two-suite run exceeded the foreground limit and was backgrounded by the
+harness; it was stopped at once and the second suite re-run alone in the
+foreground — suites are now run one per command.
+
+**Owner decisions recorded 2026-11-15:** D4 yes (toggle stays), D2 yes
+(minus unlisted events the opener could not see), D6 long-press only.
+
+## 2026-11-15 — roadmap phase 3: price out of hiding
+
+- [x] **C3** "Price & tickets" is its own section on Create and Edit
+  (`components/EventPriceFields.tsx`; `EventExtrasFields` hides the two
+  fields via `hidePriceAndTickets`). Errors for the two fields route to the
+  new section (`utils/eventPrice.splitExtrasErrors`) instead of expanding the
+  collapsed row.
+- [x] **C4** Free / Paid chips. Free writes the canonical `Free` label that the
+  comparison parser reads with confidence; Paid opens the free-text amount.
+  `utils/eventPrice.ts`, 7 tests. Column unchanged (D3 open).
+
+**Verification:** typecheck clean, **1,110 unit tests in 91 files**, lint 0
+errors / 7 warnings (baseline), `suiteHost` **92/92**, `suiteHostUi`
+**174/174**. No database touched.
+
+**Owner decisions recorded 2026-11-15:** D1 (session-only tray) and D5 (cap of
+4) confirmed as built. Commits are the owner's; sessions leave the tree
+uncommitted.
+
+## 2026-11-15 — roadmap phase 2: Create form structure
+
+- [x] **C1 sticky action bar.** Preview + Publish in one row below the
+  ScrollView, "Save as draft · private and free" as a 44 px text action; the
+  content pads by the bar's measured height. Blocked states (limit / paused)
+  drop Preview so the status label never truncates at 320 px.
+- [x] **C2 live required-field progress** — new `utils/eventFormProgress.ts`
+  (7 tests): "Still needed: Title, Category" → "Ready to publish", tappable to
+  the first gap. Upload progress moved here from the button label, where the
+  spinner had been hiding it.
+- [x] **C7** time-zone row under Starts/Ends; **C8** first-event card reduced
+  to one sentence.
+
+**Verification:** typecheck clean, **1,103 unit tests in 90 files**, lint 0
+errors / 7 warnings (baseline), `suiteHost` **92/92**, `suiteHostUi`
+**174/174** at 320 and 390 px (labels, 44 px targets, overflow, clipped text).
+No database touched. The pinned strings the suites click on ("Publish Event",
+"Save as draft", "Preview how your event will look", "Hide first event tips",
+"Your first event: three things that matter", "Time zone") are unchanged.
+
+## 2026-11-15 — create/join UX review + comparison roadmap, phases 0-1
+
+Planning: `docs/EVENT_COMPARISON_PLAN.md` (design + decisions D1-D6) and
+`docs/CREATE_AND_JOIN_UX_REVIEW_2026-11-15.md` (19 findings, J1-J9 / C1-C10),
+sequenced into one eight-phase roadmap in `ROADMAP.md`.
+
+**Phase 0 — UX quick wins (shipped):**
+
+- [x] **J1 the Join button had no in-flight state.** `screens/EventDetail.tsx`:
+  "Joining…" / "Joining waitlist…" / "Updating…", a spinner in place of the
+  arrow, `aria-busy`, and a "Saving your RSVP" label while the request runs.
+  The re-entry guard already made a second tap harmless; nothing said so.
+- [x] **J3 / C9 haptics.** `utils/haptics.ts` had exactly two consumers
+  (onboarding, HostSetup) and neither of the two actions that matter most.
+  Now: success on a confirmed RSVP, a sent request, a waitlist join and a
+  publish; selection on the interested toggle and on leaving. No-ops on web.
+- [x] **J4 joining succeeded silently.** A confirmed "going" raises a toast
+  with an **Add** action into the calendar flow (`notify.withAction`).
+- [x] **J7 / C5 sub-44 px targets.** The event page's calendar/collection
+  chips (~34 px, no hitSlop) and the age chips in `EventExtrasFields` (36 px).
+- [x] **J9 approval mode said nothing about timing** — and a pending request
+  fell through to "Not sure yet? Tap the star", which was found while fixing
+  it. Pending requests now get their own line.
+
+**Phase 1 — comparison foundations (shipped):** `utils/comparePrice.ts`,
+`utils/compare.ts`, `stores/compareStore.ts`, all renderer-free and wired into
+nothing yet, so the §7 decisions can still move the UX. Design notes and the
+one bug found (uncapped events ranking below a nearly-full one, from an
+`Number.isFinite` filter eating `-Infinity`) are in the plan's §8 log.
+
+**Verification:** typecheck clean (app), **1,096 unit tests in 89 files**
+(+48: 18 price, 18 rows, 12 store), lint 0 errors / 7 warnings — the same
+seven as the Nov 14 baseline. Browser suites against the fake backend, run in
+the foreground: `suiteAttendee` **14/14** and `suiteHost` **92/92**, covering
+the two screens that changed. No database was touched.
+
+**Deliberately not done:** J2 (optimistic RSVP vs. accepting the wait) is a
+decision, filed above rather than guessed at; C1/C2 (Create's action bar and
+progress) are layout work that wants screenshots, filed as roadmap phase 2.
 
 ## 2026-11-14 — flows 5–9 (the last agent-doable testing passes)
 

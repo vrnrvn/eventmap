@@ -31,6 +31,9 @@ import { queryKeys } from '@/hooks/queryKeys';
 import { CollectionsUnavailableError, collectionsService } from '@/services/collections';
 import { runOrQueue } from '@/services/pendingWrites';
 import { EventListItem } from '@/components/EventListItem';
+import { CompareCheckbox } from '@/components/CompareCheckbox';
+import { CompareTray } from '@/components/CompareTray';
+import { useCompareSelection } from '@/hooks/useCompareSelection';
 import { CollectionNameSheet } from '@/components/CollectionNameSheet';
 import { CollectionActionsSheet } from '@/components/CollectionActionsSheet';
 import { useCollectionCalendarExport } from '@/hooks/useCollectionCalendarExport';
@@ -41,7 +44,7 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl';
 import { Button } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { FreshnessNote, OfflineState } from '@/components/ui/QueryStates';
-import { ChevronDown, ChevronRight, ChevronUp, Ellipsis, FolderHeart, Repeat, X } from '@/components/icons.generated';
+import { ArrowLeftRight, ChevronDown, ChevronRight, ChevronUp, Ellipsis, FolderHeart, Repeat, X } from '@/components/icons.generated';
 import {
   COLLECTION_SORTS,
   collectionErrorMessage,
@@ -112,6 +115,9 @@ const CollectionEventRow = memo(function CollectionEventRow({
   onToggleExpand,
   exceptions,
   userId,
+  compareActive = false,
+  compareSelected = false,
+  onToggleCompare,
 }: {
   event: CollectionEvent;
   kind: Collection['kind'];
@@ -123,6 +129,10 @@ const CollectionEventRow = memo(function CollectionEventRow({
   onToggleExpand?: (id: string) => void;
   exceptions?: readonly OccurrenceException[];
   userId?: string;
+  /** Compare mode (plan §3.1): the row's action gives way to a checkbox. */
+  compareActive?: boolean;
+  compareSelected?: boolean;
+  onToggleCompare?: (event: CollectionEvent) => void;
 }) {
   const ended = event.has_ended;
   const cancelled = event.status === 'cancelled';
@@ -153,9 +163,16 @@ const CollectionEventRow = memo(function CollectionEventRow({
         }
         dateIcon={event.is_recurring ? <Repeat size={12} color={Colors.text.tertiary} /> : undefined}
         metaLines={metaLines}
-        rightAccessory={pinned ? undefined : <ChevronRight size={18} color={Colors.border.medium} />}
+        rightAccessory={pinned || compareActive ? undefined : <ChevronRight size={18} color={Colors.border.medium} />}
         rightAction={
-          pinned ? (
+          compareActive ? (
+            <CompareCheckbox
+              selected={!!compareSelected}
+              title={event.title}
+              disabled={!!ended || cancelled}
+              onToggle={() => onToggleCompare?.(event)}
+            />
+          ) : pinned ? (
             <TouchableOpacity
               style={styles.removeBtn}
               onPress={() => onRemove(event)}
@@ -212,6 +229,8 @@ export default function CollectionDetail() {
     return (query.data?.pages.flat() ?? []).filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true)));
   }, [query.data]);
   const nextById = useEffectiveNextDates(events, segment !== 'past');
+  const compare = useCompareSelection();
+  const [trayHeight, setTrayHeight] = useState(0);
   // Repeating segment: exceptions per series for the expanded date lists
   // (same batched query as the next dates above, so no extra request).
   const { byEvent: exceptionsByEvent } = useOccurrenceExceptionsForEvents(events, segment === 'repeating');
@@ -343,9 +362,15 @@ export default function CollectionDetail() {
         onToggleExpand={toggleExpanded}
         exceptions={exceptionsByEvent.get(item.id)}
         userId={user?.id}
+        compareActive={compare.active}
+        compareSelected={compare.isSelected(item.id)}
+        onToggleCompare={(e) => compare.toggle(e, nextById.get(e.id))}
       />
     ),
-    [collection?.kind, nextById, handleRemove, segment, expanded, toggleExpanded, exceptionsByEvent, user?.id]
+    // compare.items / compare.active change identity on every selection
+    // change, which is what re-renders the ticked rows.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [collection?.kind, nextById, handleRemove, segment, expanded, toggleExpanded, exceptionsByEvent, user?.id, compare.active, compare.items]
   );
 
   const smart = collection?.kind === 'smart';
@@ -443,15 +468,29 @@ export default function CollectionDetail() {
         onBack={() => goBackOr(router, '/collections')}
         right={
           collection ? (
-            <TouchableOpacity
-              style={styles.headerBtn}
-              onPress={() => setActionsOpen(true)}
-              accessibilityRole="button"
-              accessibilityLabel="Collection options"
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Ellipsis size={22} color={Colors.text.primary} />
-            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              {events.length >= 2 ? (
+                <TouchableOpacity
+                  style={[styles.headerBtn, compare.active && styles.headerBtnActive]}
+                  onPress={() => (compare.active ? compare.exit() : compare.setActive(true))}
+                  accessibilityRole="button"
+                  accessibilityLabel={compare.active ? 'Exit compare mode' : 'Compare events'}
+                  {...a11yState({ selected: compare.active }, 'button')}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <ArrowLeftRight size={20} color={compare.active ? Colors.primary : Colors.text.primary} />
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={() => setActionsOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Collection options"
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ellipsis size={22} color={Colors.text.primary} />
+              </TouchableOpacity>
+            </View>
           ) : undefined
         }
       />
@@ -461,7 +500,7 @@ export default function CollectionDetail() {
         keyExtractor={keyExtractor}
         ListHeaderComponent={header}
         ListEmptyComponent={empty}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: Spacing.xxl + trayHeight }]}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={pulling} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />}
         onEndReached={onEndReached}
@@ -483,6 +522,7 @@ export default function CollectionDetail() {
           ) : null
         }
       />
+      <CompareTray onHeight={setTrayHeight} />
       <CollectionActionsSheet
         target={actionsOpen ? collection : null}
         onClose={() => setActionsOpen(false)}
@@ -511,7 +551,9 @@ export default function CollectionDetail() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.background.primary },
-  headerBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  headerBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: BorderRadius.md },
+  headerActions: { flexDirection: 'row', alignItems: 'center' },
+  headerBtnActive: { backgroundColor: Colors.primarySoft },
   list: { paddingHorizontal: Spacing.md, paddingBottom: Spacing.xxl, flexGrow: 1 },
   hero: {
     flexDirection: 'row',

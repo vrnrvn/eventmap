@@ -20,6 +20,12 @@ type Props = {
   errors?: Partial<Record<keyof EventExtrasDraft, string>>;
   /** The create/edit screens differ in how rows are framed; this only renders the fields. */
   disabled?: boolean;
+  /**
+   * Price and the tickets link now have their own section
+   * (`EventPriceFields`, review C3); the screens that render it pass true so
+   * the fields are not shown twice.
+   */
+  hidePriceAndTickets?: boolean;
 };
 
 /**
@@ -27,7 +33,7 @@ type Props = {
  * tickets/price, age restriction, accessibility notes, what to bring. All
  * optional; the server stores empty values as NULL.
  */
-export function EventExtrasFields({ value, onChange, errors, disabled }: Props) {
+export function EventExtrasFields({ value, onChange, errors, disabled, hidePriceAndTickets }: Props) {
   const set = <K extends keyof EventExtrasDraft>(key: K, v: EventExtrasDraft[K]) => onChange({ ...value, [key]: v });
   const unlisted = value.visibility === 'unlisted';
   return (
@@ -52,25 +58,29 @@ export function EventExtrasFields({ value, onChange, errors, disabled }: Props) 
         />
       </View>
 
-      <Input
-        label="Tickets link (optional)"
-        value={value.ticketUrl}
-        onChangeText={(t) => set('ticketUrl', t)}
-        placeholder="https://…"
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="url"
-        editable={!disabled}
-        error={errors?.ticketUrl}
-      />
-      <Input
-        label="Price (optional)"
-        value={value.priceLabel}
-        onChangeText={(t) => set('priceLabel', t.slice(0, 60))}
-        placeholder="Free · €12 at the door · From $20"
-        editable={!disabled}
-        error={errors?.priceLabel}
-      />
+      {hidePriceAndTickets ? null : (
+        <>
+          <Input
+            label="Tickets link (optional)"
+            value={value.ticketUrl}
+            onChangeText={(t) => set('ticketUrl', t)}
+            placeholder="https://…"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            editable={!disabled}
+            error={errors?.ticketUrl}
+          />
+          <Input
+            label="Price (optional)"
+            value={value.priceLabel}
+            onChangeText={(t) => set('priceLabel', t.slice(0, 60))}
+            placeholder="Free · €12 at the door · From $20"
+            editable={!disabled}
+            error={errors?.priceLabel}
+          />
+        </>
+      )}
 
       <Text style={styles.fieldLabel}>Age</Text>
       <View style={styles.chipRow} accessibilityRole="radiogroup">
@@ -154,7 +164,8 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   chip: {
-    minHeight: 36,
+    // 44 px floor, matching the target the a11y suites assert (review C5).
+    minHeight: 44,
     paddingHorizontal: 14,
     justifyContent: 'center',
     borderRadius: BorderRadius.round,

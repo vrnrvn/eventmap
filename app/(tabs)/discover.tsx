@@ -49,6 +49,11 @@ import {
 import { EventmapFilter, EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIcons';
 import { GoogleMapView, type GoogleMapHandle } from '@/components/GoogleMapView';
 import { SearchOverlay } from '@/components/SearchOverlay';
+import { CompareTray } from '@/components/CompareTray';
+import { runOrQueueWithNotice } from '@/services/pendingWrites';
+import { connectionErrorMessage } from '@/utils/networkErrors';
+import { selectionHaptic } from '@/utils/haptics';
+import { useCompareSelection } from '@/hooks/useCompareSelection';
 import { filterEventsByDateRange } from '@/utils/recurrence';
 import { useEffectiveNextDates } from '@/hooks/useEffectiveNextDates';
 import { centroidOf, isInBounds, radiusKmFromBounds, zoomForPoints } from '@/utils/geoBounds';
@@ -126,7 +131,7 @@ export default function DiscoverScreen() {
   // depend on it, and a module-level Dimensions.get() froze them at import.
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const eventCardWidth = windowWidth - LIST_HORIZONTAL_PADDING * 2;
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const { hasBusiness, loading: appLoading } = useApp();
   const { dateRange, setDateRange } = useSearch();
   const queryClient = useQueryClient();
@@ -852,6 +857,40 @@ export default function DiscoverScreen() {
 
   // Memoised card + stable callbacks: a map pan updates mapCenter/mapBounds
   // on every moveend, which used to re-render every mounted card.
+  // Compare (decision D6): long-press is the only Discover entry — the header
+  // keeps its two controls. The tray appears once something is selected.
+  const compare = useCompareSelection();
+  const [compareTrayHeight, setCompareTrayHeight] = useState(0);
+  const toggleCompare = useCallback(
+    (item: RankedEvent) => compare.toggle(item, nextOccurrenceById.get(item.id)),
+    // compare.toggle is stable (useCallback in the hook).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [nextOccurrenceById]
+  );
+  // Save from the card (review J8): the decision no longer needs a round
+  // trip into the event page. Optimistic, queued offline like the event
+  // page's own bookmark, reverted on failure.
+  const toggleSave = useCallback(
+    async (item: RankedEvent) => {
+      if (!user) {
+        router.push({ pathname: '/(auth)/login', params: { redirect: '/(tabs)/discover' } } as never);
+        return;
+      }
+      const wasSaved = !!item.user_saved;
+      const flip = (on: boolean) =>
+        setEvents((prev) => prev.map((e) => (e.id === item.id ? { ...e, user_saved: on } : e)));
+      flip(!wasSaved);
+      selectionHaptic();
+      try {
+        const result = await runOrQueueWithNotice({ kind: 'save', targetId: item.id, on: !wasSaved, label: item.title });
+        if (result === 'done') queryKeys.markAttendanceListsStale(queryClient);
+      } catch (err) {
+        flip(wasSaved);
+        notify.error(connectionErrorMessage(err) ?? (wasSaved ? 'Failed to remove from saved events' : 'Failed to save event'));
+      }
+    },
+    [user, queryClient]
+  );
   const renderEventCard = useCallback(
     ({ item, index }: { item: RankedEvent; index: number }) => (
       <DiscoverEventCard
@@ -861,9 +900,15 @@ export default function DiscoverScreen() {
         displayDate={nextOccurrenceById.get(item.id) ?? item.start_datetime}
         onPress={openEvent}
         onBusinessPress={openBusiness}
+        onToggleSave={toggleSave}
+        onLongPress={toggleCompare}
+        compareSelected={compare.isSelected(item.id)}
       />
     ),
-    [nextOccurrenceById, openEvent, openBusiness, eventCardWidth]
+    // compare.items changes identity on every selection change, which is
+    // what re-renders the badged cards.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [nextOccurrenceById, openEvent, openBusiness, eventCardWidth, toggleCompare, toggleSave, compare.items]
   );
 
   const eventCountLabel = loading
@@ -1313,7 +1358,7 @@ export default function DiscoverScreen() {
             // Sit a step above the sheet's collapsed peek (same 0.13 snap as
             // snapPoints) so the FAB never brushes the peeked header on tall
             // screens, while staying clear of the map attribution.
-            { bottom: Math.max(windowHeight * SHEET_PEEK_RATIO + Spacing.md, insets.bottom + 104) },
+            { bottom: Math.max(windowHeight * SHEET_PEEK_RATIO + Spacing.md, insets.bottom + 104) + compareTrayHeight },
           ]}
         >
           <TouchableOpacity
@@ -1336,6 +1381,9 @@ export default function DiscoverScreen() {
         index={0}
         snapPoints={snapPoints}
         topInset={headerHeight}
+        // The compare tray sits below the sheet; lift the sheet so its peek
+        // (and the list's last card) stay reachable while the tray is up.
+        bottomInset={compareTrayHeight}
         enablePanDownToClose={false}
         handleIndicatorStyle={styles.handleIndicator}
         // The library marks the sheet and handle role="slider" ("adjustable")
@@ -1465,6 +1513,9 @@ export default function DiscoverScreen() {
           }}
         />
       </BottomSheet>
+      <View style={styles.compareTrayWrap} pointerEvents="box-none">
+        <CompareTray onHeight={setCompareTrayHeight} respectBottomInset={false} />
+      </View>
     </View>
   );
 }
@@ -1547,10 +1598,16 @@ const styles = StyleSheet.create({
   },
   chipsScroll: {
     marginTop: Spacing.sm,
+    // react-native-web gives every ScrollView flexGrow: 1; inside this
+    // fixed-height header that stretched the strip to the leftover space and
+    // the pill chips into 100 px circles. Native never grew it.
+    flexGrow: 0,
+    flexShrink: 0,
   },
   chipsRow: {
     gap: Spacing.sm,
     paddingRight: Spacing.md,
+    alignItems: 'center',
   },
   overlayChip: {
     flexDirection: 'row',
@@ -2034,6 +2091,13 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
     color: Colors.text.inverse,
+  },
+  compareTrayWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 70,
   },
   fabWrap: {
     position: 'absolute',
