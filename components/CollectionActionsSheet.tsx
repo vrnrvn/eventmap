@@ -2,6 +2,7 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CalendarPlus, Pencil, Trash2, X } from '@/components/icons.generated';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
+import { useFocusOnOpen } from '@/hooks/useFocusOnOpen';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import type { Collection } from '@/types/database';
 
@@ -21,6 +22,8 @@ type Props = {
  */
 export function CollectionActionsSheet({ target, onClose, onRename, onDelete, onExportCalendar }: Props) {
   const insets = useSafeAreaInsets();
+  // No text field here, so nothing else would move focus into the sheet.
+  const closeRef = useFocusOnOpen(!!target);
   if (!target) return null;
   const smart = target.kind === 'smart';
   return (
@@ -37,7 +40,7 @@ export function CollectionActionsSheet({ target, onClose, onRename, onDelete, on
           <Text style={styles.title} numberOfLines={1} accessibilityRole="header">
             {target.name}
           </Text>
-          <Pressable onPress={onClose} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel="Close">
+          <Pressable ref={closeRef} onPress={onClose} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel="Close">
             <X size={20} color={Colors.text.secondary} />
           </Pressable>
         </View>

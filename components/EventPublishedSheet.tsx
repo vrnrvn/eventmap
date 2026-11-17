@@ -13,6 +13,7 @@ import {
 } from '@/components/icons.generated';
 import { Colors, Spacing, Typography, BorderRadius, Shadows } from '@/constants/theme';
 import { Button } from '@/components/ui/Button';
+import { useFocusOnOpen } from '@/hooks/useFocusOnOpen';
 import { shareEventLink, shareEventIcs } from '@/utils/eventShare';
 import { getEventWebUrl } from '@/utils/eventIcs';
 import { businessesService } from '@/services/businesses';
@@ -65,6 +66,8 @@ export function EventPublishedSheet({
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState<'share' | 'notify' | 'calendar' | null>(null);
   const [notified, setNotified] = useState(false);
+  // No text field here, so nothing else would move focus into the sheet.
+  const closeRef = useFocusOnOpen(visible && !!event);
   if (!event) return null;
 
   const handleShare = async () => {
@@ -146,7 +149,7 @@ export function EventPublishedSheet({
               {event.title}
             </Text>
           </View>
-          <Pressable onPress={onClose} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel="Close">
+          <Pressable ref={closeRef} onPress={onClose} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel="Close">
             <X size={20} color={Colors.text.secondary} />
           </Pressable>
         </View>

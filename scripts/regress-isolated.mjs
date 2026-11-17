@@ -182,10 +182,23 @@ await check("getBusinessEvents scope 'past' filter parses and returns past + can
 });
 
 await check('getBusinessEventsCount upcoming (head count with the same filter)', async () => {
+  // Mirrors services/events.ts after B5: published + active/postponed, which
+  // is the set getBusinessEvents({ scope: 'upcoming' }) lists. The service
+  // then subtracts finished recurring series client-side with hasEventEnded.
   const r = await host.from('events').select('*', { count: 'exact', head: true }).eq('business_id', business.id)
-    .eq('status', 'active').or(`end_datetime.gt.${new Date().toISOString()},is_recurring.eq.true`);
+    .eq('publish_state', 'published').in('status', ['active', 'postponed'])
+    .or(`end_datetime.gt.${new Date().toISOString()},is_recurring.eq.true`);
   ok(r);
   assert.ok(r.count >= 2, `count ${r.count}`);
+});
+
+await check('the B5 correction query parses (recurring timing fields only)', async () => {
+  const r = await host.from('events')
+    .select('start_datetime, end_datetime, is_recurring, recurrence_pattern, timezone')
+    .eq('business_id', business.id).eq('publish_state', 'published')
+    .in('status', ['active', 'postponed']).eq('is_recurring', true).limit(201);
+  const rows = ok(r);
+  assert.ok(Array.isArray(rows), 'rows returned');
 });
 
 await check('visitor (anon) sees the ongoing recurring series via the recurrence-aware SELECT policy', async () => {

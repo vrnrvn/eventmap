@@ -190,3 +190,33 @@ export function nextDateOverride(
   if (wantGoing === seriesGoing) return null; // back to the series default
   return wantGoing ? 'going' : 'not_going';
 }
+
+/**
+ * Whether a series actually meets inside [from, to], with per-date
+ * exceptions applied: a skipped date does not count, and a date moved into
+ * the window does. Used to drop series from a date-filtered list whose only
+ * date in that window was skipped (Discover "Today" / "This weekend").
+ *
+ * One-off events and series with no exceptions are left to the caller's
+ * cheaper check (`filterEventsByDateRange`).
+ */
+export function hasEffectiveDateInRange(
+  event: SeriesEvent,
+  exceptions: readonly OccurrenceException[],
+  from: Date,
+  to: Date
+): boolean {
+  if (!event.is_recurring || !event.recurrence_pattern) {
+    const start = new Date(event.start_datetime).getTime();
+    return start >= from.getTime() && start <= to.getTime();
+  }
+  // Over-fetch: the walk starts at the window's first day, and cancelled
+  // dates in between must not crowd out a live one later in the window.
+  const days = Math.ceil((to.getTime() - from.getTime()) / 86_400_000) + 1;
+  const occurrences = listOccurrences(event, exceptions, {
+    count: days + exceptions.length + 1,
+    now: from,
+    includeCancelled: false,
+  });
+  return occurrences.some((o) => o.start.getTime() >= from.getTime() && o.start.getTime() <= to.getTime());
+}

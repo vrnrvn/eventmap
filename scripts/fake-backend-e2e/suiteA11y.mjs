@@ -1,6 +1,7 @@
 // Accessibility pass on the web build against the FAKE backend (no database).
 //
 //   node scripts/fake-backend-e2e/suiteA11y.mjs <repo> <dist> [scenarios] [axePath] [outDir]
+//   Scenarios: S,A,E,L,K,V and T (large text 1.3×/1.6× on the main screens).
 //
 // Per screen: axe-core (WCAG 2.0/2.1 A + AA), controls with no accessible
 // name, controls under 44 px / 24 px, heading presence, Tab order and visible
@@ -12,7 +13,7 @@
 // covered here — see docs/ISSUES.md "Next step — testing passes".
 import fs from 'node:fs';
 import path from 'node:path';
-import { open, check, results, sleep } from './lib.mjs';
+import { open, check, results, scaleText, layoutFacts, sleep } from './lib.mjs';
 
 const [repo, dist, only, axePath, outDir = '/tmp/eventmap-a11y'] = process.argv.slice(2);
 const P = { repo, dist };
@@ -247,6 +248,36 @@ if (run('V')) {
     await screenPass(h, 'settings', '/settings', 7000, tag);
     check(`settings${tag} no horizontal overflow`, !(await overflow()));
     report.viewports[tag] = { w, h: hgt };
+    await h.close();
+  }
+}
+
+// --- Large text: 1.3× and 1.6× on the main screens (first coverage, 2026-11-16) ---
+// Fails only on overflow, runtime errors, or the scale not applying. Clipped
+// text is reported, not failed: some truncation (numberOfLines) is designed.
+if (run('T')) {
+  const screens = [
+    ['discover', '/', 9000], ['event', null, 8000], ['profile', '/profile', 8000],
+    ['settings', '/settings', 7000], ['create', '/create', 7000], ['my-events', '/my-events', 7000],
+    ['calendar', '/calendar', 7000], ['notifications', '/notifications', 8000],
+  ];
+  report.largeText = {};
+  for (const factor of [1.3, 1.6]) {
+    const h = await open({ ...P, viewport: [390, 844], dataOpts: { business: true } });
+    for (const [id, route, wait] of screens) {
+      await h.go(route ?? `/event/${EV(h)}`, wait);
+      const s = await scaleText(h, factor);
+      await sleep(500);
+      const l = await layoutFacts(h);
+      const tag = `${id}@text${factor}`;
+      report.largeText[tag] = { ...s, ...l };
+      check(`${tag} scale applied`, s.touched > 20 && s.after >= s.before * (factor - 0.05), `${s.before}→${s.after}px, ${s.touched} el`);
+      check(`${tag} no horizontal overflow`, l.overflowX === 0, `overflowX=${l.overflowX}`);
+      if (l.clipped.length) console.log(`NOTE ${tag} clipped sideways: ${JSON.stringify(l.clipped)}`);
+      if (l.clippedVertically.length) console.log(`NOTE ${tag} clipped from below: ${JSON.stringify(l.clippedVertically)}`);
+      await h.shot(path.join(outDir, `${tag}.png`));
+    }
+    check(`T@${factor} no uncaught exceptions`, h.errors().length === 0, h.errors().slice(0, 2).join(' | '));
     await h.close();
   }
 }

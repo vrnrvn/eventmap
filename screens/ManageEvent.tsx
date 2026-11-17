@@ -111,6 +111,8 @@ import { alpha, BorderRadius, Colors, Spacing, Typography } from '@/constants/th
 import { a11yState } from '@/utils/accessibility';
 
 type Tab = 'overview' | 'attendees' | 'settings' | 'chat';
+/** Tabs a `?tab=` deep link may open (host dashboard "Needs you" rows). */
+const LINKABLE_TABS: Tab[] = ['overview', 'attendees', 'settings', 'chat'];
 const TABS = [
   { value: 'overview', label: 'Overview' },
   { value: 'attendees', label: 'Attendees' },
@@ -309,12 +311,21 @@ const attendeeKey = (item: HostAttendee) => item.user_id;
  */
 export default function ManageEvent() {
   // `checklist=1` comes from the My Events progress pill: open the hub with
-  // the checklist already expanded.
-  const { id, checklist: checklistParam } = useLocalSearchParams<{ id: string; checklist?: string }>();
+  // the checklist already expanded. `tab` / `seg` come from the host
+  // dashboard's "Needs you" rows (docs/HOST_DASHBOARD_PLAN.md C2), so a row
+  // lands on the tool that answers it rather than on Overview.
+  const {
+    id,
+    checklist: checklistParam,
+    tab: tabParam,
+    seg: segParam,
+  } = useLocalSearchParams<{ id: string; checklist?: string; tab?: string; seg?: string }>();
   const { userBusiness } = useApp();
   const { profile } = useAuth();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<Tab>('overview');
+  const [tab, setTab] = useState<Tab>(() =>
+    LINKABLE_TABS.includes(tabParam as Tab) ? (tabParam as Tab) : 'overview'
+  );
 
   // ── Event + counts ────────────────────────────────────────────────────────
   const detailsQuery = useQuery({
@@ -448,7 +459,11 @@ export default function ManageEvent() {
   const playbookTick = eventPlaybook.tick;
 
   // ── Attendees tab ─────────────────────────────────────────────────────────
-  const [attendeeStatus, setAttendeeStatus] = useState<HostAttendeeStatus>('going');
+  const [attendeeStatus, setAttendeeStatus] = useState<HostAttendeeStatus>(() =>
+    segParam === 'requested' || segParam === 'waitlist' || segParam === 'removed'
+      ? (segParam as HostAttendeeStatus)
+      : 'going'
+  );
   /** F-R3: 'YYYY-MM-DD' to list one date's goers (series only); null = whole series. */
   const [attendeeDate, setAttendeeDate] = useState<string | null>(null);
   const [attendeeDateUnavailable, setAttendeeDateUnavailable] = useState(false);

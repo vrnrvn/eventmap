@@ -6,22 +6,20 @@
  * attendees. Before the migration is applied the list still renders and the
  * actions explain they aren't available yet.
  */
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { router } from 'expo-router';
-import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useQuery } from '@tanstack/react-query';
 import { SettingsSection } from '@/components/ui/SettingsSection';
-import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
-import { Button } from '@/components/ui/Button';
-import { WebDateTimeInput } from '@/components/WebDateTimeInput';
+import { MoveDateModal } from '@/components/MoveDateModal';
 import { CalendarX, Clock, RotateCcw, Scissors } from '@/components/icons.generated';
+import { formatOccurrenceWhen as formatWhen, useOccurrenceActions } from '@/hooks/useOccurrenceActions';
 import { useOccurrenceExceptions } from '@/hooks/useOccurrenceExceptions';
 import { queryKeys } from '@/hooks/queryKeys';
 import { occurrenceErrorMessage, occurrencesService } from '@/services/occurrences';
 import { listOccurrences, type Occurrence } from '@/utils/occurrences';
 import { describeRecurrence, type RecurrencePattern } from '@/utils/recurrence';
-import { instantToPickerDate, isValidTimeZone, pickerDateToInstant } from '@/utils/timezone';
+import { isValidTimeZone } from '@/utils/timezone';
 import { confirmAction } from '@/utils/confirm';
 import { notify } from '@/utils/notify';
 import { a11yState } from '@/utils/accessibility';
@@ -38,30 +36,7 @@ type SeriesEvent = {
 
 const SHOWN = 8;
 
-function formatWhen(d: Date, tz: string | null) {
-  return d.toLocaleString(undefined, {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-    ...(tz ? { timeZone: tz } : {}),
-  });
-}
-
-async function askNotify(title: string, message: string, confirmLabel: string): Promise<boolean | null> {
-  const go = await confirmAction({ title, message, confirmLabel });
-  if (!go) return null;
-  return confirmAction({
-    title: 'Tell attendees?',
-    message: 'Send an in-app notice to people going, interested or who saved this event.',
-    confirmLabel: 'Notify',
-    cancelLabel: 'Don’t notify',
-  });
-}
-
 export function SeriesDatesSection({ event, canEdit }: { event: SeriesEvent; canEdit: boolean }) {
-  const queryClient = useQueryClient();
   const { exceptions, isError, refetch } = useOccurrenceExceptions(event.id, !!event.is_recurring);
   const tz = event.timezone && isValidTimeZone(event.timezone) ? event.timezone : null;
   const occurrences = useMemo(() => listOccurrences(event, exceptions, { count: SHOWN }), [event, exceptions]);
@@ -75,43 +50,12 @@ export function SeriesDatesSection({ event, canEdit }: { event: SeriesEvent; can
   });
   const goingByDate = countsQuery.data?.going ?? {};
   const waitByDate = countsQuery.data?.waitlist ?? {};
-  const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [editing, setEditing] = useState<Occurrence | null>(null);
-
-  const after = async () => {
-    await queryClient.invalidateQueries({ queryKey: queryKeys.occurrenceExceptions(event.id) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.eventDetails(event.id) });
-  };
-
-  const run = async (o: Occurrence, fn: () => Promise<{ notified: number }>, done: string) => {
-    setBusyKey(o.dateKey);
-    try {
-      const r = await fn();
-      await after();
-      notify.success(r.notified > 0 ? `${done} ${r.notified} ${r.notified === 1 ? 'person was' : 'people were'} notified.` : done);
-    } catch (e) {
-      notify.error(occurrenceErrorMessage(e) ?? 'Couldn’t change that date. Try again.');
-    } finally {
-      setBusyKey(null);
-    }
-  };
-
-  const skip = async (o: Occurrence) => {
-    const when = formatWhen(o.start, tz);
-    const n = await askNotify('Skip this date?', `${when} won't happen. The rest of the series is unchanged.`, 'Skip date');
-    if (n === null) return;
-    await run(o, () => occurrencesService.skipOccurrence(event.id, o.dateKey, { notify: n }), 'Date skipped.');
-  };
-
-  const restore = async (o: Occurrence) => {
-    const n = await askNotify(
-      'Restore this date?',
-      `${formatWhen(o.originalStart, tz)} goes back to its original time.`,
-      'Restore'
-    );
-    if (n === null) return;
-    await run(o, () => occurrencesService.restoreOccurrence(event.id, o.dateKey, { notify: n }), 'Date restored.');
-  };
+  // Skip / move / restore are shared with the host dashboard (C5).
+  const actions = useOccurrenceActions();
+  const busyKeyFor = (o: Occurrence) => `${event.id}:${o.dateKey}`;
+  const target = (o: Occurrence) => ({ eventId: event.id, tz, occurrence: o });
+  const skip = (o: Occurrence) => actions.skip(target(o));
+  const restore = (o: Occurrence) => actions.restore(target(o));
 
   /** "This and following": split here, then edit the new series. */
   const splitFrom = async (o: Occurrence) => {
@@ -121,24 +65,17 @@ export function SeriesDatesSection({ event, canEdit }: { event: SeriesEvent; can
       confirmLabel: 'Split series',
     });
     if (!go) return;
-    setBusyKey(o.dateKey);
+    actions.setBusyKey(busyKeyFor(o));
     try {
       const newId = await occurrencesService.splitSeriesFrom(event.id, o.dateKey);
-      await after();
+      await actions.after(event.id);
       notify.success('Series split. Edit the new series below.');
       router.push(`/business/edit-event/${newId}` as never);
     } catch (e) {
       notify.error(occurrenceErrorMessage(e) ?? 'Couldn’t split the series. Try again.');
     } finally {
-      setBusyKey(null);
+      actions.setBusyKey(null);
     }
-  };
-
-  const saveMove = async (o: Occurrence, start: Date, end: Date) => {
-    setEditing(null);
-    const n = await askNotify('Move this date?', `${formatWhen(o.originalStart, tz)} → ${formatWhen(start, tz)}`, 'Move date');
-    if (n === null) return;
-    await run(o, () => occurrencesService.rescheduleOccurrence(event.id, o.dateKey, start, end, { notify: n }), 'Date moved.');
   };
 
   return (
@@ -157,7 +94,7 @@ export function SeriesDatesSection({ event, canEdit }: { event: SeriesEvent; can
         </View>
       ) : null}
       {occurrences.map((o) => {
-        const busy = busyKey === o.dateKey;
+        const busy = actions.busyKey === busyKeyFor(o);
         const label =
           o.status === 'cancelled'
             ? `${formatWhen(o.start, tz)}, skipped`
@@ -184,7 +121,7 @@ export function SeriesDatesSection({ event, canEdit }: { event: SeriesEvent; can
                 {o.status === 'scheduled' ? (
                   <>
                     <TouchableOpacity
-                      onPress={() => setEditing(o)}
+                      onPress={() => actions.startMove(target(o))}
                       disabled={busy}
                       style={styles.iconBtn}
                       accessibilityRole="button"
@@ -233,84 +170,15 @@ export function SeriesDatesSection({ event, canEdit }: { event: SeriesEvent; can
           </View>
         );
       })}
-      {editing ? (
+      {actions.moving ? (
         <MoveDateModal
-          occurrence={editing}
-          tz={tz}
-          onCancel={() => setEditing(null)}
-          onSave={(s, e) => void saveMove(editing, s, e)}
+          occurrence={actions.moving.occurrence}
+          tz={actions.moving.tz}
+          onCancel={actions.cancelMove}
+          onSave={(s, e) => void actions.saveMove(actions.moving!, s, e)}
         />
       ) : null}
     </SettingsSection>
-  );
-}
-
-/** Pick a new start for one date; the series duration is kept. */
-function MoveDateModal({
-  occurrence,
-  tz,
-  onCancel,
-  onSave,
-}: {
-  occurrence: Occurrence;
-  tz: string | null;
-  onCancel: () => void;
-  onSave: (start: Date, end: Date) => void;
-}) {
-  const duration = occurrence.end.getTime() - occurrence.start.getTime();
-  // Pickers work on the event zone's wall clock (same as Create/Edit).
-  const toPicker = (d: Date) => (tz ? instantToPickerDate(d, tz) : d);
-  const fromPicker = (d: Date) => (tz ? pickerDateToInstant(d, tz) : d);
-  const [value, setValue] = useState(() => toPicker(occurrence.start));
-  const start = fromPicker(value);
-  const inPast = start.getTime() <= Date.now();
-
-  const openAndroid = () => {
-    DateTimePickerAndroid.open({
-      value,
-      mode: 'date',
-      minimumDate: new Date(),
-      onChange: (ev, d) => {
-        if (ev.type !== 'set' || !d) return;
-        const withDate = new Date(value);
-        withDate.setFullYear(d.getFullYear(), d.getMonth(), d.getDate());
-        DateTimePickerAndroid.open({
-          value: withDate,
-          mode: 'time',
-          onChange: (ev2, t) => {
-            if (ev2.type !== 'set' || !t) return setValue(withDate);
-            const next = new Date(withDate);
-            next.setHours(t.getHours(), t.getMinutes(), 0, 0);
-            setValue(next);
-          },
-        });
-      },
-    });
-  };
-
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onCancel}>
-      <ModalBackdrop onPress={onCancel} label="Close" style={styles.backdrop} />
-      <View style={styles.sheet} accessibilityViewIsModal onAccessibilityEscape={onCancel}>
-        <Text style={styles.sheetTitle} accessibilityRole="header">Move this date</Text>
-        <Text style={styles.meta}>Originally {formatWhen(occurrence.originalStart, tz)}</Text>
-        {Platform.OS === 'web' ? (
-          <WebDateTimeInput mode="datetime" value={value} minimumDate={new Date()} accessibilityLabel="New start" onChange={setValue} />
-        ) : Platform.OS === 'ios' ? (
-          <DateTimePicker value={value} mode="datetime" display="inline" minimumDate={new Date()} onChange={(_, d) => d && setValue(d)} />
-        ) : (
-          <TouchableOpacity onPress={openAndroid} style={styles.androidPick} accessibilityRole="button">
-            <Text style={styles.when}>{formatWhen(start, tz)}</Text>
-            <Text style={styles.meta}>Tap to change</Text>
-          </TouchableOpacity>
-        )}
-        {inPast ? <Text style={styles.metaWarn}>Pick a time in the future.</Text> : null}
-        <View style={styles.sheetActions}>
-          <Button label="Cancel" variant="ghost" onPress={onCancel} />
-          <Button label="Move date" onPress={() => onSave(start, new Date(start.getTime() + duration))} disabled={inPast} />
-        </View>
-      </View>
-    </Modal>
   );
 }
 
@@ -324,18 +192,5 @@ const styles = StyleSheet.create({
   muted: { fontSize: Typography.sizes.sm, color: Colors.text.secondary, fontFamily: Typography.fontFamilies.regular },
   actions: { flexDirection: 'row', gap: Spacing.xs },
   iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: BorderRadius.md },
-  backdrop: { backgroundColor: 'rgba(0,0,0,0.4)' },
-  sheet: {
-    position: 'absolute',
-    left: Spacing.md,
-    right: Spacing.md,
-    top: '20%',
-    backgroundColor: Colors.surface,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-    gap: Spacing.sm,
-  },
-  sheetTitle: { fontSize: Typography.sizes.lg, fontFamily: Typography.fontFamilies.semibold, color: Colors.text.primary },
-  sheetActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: Spacing.sm, marginTop: Spacing.sm },
-  androidPick: { paddingVertical: Spacing.md },
+
 });

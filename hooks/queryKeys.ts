@@ -92,4 +92,10 @@ export const queryKeys = {
    * prefix so publishing or editing an event refreshes it too.
    */
   hostChecklist: (businessId: string | undefined) => ['events', 'host-checklist', businessId ?? 'none'] as const,
+  /**
+   * Host dashboard agenda (docs/HOST_DASHBOARD_PLAN.md C1): upcoming rows,
+   * counts, exceptions and per-date going, kept on the device. Under the
+   * 'events' prefix so any event or RSVP write refreshes it.
+   */
+  hostDashboard: (businessId: string | undefined) => ['events', 'host-dashboard', businessId ?? 'none'] as const,
 };

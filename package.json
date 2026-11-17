@@ -25,6 +25,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bench:recurrence": "node --experimental-strip-types --no-warnings --experimental-loader ./scripts/perf/alias-loader.mjs scripts/perf/bench-recurrence.mjs",
     "maestro:smoke": "maestro test .maestro/smoke.yaml",
     "android": "expo run:android",
     "ios": "expo run:ios"

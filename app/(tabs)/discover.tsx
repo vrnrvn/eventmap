@@ -55,7 +55,8 @@ import { connectionErrorMessage } from '@/utils/networkErrors';
 import { selectionHaptic } from '@/utils/haptics';
 import { useCompareSelection } from '@/hooks/useCompareSelection';
 import { filterEventsByDateRange } from '@/utils/recurrence';
-import { useEffectiveNextDates } from '@/hooks/useEffectiveNextDates';
+import { useEffectiveNextDates, useOccurrenceExceptionsForEvents } from '@/hooks/useEffectiveNextDates';
+import { hasEffectiveDateInRange } from '@/utils/occurrences';
 import { centroidOf, isInBounds, radiusKmFromBounds, zoomForPoints } from '@/utils/geoBounds';
 import { bannersService, type AppBanner } from '@/services/banners';
 import { AppBannerCarousel } from '@/components/AppBannerCarousel';
@@ -685,10 +686,30 @@ export default function DiscoverScreen() {
     mapRef.current?.animateTo(area.center.lat, area.center.lng);
   }, [isRestoring, loadError, queryClient, beginProgrammaticMove]);
 
+  /**
+   * Per-date exceptions for the series on screen. Shares its query (and key)
+   * with `useEffectiveNextDates` below, so this costs no extra request.
+   */
+  const { byEvent: exceptionsByEvent } = useOccurrenceExceptionsForEvents(events);
+
   const visibleEvents = useMemo(() => {
-    if (!mapBounds) return events;
-    return events.filter((e) => isInBounds(e.lat, e.lng, mapBounds));
-  }, [events, mapBounds]);
+    const inBounds = mapBounds ? events.filter((e) => isInBounds(e.lat, e.lng, mapBounds)) : events;
+    if (!dateRange || exceptionsByEvent.size === 0) return inBounds;
+    // A date filter asks "is it on then?", and a skipped date is not (O-1).
+    // The load-time filter (filterEventsByDateRange) runs before exceptions
+    // are fetched, so the series is dropped here once they arrive. A date
+    // moved INTO the window cannot be added back this way — the row is not
+    // in `events` at all; that needs the server (E-R1 / B3).
+    const from = new Date(dateRange.start);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(dateRange.end);
+    to.setHours(23, 59, 59, 999);
+    return inBounds.filter((e) => {
+      const exceptions = exceptionsByEvent.get(e.id);
+      if (!exceptions?.length) return true;
+      return hasEffectiveDateInRange(e, exceptions, from, to);
+    });
+  }, [events, mapBounds, dateRange, exceptionsByEvent]);
 
   /**
    * Events we fetched for this area that fall outside the current viewport.

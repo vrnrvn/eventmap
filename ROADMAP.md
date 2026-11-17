@@ -162,6 +162,23 @@ mirrored under "Needs a product decision" in `docs/ISSUES.md`):
   2026-11-15:** long-press is the only Discover entry; the header keeps two
   controls.
 
+## Planned: recurrence review + host dashboard (added 2026-11-16)
+
+Three roadmaps, tracked in
+`docs/HOST_DASHBOARD_AND_RECURRENCE_REVIEW_2026-11-16.md`:
+
+- **A — recurrence correctness (client):** A1-A3, A5 done 2026-11-16; A4
+  deferred (needs an isolated database run).
+- **B — server recurrence and architecture debt:** B5, B6 done 2026-11-16;
+  B1-B4 deferred (database work, done last).
+- **Database work from all three roadmaps** is consolidated in
+  `docs/MIGRATIONS_PENDING.md` §2b (items 2b-1 … 2b-10); nothing is written
+  and the shared database is untouched.
+- **C — host operations dashboard:** C0 (design, `docs/HOST_DASHBOARD_PLAN.md`)
+  C1 (the `/hosting` agenda), C2 ("Needs you") and C5 (per-date skip / move /
+  restore) and C6's web half (110 browser checks) done 2026-11-16; C6's
+  device pass, C3 and C4 remain.
+
 ## Additional ideas
 
 - **Host workflow UI review:** keep `scripts/fake-backend-e2e/suiteHostUi.mjs`

@@ -362,6 +362,20 @@ picker and permission prompts (flow 1); notification taps from a push
   corrects it. Open since 2026-11-09
   (`docs/CATEGORIES_AND_SERIES_PLAN.md` l.704-708, l.827); the collections
   migration reused the plain helper and widened it.
+- [ ] **[DB] `event_next_occurrence` S1 + S2 (found 2026-11-16).** S1: the v1
+  monthly path adds `+N months` to an already-clamped candidate
+  (`20261109130000:173-176`), so a 29th-31st series names e.g. 28 Mar instead
+  of 31 Mar for the hours between a short month's occurrence and that month's
+  end. S2: the v2 (`byWeekday` / `nthWeekday`) walk is capped at 800 days
+  (`:145`) and returns the series start for very long intervals. Both low
+  severity; client is correct. Plan: Roadmap B2 in
+  [`docs/HOST_DASHBOARD_AND_RECURRENCE_REVIEW_2026-11-16.md`](HOST_DASHBOARD_AND_RECURRENCE_REVIEW_2026-11-16.md).
+- [x] **Client recurrence walk truncated long series (R1-R3) — fixed
+  2026-11-16.** `getNextOccurrences` stepped one day at a time with a 731-day
+  cap: long intervals returned short lists, far-future starts returned `[]`,
+  and "Ends after N times" failed past ~2 years. Now steps whole occurrences
+  from `max(today, start)`; `tests/recurrenceHorizon.test.ts` adds
+  regressions and an equivalence suite against the old day-by-day rule.
 - [x] ~~**Runtime exposure of the `supautils` segfault**~~ — **closed
   2026-11-14, it does not exist.** Tested on an isolated Postgres + PostgREST
   stack: an anonymous `POST /rpc/get_user_collections` (anon has no EXECUTE)
@@ -519,8 +533,21 @@ against the current code. Archive line numbers in brackets.
   `utils/sessionGate.ts:52` never blocks realtime by design. [A:1007]
 - [ ] **Maestro airplane-mode flows were never written** (OFFLINE_PLAN §7);
   `.maestro/` has only `calendar.yaml` and `smoke.yaml`. [A:1271-1275]
-- [ ] Profile "Created" / venue "Upcoming" counts include recurring series
-  whose end date has passed (the lists drop them client-side). [A:602]
+- [x] **Venue "Upcoming" count included finished recurring series — fixed
+  2026-11-16 (Roadmap B5).** `getBusinessEventsCount` kept every
+  `is_recurring` row forever, so the stat disagreed with the list under it,
+  which drops ended series with `hasEventEnded`. The count now fetches the
+  recurring rows' timing fields (bounded at 200) and subtracts the finished
+  ones using that same helper, so the end date is judged on the event's own
+  calendar day. **Also fixed in the same place:** the stat filtered
+  `status = 'active'` with no `publish_state` filter, counting unpublished
+  drafts and omitting postponed events; it now mirrors the list (published,
+  active or postponed). Tests: `tests/businessEventsCount.test.ts`.
+- [ ] Profile "Created" count (`app/(tabs)/profile.tsx:136`) still counts
+  every event ever — scope `'all'`, including drafts, past and cancelled.
+  Left as is: the label is "Created", not "Upcoming". Giving it an
+  upcoming/past split is the small feature already listed below under
+  business-mode profile.
 - [ ] Nitpicks: stale error text "status can only be changed through
   cancel_event" (`20261102110000:161`); `allow_capacity_shrink` uses `'on'`
   where sibling flags use `'true'` (`20261103120000:182,224`); `refetchAll`
@@ -809,9 +836,13 @@ PUBLIC` + explicit grants to `authenticated` for RPCs; require a session for
   `price_min` / `currency` / `is_free` columns, **[DB]**) decides whether the
   free-text price parser and phase 3's Free chip are permanent or interim;
   nothing waits on it.
-- [ ] **[decision]** Categories D1 (`docs/CATEGORIES_AND_SERIES_PLAN.md` §7
+- [x] **[decision]** Categories D1 (`docs/CATEGORIES_AND_SERIES_PLAN.md` §7
   Phase D): whether a future start date that is not itself an occurrence
-  should be returned as the next date.
+  should be returned as the next date. **Decided 2026-11-16 (owner): the next
+  real occurrence** — never a date the event does not happen on. Ratifies the
+  shipped client and local-migration behaviour; pinned by
+  `tests/recurrenceHorizon.test.ts` and by the empty `KNOWN_START_DIVERGENCE`
+  in `tests/recurrenceParity.test.ts`.
 
 ### Decided 2026-11-08 (common practice for event/social apps)
 - **Connection banner over headers:** keep. It ignores touches, and the same
@@ -846,6 +877,130 @@ never exposed, so the hash isn't reversible in practice).
 ---
 
 # Done log
+
+## 2026-11-16 — review round 3 + full regression
+
+Fixed: Discover's date filter drops series whose only date in the window was
+skipped (O-1; a date moved *into* the window still needs the server, see
+MIGRATIONS_PENDING 2b-7); the dashboard clock re-arms at midnight (O-3); the
+schedule's time column grows with large text instead of wrapping (O-4).
+
+O-2 **partly withdrawn**: the clipped tab-bar labels were an artifact of the
+large-text harness, which overrides `tabBarAllowFontScaling: false`. The
+detector now also finds text cut off from below, excluding intended
+`numberOfLines` truncation (~30 false hits before that), with the caveat
+documented on `layoutFacts`.
+
+Regression, all foreground, no database: 1,207 unit tests; typecheck clean;
+`npm run lint` 0 errors / 7 warnings (the documented baseline, none in
+touched files); suiteHostDashboard 110/110 (axe), suiteA11y S,E,V 138/138
+(axe) and T 34/34, suiteHostUi 174/174, suiteCollections 168/168,
+suiteVisual 68/68, suiteCompare 45/45, suiteA 21/21, suiteB 46/46,
+suiteD 30/30, suiteF 25/25. Not run: suiteC (stress), device passes.
+
+**All outstanding database work from this programme is listed in
+[`docs/MIGRATIONS_PENDING.md`](MIGRATIONS_PENDING.md) §2b (2b-1 … 2b-10).**
+
+## 2026-11-16 — review round 2 (dashboard + recurrence)
+
+Fixed: Discover/Category date filter now zone-correct for series (R2-1,
+equivalence-tested against the old code for zone-less events); Profile
+"Today" card ignores a cache older than 12 h (R2-2); stale-draft rule reads
+50 drafts instead of 20 newest-first (R2-3); focus-on-open for
+`CollectionActionsSheet` and `EventPublishedSheet` via shared
+`useFocusOnOpen` (R2-4); first app-wide large-text pass, `suiteA11y` T,
+34/34 (R2-5). Open items O-1…O-6 are in
+`docs/HOST_DASHBOARD_AND_RECURRENCE_REVIEW_2026-11-16.md` §8 — notably the
+date filter still ignores skipped dates (O-1) and the tab bar clips at 1.6×
+text (O-2).
+
+## 2026-11-16 — host dashboard C6, web half
+
+`suiteHostDashboard.mjs` now runs 110 checks (foreground, no database):
+axe WCAG A/AA on the schedule and with the date sheet and move picker open,
+a keyboard walk (every stop named, focus ring present, none off-screen, not
+stuck), focus moving into the date sheet, Escape closing both overlays,
+1280 px and 640 px (200 % zoom) reflow, and large text at 1.3× and 1.6×.
+
+Fixed: the date sheet did not move focus on open (keyboard users stayed
+behind the modal). Sheets elsewhere get this from a field's `autoFocus`;
+this one focuses its first action instead, guarding `findNodeHandle`, which
+throws on web.
+
+Also found, **not** fixed (pre-existing, outside this phase):
+- `components/CollectionActionsSheet.tsx` and
+  `components/EventPublishedSheet.tsx` have the same focus-on-open gap (no
+  text field, no focus call). Verified by inspection, not covered by
+  `suiteA11y`.
+- Large text has still never been tested on the rest of the app; the scaling
+  technique used here (scale every computed font size — Chrome's
+  minimum-font-size does nothing to RN-web px text) is reusable in
+  `suiteA11y`/`suiteHostUi`.
+- `label-content-name-mismatch` stays a warning on row buttons, as
+  elsewhere: clearing it would mean dropping the punctuation that gives a
+  screen reader its pauses.
+
+## 2026-11-16 — host dashboard C5 (per-date operations)
+
+Series rows on `/hosting` now have a "Date options" button. It opens a sheet
+to change one date's time, skip it, or restore it, and offers only what the
+RPCs would accept for that date. Manage event's "Upcoming dates" was
+refactored onto the same hook (`hooks/useOccurrenceActions.ts`) and picker
+(`components/MoveDateModal.tsx`), lifted unchanged, so there is one code
+path for both screens. No database changes.
+
+Two accessibility defects were found by the browser pass and fixed:
+- Identical button names on every row of a daily series; they now include
+  the date.
+- Visible text and accessible names that differed in the sheet (WCAG
+  2.5.3); both now come from one constant.
+
+Also found: `suiteCollections.mjs` silently runs nothing when given `all`
+(it needs the scenario list). Noted in the harness README.
+
+Evidence:
+- `suiteHostDashboard.mjs` 74/74.
+- Regression: suiteHostUi 174/174, suiteCollections 168/168, suiteVisual
+  68/68.
+- 1,199 unit tests; typecheck and lint clean.
+
+## 2026-11-16 — host dashboard C2 ("Needs you")
+
+Seven rules over the data the dashboard already holds, plus per-event facts
+for the next 10 events only (DC5, owner-decided; approval-mode events
+first): chat reports, join requests, postponed, promotable waitlist, stale
+draft, starting soon with RSVPs off, and full with no waitlist. Each row
+deep-links to the tool that answers it — `?tab=` / `?seg=` params were added
+to Manage event for this. The fan-out goes through Manage event's own query
+key, so the dashboard warms the screen it links to. Not persisted.
+
+When more events exist than the cap, the screen says so ("Checked your next
+10 events for requests and reports") — the note was initially rendered
+inside the queue section and so vanished when the queue was empty, which is
+exactly when unbounded-looking silence misleads; fixed and pinned by H7.
+
+Evidence: 40 unit tests in `tests/hostDashboard.test.ts` (green in 5 zones),
+`suiteHostDashboard.mjs` 49/49, suiteHostUi 174/174, suiteVisual 68/68,
+1,195 unit tests, typecheck and lint clean.
+
+## 2026-11-16 — host dashboard C1 (`/hosting` agenda)
+
+Built per `docs/HOST_DASHBOARD_PLAN.md` (DC1-DC3 decided by the owner as
+recommended). The agenda covers today plus six days across every event the
+host runs, with series expanded into their real dates. Skipped dates are
+struck through with the host's note, moved dates show at their new time,
+and a series date uses its per-date going count where one exists, otherwise
+"N going to the series". Entry points: a "Today" card on business-mode
+Profile, which reads the cache only and makes zero requests, and a "This
+week's schedule" button in the My Events header. No database changes.
+Evidence:
+- `tests/hostDashboard.test.ts`: 26 tests, green in 5 device zones.
+- `suiteHostDashboard.mjs`: 33/33 on the fake backend, foreground.
+- Regression: suiteHostUi 174/174, suiteB B7-B8, suiteVisual 68/68.
+- 1,181 unit tests; typecheck and lint clean.
+
+One defect was found and fixed during the browser pass: the Profile card
+said "Next: 12:00 PM" for an item that was tomorrow. It now names the day.
 
 ## 2026-11-15 — final regression pass over the whole roadmap
 

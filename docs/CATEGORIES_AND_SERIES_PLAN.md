@@ -658,11 +658,17 @@ Done
    scratch DB by `scripts/recurrence-parity.sql`), `recurrenceErrorMessage`.
    Totals: 69 files, 833 tests; app typecheck clean; no new lint warnings.
 
-Decision needed (D1): a future start that isn't an occurrence (start on a
-Saturday, series "weekdays"). The other session's function returns the
-Saturday start; this file and the client return the following Monday.
-Recommendation: next real occurrence (what the client already shows), and
-snap the start in the form (G6 below) so stored rows rarely hit the case.
+**D1 — DECIDED 2026-11-16 (owner): the next real occurrence.** A future start
+that isn't an occurrence (start on a Saturday, series "weekdays") resolves to
+the following Monday, never to the Saturday — a date the event does not
+happen on must never be shown as its next date. This is what the client and
+this file's `event_next_occurrence` already do, so the decision ratifies the
+shipped behaviour and closes the item; `KNOWN_START_DIVERGENCE` in
+`tests/recurrenceParity.test.ts` stays empty, and
+`tests/recurrenceHorizon.test.ts` pins it for a far-future start. The other
+session's function returned the Saturday start and is the side that would
+need changing if that snapshot is ever merged. G6 (snapping the start in the
+form) remains worthwhile so stored rows rarely hit the case.
 
 ### Phase E — 2026-11-09 (uncommitted)
 

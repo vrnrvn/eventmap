@@ -303,30 +303,36 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------- split
+CREATE TEMP TABLE split_dates AS
+SELECT ((now() AT TIME ZONE 'UTC')::date + 1) AS first_date;
 INSERT INTO events (id, business_id, title, description, category_id, start_datetime, end_datetime, lat, lng, address, status, publish_state, visibility, is_recurring, recurrence_pattern, timezone)
-SELECT '91000000-0000-4000-8000-000000000020'::uuid, biz, 'Yoga', 'fixture', cat_sports, '2026-11-02 18:00+00', '2026-11-02 19:00+00', 37.77, -122.41, 'x', 'active', 'published', 'public', true, '{"frequency":"weekly","interval":1,"endDate":"2027-03-01"}', 'UTC' FROM ctx;
+SELECT '91000000-0000-4000-8000-000000000020'::uuid, biz, 'Yoga', 'fixture', cat_sports,
+       (first_date + time '18:00') AT TIME ZONE 'UTC', (first_date + time '19:00') AT TIME ZONE 'UTC',
+       37.77, -122.41, 'x', 'active', 'published', 'public', true,
+       jsonb_build_object('frequency', 'weekly', 'interval', 1, 'endDate', (first_date + 119)::text), 'UTC'
+FROM ctx CROSS JOIN split_dates;
 INSERT INTO rsvps (event_id, user_id, status) SELECT '91000000-0000-4000-8000-000000000020', b, 'going' FROM ctx;
 INSERT INTO event_links (event_id, label, url) VALUES ('91000000-0000-4000-8000-000000000020', 'Tickets', 'https://example.test/t');
 DO $$
-DECLARE v_new uuid; v_notes integer;
+DECLARE v_new uuid; v_notes integer; v_first date := (SELECT first_date FROM split_dates);
 BEGIN
   PERFORM pg_temp.as_user((SELECT host FROM ctx));
-  PERFORM skip_occurrence('91000000-0000-4000-8000-000000000020', '2026-11-16', NULL, false);
-  PERFORM skip_occurrence('91000000-0000-4000-8000-000000000020', '2026-12-07', NULL, false);
+  PERFORM skip_occurrence('91000000-0000-4000-8000-000000000020', v_first + 14, NULL, false);
+  PERFORM skip_occurrence('91000000-0000-4000-8000-000000000020', v_first + 35, NULL, false);
   PERFORM pg_temp.as_user((SELECT b FROM ctx));
-  PERFORM set_occurrence_rsvp('91000000-0000-4000-8000-000000000020', '2026-12-14', 'not_going');
+  PERFORM set_occurrence_rsvp('91000000-0000-4000-8000-000000000020', v_first + 42, 'not_going');
   PERFORM pg_temp.as_user((SELECT host FROM ctx));
-  ASSERT pg_temp.raises($q$SELECT split_series_from('91000000-0000-4000-8000-000000000020', '2026-11-02')$q$, '%first%'), 'cannot split at the first date';
-  ASSERT pg_temp.raises($q$SELECT split_series_from('91000000-0000-4000-8000-000000000020', '2026-11-03')$q$, '%does not run%'), 'cannot split on an off-pattern date';
+  ASSERT pg_temp.raises(format($q$SELECT split_series_from('91000000-0000-4000-8000-000000000020', %L)$q$, v_first), '%first%'), 'cannot split at the first date';
+  ASSERT pg_temp.raises(format($q$SELECT split_series_from('91000000-0000-4000-8000-000000000020', %L)$q$, v_first + 1), '%does not run%'), 'cannot split on an off-pattern date';
   SELECT count(*) INTO v_notes FROM notifications;
-  v_new := split_series_from('91000000-0000-4000-8000-000000000020', '2026-11-30');
-  ASSERT (SELECT recurrence_pattern->>'endDate' FROM events WHERE id = '91000000-0000-4000-8000-000000000020') = '2026-11-29', 'original ends the day before';
-  ASSERT (SELECT start_datetime FROM events WHERE id = v_new) = '2026-11-30 18:00+00', 'new series starts at the split date';
+  v_new := split_series_from('91000000-0000-4000-8000-000000000020', v_first + 28);
+  ASSERT (SELECT recurrence_pattern->>'endDate' FROM events WHERE id = '91000000-0000-4000-8000-000000000020') = (v_first + 27)::text, 'original ends the day before';
+  ASSERT (SELECT start_datetime FROM events WHERE id = v_new) = ((v_first + 28 + time '18:00') AT TIME ZONE 'UTC'), 'new series starts at the split date';
   ASSERT (SELECT publish_state FROM events WHERE id = v_new) = 'published', 'new series published';
   ASSERT (SELECT count(*) FROM rsvps WHERE event_id = v_new AND status = 'going') = 1, 'going RSVPs copied';
   ASSERT (SELECT count(*) FROM event_links WHERE event_id = v_new) = 1, 'links copied';
-  ASSERT (SELECT string_agg(occurrence_date::text, ',') FROM event_occurrence_exceptions WHERE event_id = '91000000-0000-4000-8000-000000000020') = '2026-11-16', 'earlier exception stays';
-  ASSERT (SELECT string_agg(occurrence_date::text, ',') FROM event_occurrence_exceptions WHERE event_id = v_new) = '2026-12-07', 'later exception moved (prune-safe ordering)';
+  ASSERT (SELECT string_agg(occurrence_date::text, ',') FROM event_occurrence_exceptions WHERE event_id = '91000000-0000-4000-8000-000000000020') = (v_first + 14)::text, 'earlier exception stays';
+  ASSERT (SELECT string_agg(occurrence_date::text, ',') FROM event_occurrence_exceptions WHERE event_id = v_new) = (v_first + 35)::text, 'later exception moved (prune-safe ordering)';
   ASSERT (SELECT count(*) FROM rsvp_occurrences WHERE event_id = v_new) = 1, 'later per-date RSVP moved';
   ASSERT (SELECT count(*) FROM notifications) = v_notes, 'split sends no notifications';
   RAISE NOTICE 'PASS: split series';

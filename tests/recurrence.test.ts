@@ -157,13 +157,21 @@ describe('getNextOccurrences (Discover usage)', () => {
     expect(getNextOccurrences(event, 5)).toEqual([]);
   });
 
-  it('start far beyond the 731-day walk window returns no occurrences instead of looping', () => {
+  it('a series starting years ahead yields its own first dates (R2; server: GREATEST(now, start))', () => {
+    // Previously pinned as [] — the old 731-day walk began at today and ran
+    // out before reaching the start, so cards showed no next date.
     const event = recurringEvent('2031-01-01T10:00:00', {
       frequency: 'weekly',
       interval: 1,
     });
 
-    expect(getNextOccurrences(event, 1)).toEqual([]);
+    const dates = getNextOccurrences(event, 3);
+    expect(dates.map((d) => d.toDateString())).toEqual([
+      new Date(2031, 0, 1).toDateString(),
+      new Date(2031, 0, 8).toDateString(),
+      new Date(2031, 0, 15).toDateString(),
+    ]);
+    expect(dates[0].getHours()).toBe(10);
   });
 
   it('limit 1 (the Discover call shape) returns exactly the single next occurrence', () => {

@@ -1,5 +1,13 @@
 # Migration work waiting for the owner
 
+**Handoff verification, 2026-11-16:** The local database records all 123
+repository migrations through `20261115100000`; no new migration files were
+prepared in the latest session. Regenerated local schema types are identical
+to the committed types. The 13 SQL suites pass on a disposable PG17 container
+after replacing an expired date fixture in `test-categories-series.sql`.
+The §2b migrations and expanded parity fixture remain unwritten. Hosted
+database inventory remains outstanding; no hosted database was changed.
+
 **Owner checklist, 2026-11-15 (the full list is at the top of `docs/ISSUES.md`):**
 
 1. Item 0 below — the hosted-database inventory. Read-only; do it first.
@@ -268,6 +276,38 @@ container, apply, run all 12 SQL suites, add a ranking assertion for a skipped
 date to `scripts/test-categories-series.sql` and `scripts/test-collections.sql`,
 then re-run `scripts/perf/bench_ranked.sql` against the fixture and compare
 timings and fingerprints with the table above.
+
+---
+
+## 2b. From the recurrence + host dashboard programme (2026-11-16)
+
+Everything below was found while building roadmaps A, B and C
+(`docs/HOST_DASHBOARD_AND_RECURRENCE_REVIEW_2026-11-16.md`). **None is
+written**: no session has touched the shared database, and all SQL work is
+to be validated on `scripts/pg17-isolated.sh` first. Listed in the order to
+tackle them.
+
+| # | Work | What it is | Notes |
+| --- | --- | --- | --- |
+| 2b-1 | **Hosted-database inventory** | Owner-only; no hosted project's migration state has ever been checked | §0 of this file. Do first: everything else inherits it |
+| 2b-2 | **Generated types check — done 2026-11-16** | Freshly generated types match `types/supabase.generated.ts` | Read-only local schema check |
+| 2b-3 | **A4 — widen the recurrence parity fixture** | `scripts/recurrence-parity.sql` currently captures only the NEXT date for 14 shapes. Needs first-N-dates plus long-interval, far-future and month-end shapes | Needs Docker for the isolated PG17 container |
+| 2b-4 | **S1 — monthly drift after a clamped date** | `event_next_occurrence` (`20261109130000:173-176`) adds `+N months` to an already-clamped candidate, so a 29th-31st series names 28 Mar instead of 31 Mar for the hours between a short month's occurrence and that month's end. Client is correct; pinned by `tests/recurrenceHorizon.test.ts` | Low severity. Fix: compute each candidate as `start + (k × N) months` |
+| 2b-5 | **S2 — v2 walk capped at 800 days** | `20261109130000:145`: a `byWeekday` / `nthWeekday` series with an interval beyond ~26 months (or ~114 weeks) falls off the cap and returns the series start | Low severity, legal patterns (`interval ≤ 99`). Same stepping fix the client got |
+| 2b-6 | **O-5 — no `endDate >= start` check** | `c_validate_event_recurrence` only checks the `YYYY-MM-DD` format. Create and Edit both reject it client-side, so this is defence-in-depth for API writes | Ride with 2b-4/2b-5: one migration, same function family |
+| 2b-7 | **E-R1 server half** | Ranking, saved/going, calendar and the three collection RPCs still use `event_next_occurrence`, not `event_next_effective_occurrence` | Design + measurements in §2 above. Biggest user-visible win |
+| 2b-8 | **B4 — client follow-up to E-R1** | Retire or demote `useEffectiveNextDates` where 2b-7 makes it dead | Client-only, after 2b-7 is applied |
+| 2b-9 | **C3 — `get_host_dashboard`** | One RPC for the dashboard's agenda + counts + requests + reports: up to 17 requests today, bounded at 10 events (DC5) | Design in `docs/HOST_DASHBOARD_PLAN.md` §4; C1/C2 ship on the N-call path so this has a measured baseline |
+| 2b-10 | **C4 — check-in / CSV export** | `checked_in`, `host_checkin_attendee`, per-date check-in for series, `export_event_attendees`; premium | Needs decision DC6 and a device. Host tools Phase 4 |
+
+Two client-side things also wait on a database run, needing no migration of
+their own: the shape checks in `scripts/regress-isolated.mjs` (updated
+2026-11-16 for the venue "Upcoming" count, B5) and the S1 expectation pinned
+in `tests/recurrenceHorizon.test.ts`.
+
+**Earlier access limitation:** Docker was denied in the 2026-11-16 model
+sessions. It was available during handoff and the existing SQL suites passed
+in isolation; the new work in 2b-3 onward is still unwritten and unvalidated.
 
 ---
 

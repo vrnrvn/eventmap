@@ -21,6 +21,7 @@ import { profilesService } from '@/services/profiles';
 import { notify } from '@/utils/notify';
 import { businessesService } from '@/services/businesses';
 import { HostChecklistCard } from '@/components/HostChecklistCard';
+import { HostTodayCard } from '@/components/HostTodayCard';
 import { eventsService } from '@/services/events';
 import { socialService } from '@/services/social';
 import { useFocusEffect, router } from 'expo-router';
@@ -450,6 +451,7 @@ export default function ProfileScreen() {
         <>
         <FreshnessNote text={freshness} style={styles.freshness} />
         {!appLoading && isBizMode && <HostChecklistCard style={styles.checklistWrap} />}
+        {!appLoading && isBizMode && <HostTodayCard style={styles.checklistWrap} />}
         {!appLoading && hasBusiness && (
           <TouchableOpacity
             style={styles.createEventWrap}

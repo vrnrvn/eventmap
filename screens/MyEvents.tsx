@@ -41,6 +41,7 @@ import {
   CalendarX,
   PlusCircle,
   CalendarDays,
+  CalendarClock,
   Briefcase,
   ChevronRight,
   Clock,
@@ -596,7 +597,17 @@ export default function MyEvents() {
             </Text>
           </View>
         </View>
-        <View style={styles.headerSpacer} />
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.push('/hosting' as never)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="This week's schedule"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          testID="my-events-hosting-link"
+        >
+          <CalendarClock size={20} color={Colors.text.primary} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.segmentRow} accessibilityRole="tablist">

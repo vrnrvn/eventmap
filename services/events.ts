@@ -11,6 +11,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { THUMBNAIL_WIDTH, markedUploadName, thumbnailOf } from '@/utils/imageThumbnails';
 import { isConnectionError } from '@/utils/networkErrors';
 import { rpcArgs } from './rpcArgs';
+import { hasEventEnded, type EventTimingFields } from '@/utils/eventStatus';
 
 /**
  * Create keys whose last attempt ended without an answer (connection lost
@@ -19,6 +20,12 @@ import { rpcArgs } from './rpcArgs';
 const uncertainCreates = new Set<string>();
 /** How far back a retry looks for the event an uncertain attempt created. */
 const RECOVERY_WINDOW_MS = 30 * 60 * 1000;
+/**
+ * Most recurring events a venue's "Upcoming" stat will scan to subtract
+ * finished series. Beyond this the uncorrected count is kept (see
+ * getBusinessEventsCount).
+ */
+const RECURRING_SCAN_LIMIT = 200;
 
 export type CreateEventResult = {
   id: string;
@@ -447,31 +454,63 @@ export const eventsService = {
   },
 
   /**
-   * Row count for a business's events. `scope: 'upcoming'` counts only active
-   * events that haven't ended — what the venue page's "Upcoming" stat means.
-   * (Recurring series whose own end date passed are still counted here; the
-   * server can't evaluate that in a PostgREST filter. Rare enough to accept
-   * rather than fetch every row just to count them.)
+   * Row count for a business's events. `scope: 'upcoming'` counts only
+   * published, non-ended events — what the venue page's "Upcoming" stat
+   * means, and the same set `getBusinessEvents({ scope: 'upcoming' })` lists.
+   *
+   * Two corrections over the original filter (B5,
+   * docs/HOST_DASHBOARD_AND_RECURRENCE_REVIEW_2026-11-16.md):
+   *
+   * 1. The stat used `status = 'active'` with no `publish_state` filter, so
+   *    unpublished drafts were counted and postponed events were not. It now
+   *    mirrors the list: published, `active` or `postponed`.
+   * 2. `is_recurring.eq.true` keeps a series in the count forever, including
+   *    one whose recurrence end date has passed — the list drops those with
+   *    `hasEventEnded`, so the stat disagreed with the rows beneath it. The
+   *    end date lives in `recurrence_pattern` jsonb and is compared on the
+   *    event's own calendar day, which a PostgREST filter cannot express, so
+   *    the recurring rows (only their timing fields) are fetched and judged
+   *    with the same `hasEventEnded` the list uses. A business with more than
+   *    `RECURRING_SCAN_LIMIT` recurring events keeps the uncorrected count
+   *    rather than paging through them for a stat.
    */
   async getBusinessEventsCount(
     businessId: string,
     opts?: { scope?: 'upcoming' | 'all' }
   ): Promise<number> {
-    let query = supabase
-      .from('events')
-      .select('*', { count: 'exact', head: true })
-      .eq('business_id', businessId);
-
-    if (opts?.scope === 'upcoming') {
-      query = query
-        .eq('status', 'active')
-        .or(`end_datetime.gt.${new Date().toISOString()},is_recurring.eq.true`);
+    if (opts?.scope !== 'upcoming') {
+      const { count, error } = await supabase
+        .from('events')
+        .select('*', { count: 'exact', head: true })
+        .eq('business_id', businessId);
+      if (error) throw error;
+      return count ?? 0;
     }
 
-    const { count, error } = await query;
-
+    const { count, error } = await supabase
+      .from('events')
+      .select('*', { count: 'exact', head: true })
+      .eq('business_id', businessId)
+      .eq('publish_state', 'published')
+      .in('status', ['active', 'postponed'])
+      .or(`end_datetime.gt.${new Date().toISOString()},is_recurring.eq.true`);
     if (error) throw error;
-    return count ?? 0;
+    const total = count ?? 0;
+    if (total === 0) return 0;
+
+    const { data: series, error: seriesError } = await supabase
+      .from('events')
+      .select('start_datetime, end_datetime, is_recurring, recurrence_pattern, timezone')
+      .eq('business_id', businessId)
+      .eq('publish_state', 'published')
+      .in('status', ['active', 'postponed'])
+      .eq('is_recurring', true)
+      .limit(RECURRING_SCAN_LIMIT + 1);
+    // The count itself succeeded; a failure here only loses the correction.
+    if (seriesError || !series || series.length > RECURRING_SCAN_LIMIT) return total;
+
+    const ended = series.filter((e) => hasEventEnded(e as EventTimingFields)).length;
+    return Math.max(total - ended, 0);
   },
 
   async addEventLink(
