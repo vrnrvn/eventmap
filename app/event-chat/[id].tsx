@@ -27,6 +27,7 @@ import {
   Info,
   Lock,
   MessageCircle,
+  Eye,
   ShieldAlert,
   ShieldCheck,
   Users,
@@ -38,6 +39,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsRestoring, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/hooks/queryKeys';
 import { HostTipCard } from '@/components/HostTipCard';
+import { eventChatAccess } from '@/utils/eventChatAccess';
+import { REHEARSAL_CHAT_BAR, REHEARSAL_NOT_SAVED } from '@/utils/rehearsal';
 import { useHostTip } from '@/hooks/useHostTip';
 import { getConnectivity, subscribeConnectivity } from '@/utils/connectivity';
 import { isConnectionError } from '@/utils/networkErrors';
@@ -130,7 +133,9 @@ function haptic(kind: 'send' | 'press' | 'error') {
 }
 
 export default function EventChatScreen() {
-  const { id, messageId: targetMessageId } = useLocalSearchParams<{ id: string; messageId?: string }>();
+  // `rehearse=1`: the host's "Preview as attendee" (docs/EVENT_REHEARSAL_PLAN.md
+  // Phase 4) — the chat as a guest sees it, read-only, with nothing sent.
+  const { id, messageId: targetMessageId, rehearse } = useLocalSearchParams<{ id: string; messageId?: string; rehearse?: string }>();
   const insets = useSafeAreaInsets();
   const { user, profile, sessionStale, sessionLoading } = useAuth();
   const sessionStaleRef = useRef(sessionStale);
@@ -209,17 +214,31 @@ export default function EventChatScreen() {
   const markReadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const attendeeAccess = details?.user_rsvp === 'going' && (details?.rsvp_count ?? 0) >= 2;
+  // One rule with the event page (utils/eventChatAccess mirrors the server's
+  // user_can_access_event_chat): honours "any going" and "off" (EJ-4).
+  const chatAccess = eventChatAccess(details?.user_rsvp, details?.rsvp_count ?? 0, postStatus);
+  const attendeeAccess = chatAccess.state === 'open';
+  const chatTurnedOff = chatAccess.state === 'off';
   // Reading: attendees, plus hosts/admins moderating. Posting: server-decided
   // (attendee access minus bans and per-chat blocks).
   const canChat = attendeeAccess || (postStatus?.can_read ?? false);
-  const canPost = postStatus ? postStatus.can_post : attendeeAccess;
-  const isModerator = Boolean(postStatus?.is_host || postStatus?.is_admin);
+  // Previewing (host only — kept while the server says this viewer hosts the
+  // event): read-only, no moderation tools, and no read markers, presence,
+  // typing or reports leave the device. Side effects check the ref, which
+  // starts from the URL so nothing slips out before the status loads.
+  const rehearseParam = rehearse === '1';
+  const rehearsing = rehearseParam && postStatus?.is_host !== false;
+  const rehearsingRef = useRef(rehearseParam);
+  useEffect(() => {
+    rehearsingRef.current = rehearsing;
+  }, [rehearsing]);
+  const canPost = !rehearsing && (postStatus ? postStatus.can_post : attendeeAccess);
+  const isModerator = !rehearsing && Boolean(postStatus?.is_host || postStatus?.is_admin);
   // Host only: an admin moderating someone else's chat must not burn the
   // host's tip.
   const { tip: hostTipId, dismiss: dismissHostTip } = useHostTip(
     { chatOpened: true },
-    Boolean(postStatus?.is_host)
+    Boolean(postStatus?.is_host) && !rehearseParam
   );
   const isMuted = postStatus?.muted ?? false;
 
@@ -380,6 +399,7 @@ export default function EventChatScreen() {
   // Read receipts: debounce while messages stream in, only when the user is
   // actually looking at the latest messages.
   const scheduleMarkRead = useCallback(() => {
+    if (rehearsingRef.current) return;
     if (!id || !canChatRef.current || !isFocusedRef.current || !nearBottomRef.current) return;
     if (markReadTimer.current) clearTimeout(markReadTimer.current);
     markReadTimer.current = setTimeout(() => {
@@ -390,6 +410,7 @@ export default function EventChatScreen() {
   // Leaving/backgrounding records the read position only if the user was at
   // the latest messages; anything they scrolled past unseen stays unread.
   const markReadNow = useCallback(() => {
+    if (rehearsingRef.current) return;
     if (!id || !canChatRef.current || !nearBottomRef.current) return;
     if (markReadTimer.current) clearTimeout(markReadTimer.current);
     eventChatService.markRead(id).catch(() => {});
@@ -492,7 +513,7 @@ export default function EventChatScreen() {
         eventChatService.getPostStatus(id).catch(() => null),
       ]);
       const hasAccess =
-        (next?.user_rsvp === 'going' && (next?.rsvp_count ?? 0) >= 2) || Boolean(status?.can_read);
+        eventChatAccess(next?.user_rsvp, next?.rsvp_count ?? 0, status).state === 'open' || Boolean(status?.can_read);
       const gainedAccess = hasAccess && !canChatRef.current;
       setDetails(next);
       if (status) setPostStatus(status);
@@ -668,7 +689,7 @@ export default function EventChatScreen() {
         if (status) setPostStatus(status);
 
         const hasAccess =
-          (nextDetails?.user_rsvp === 'going' && nextDetails.rsvp_count >= 2) ||
+          eventChatAccess(nextDetails?.user_rsvp, nextDetails?.rsvp_count ?? 0, status).state === 'open' ||
           Boolean(status?.can_read);
         if (!hasAccess) {
           roomFromCacheRef.current = false;
@@ -776,7 +797,7 @@ export default function EventChatScreen() {
           userIdRef.current
             ? {
                 self: { userId: userIdRef.current, name: selfNameRef.current },
-                participate: status ? status.can_post : hasAccess,
+                participate: rehearsingRef.current ? false : status ? status.can_post : hasAccess,
               }
             : {}
         );
@@ -1248,6 +1269,10 @@ export default function EventChatScreen() {
 
   const toggleMute = useCallback(async () => {
     if (!id || !postStatus) return;
+    if (rehearsingRef.current) {
+      showNotice(REHEARSAL_NOT_SAVED.mute);
+      return;
+    }
     const nextMuted = !postStatus.muted;
     haptic('send');
     setPostStatus({ ...postStatus, muted: nextMuted });
@@ -1339,6 +1364,10 @@ export default function EventChatScreen() {
   const submitUserReport = useCallback(
     async (reason: string) => {
       if (!reportUserTarget) return;
+      if (rehearsingRef.current) {
+        showNotice(REHEARSAL_NOT_SAVED.report);
+        return;
+      }
       try {
         await complaintsService.createComplaint('user', reportUserTarget.id, reason);
         showNotice('Report received. We review reports within about 48 hours.');
@@ -1363,6 +1392,10 @@ export default function EventChatScreen() {
 
   const handleReport = useCallback(
     async (target: ChatMessageActionsTarget, reason: ChatReportReason) => {
+      if (rehearsingRef.current) {
+        showNotice(REHEARSAL_NOT_SAVED.report);
+        return;
+      }
       try {
         await eventChatService.reportMessage(target.id, reason);
         showNotice('Thanks — the message has been reported.');
@@ -1546,6 +1579,26 @@ export default function EventChatScreen() {
           <MessageCircle size={44} color={Colors.text.tertiary} />
           <Text style={styles.centerTitle}>Chat unavailable</Text>
           <Text style={styles.centerText}>This event could not be loaded.</Text>
+        </View>
+      );
+    }
+
+    if (!canChat && chatTurnedOff) {
+      return (
+        <View style={styles.centerState}>
+          <Lock size={44} color={Colors.text.tertiary} />
+          <Text style={styles.centerTitle}>Chat is off</Text>
+          <Text style={styles.centerText}>
+            The host turned this chat off. Check the event page for updates.
+          </Text>
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={() => router.replace(`/event/${details.event.id}` as never)}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+          >
+            <Text style={styles.primaryButtonText}>Back to event</Text>
+          </TouchableOpacity>
         </View>
       );
     }
@@ -1822,12 +1875,30 @@ export default function EventChatScreen() {
         <View style={[styles.lockedNotice, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <Lock size={16} color={Colors.text.secondary} />
           <Text style={styles.lockedNoticeText}>
-            Chat is locked — it reopens when at least 2 people are going.
+            {chatTurnedOff
+              ? 'The host turned this chat off.'
+              : 'Chat is locked — it reopens when at least 2 people are going.'}
           </Text>
         </View>
       ) : null}
 
-      {canChat && !canPost && !loading ? (
+      {rehearsing && canChat && !loading ? (
+        <View
+          style={[styles.lockedNotice, styles.previewBar, { paddingBottom: Math.max(insets.bottom, 12) }]}
+          accessibilityRole="summary"
+        >
+          <Eye size={16} color={Colors.text.secondary} />
+          <Text style={styles.lockedNoticeText}>{REHEARSAL_CHAT_BAR}</Text>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.previewExit}
+            accessibilityRole="button"
+            accessibilityLabel="Exit chat preview"
+          >
+            <Text style={styles.previewExitText}>Back</Text>
+          </TouchableOpacity>
+        </View>
+      ) : canChat && !canPost && !loading ? (
         <View style={[styles.lockedNotice, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <ShieldAlert size={16} color={Colors.text.secondary} />
           <Text style={styles.lockedNoticeText}>
@@ -2142,6 +2213,22 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surface,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.border.light,
+  },
+  previewBar: { justifyContent: 'flex-start' },
+  previewExit: {
+    minHeight: 44,
+    minWidth: 64,
+    paddingHorizontal: Spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: BorderRadius.round,
+    borderWidth: 1,
+    borderColor: Colors.border.medium,
+  },
+  previewExitText: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    color: Colors.text.primary,
   },
   lockedNoticeText: {
     flex: 1,

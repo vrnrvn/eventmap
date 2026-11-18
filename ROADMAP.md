@@ -42,6 +42,27 @@ Status verified 2026-11-14. The remaining work for each is tracked in
   `docs/HOST_ONBOARDING_PLAN.md` §18-§20: appeals queue, verified badge on
   Discover cards, transfer of ownership, Stage 8 growth.
 
+## Added 2026-11-17: event-journey review + "Preview as attendee"
+
+- **Event-journey review** (`docs/EVENT_JOURNEY_REVIEW_PLAN_2026-11-17.md`,
+  findings in `docs/EVENT_JOURNEY_REVIEW_2026-11-17.md`): 26 findings (EJ-1…
+  EJ-26).
+  - **Built, client-only:** "happening now" for series, review eligibility,
+    the chat access rule, the waitlist offered only when it's open, the
+    same-day cue and more.
+  - **Prepared, not applied:** the server halves, 7 approved migrations in
+    `supabase/prepared/2026-11-17_event_journey/`.
+  - **Designed:** Batch D, post-event chat window and series reviews, which
+    need two answers.
+- **"Preview as attendee"** (`docs/EVENT_REHEARSAL_PLAN.md`, Phases 1–5).
+  A host walks their own event, or a draft, as a guest:
+  - simulated join, leave, request and waitlist; nothing saved;
+  - scenarios: when (days before → ended) and how full;
+  - a read-only chat preview;
+  - entry from Manage event, the checklist and the published sheet.
+- What's left for the owner: `docs/ISSUES.md` → "Owner to-do (updated
+  2026-11-17)".
+
 ## Planned: event comparison + create/join UX (added 2026-11-15)
 
 One roadmap covering two pieces of work that reinforce each other — the

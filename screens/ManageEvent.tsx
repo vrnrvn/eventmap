@@ -21,6 +21,7 @@ import {
   CalendarX,
   Clock,
   ExternalLink,
+  Eye,
   Lock,
   MapPin,
   Megaphone,
@@ -397,12 +398,12 @@ export default function ManageEvent() {
   }, [refetchDetails, refetchOverview, refetchChatStatus, canManage]);
   useRefetchOnFocus(refetchAll, !!id);
 
-  const phase = event ? getHostEventPhase(event) : 'upcoming';
-  const actions = getHostActions(phase);
+  const { exceptions: manageExceptions } = useOccurrenceExceptions(event?.id, !!event?.is_recurring);
+  const phase = event ? getHostEventPhase(event, new Date(), manageExceptions) : 'upcoming';
+  const actions = getHostActions(phase, { isSeries: !!event?.is_recurring });
   const badge = HOST_PHASE_BADGE[phase];
   const tone = badgeTones[badge.tone];
 
-  const { exceptions: manageExceptions } = useOccurrenceExceptions(event?.id, !!event?.is_recurring);
   // Next dates offered as attendee filters (F-R3), with skips/moves applied.
   const attendeeDateOptions = useMemo(() => {
     if (!event?.is_recurring) return [] as { key: string; label: string }[];
@@ -1088,6 +1089,9 @@ export default function ManageEvent() {
         case 'reviews':
           if (userBusiness) router.push(`/business/${userBusiness.id}` as never);
           return;
+        case 'rehearse':
+          router.push(`/event/${event.id}?rehearse=1` as never);
+          return;
         case 'none':
           return;
       }
@@ -1255,10 +1259,19 @@ export default function ManageEvent() {
             description="Reach, saves and RSVPs"
             onPress={openInsights}
           />
+          {/* docs/EVENT_REHEARSAL_PLAN.md D4: rehearsal is the primary way in;
+              the owner view stays one row below. Works for drafts too — the
+              preview shows a draft as guests will meet it once published. */}
+          <SettingsRow
+            icon={<Eye size={16} color={Colors.primary} />}
+            title="Preview as attendee"
+            description="See your page as a guest would and try joining. Nothing is saved."
+            onPress={() => router.push(`/event/${event.id}?rehearse=1` as never)}
+          />
           <SettingsRow
             icon={<ExternalLink size={16} color={Colors.primary} />}
-            title={phase === 'draft' ? 'Preview page' : 'View public page'}
-            description="See the event the way attendees do"
+            title="View as owner"
+            description="Your event page with your host controls"
             onPress={() => router.push(`/event/${event.id}` as never)}
           />
           {actions.canDuplicate ? (

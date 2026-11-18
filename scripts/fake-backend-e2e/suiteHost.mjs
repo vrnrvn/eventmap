@@ -129,6 +129,8 @@ if (run('H4')) { // Venue, guided publish: Publish → preview → Publish → p
   check('H4 published sheet for the first event', t.includes('Your first event is live'));
   check('H4 sheet offers share / followers / calendar / manage',
     ['Share the link', 'Notify your followers', 'Add to my calendar', 'Open Manage event'].every((s) => t.includes(s)));
+  // Rehearsal Phase 4: the hand-off into "Preview as attendee".
+  check('H4 published sheet offers "Preview as a guest"', t.includes('Preview as a guest'));
   const typed = h.requests.find((r) => r.method === 'PATCH' && r.path.endsWith('/events') && (r.body || '').includes('event_type'));
   check('H4 preset id recorded on the event', !!typed && typed.body.includes('casual'));
   const waitlist = h.requests.find((r) => r.path.endsWith('rpc/host_set_event_settings'));

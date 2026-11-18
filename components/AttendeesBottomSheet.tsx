@@ -28,6 +28,11 @@ type AttendeesBottomSheetProps = {
   eventId: string;
   /** Bump to make an open sheet refetch (e.g. after the viewer's own RSVP changed). */
   refreshToken?: number;
+  /**
+   * "Preview as attendee" (docs/EVENT_REHEARSAL_PLAN.md): the simulated
+   * guest, listed first and not tappable, so the list agrees with the count.
+   */
+  previewSelf?: PublicAttendee | null;
 };
 
 /**
@@ -37,7 +42,7 @@ type AttendeesBottomSheetProps = {
 export const AttendeesBottomSheet = forwardRef<
   AttendeesBottomSheetHandle,
   AttendeesBottomSheetProps
->(function AttendeesBottomSheet({ eventId, refreshToken = 0 }, ref) {
+>(function AttendeesBottomSheet({ eventId, refreshToken = 0, previewSelf = null }, ref) {
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const insets = useSafeAreaInsets();
   const [items, setItems] = useState<PublicAttendee[]>([]);
@@ -127,14 +132,21 @@ export const AttendeesBottomSheet = forwardRef<
     void loadPage(items.length, activeSearch);
   };
 
+  const isPreviewSelf = (item: PublicAttendee) => !!previewSelf && item.id === previewSelf.id;
   const renderItem = ({ item }: { item: PublicAttendee }) => (
     <TouchableOpacity
       style={styles.row}
-      onPress={() => !item.is_anonymous && handleAttendeePress(item.id)}
-      activeOpacity={item.is_anonymous ? 1 : 0.7}
-      disabled={item.is_anonymous}
-      accessibilityRole={item.is_anonymous ? undefined : 'button'}
-      accessibilityLabel={item.is_anonymous ? 'Anonymous attendee' : `View ${item.name}'s profile`}
+      onPress={() => !item.is_anonymous && !isPreviewSelf(item) && handleAttendeePress(item.id)}
+      activeOpacity={item.is_anonymous || isPreviewSelf(item) ? 1 : 0.7}
+      disabled={item.is_anonymous || isPreviewSelf(item)}
+      accessibilityRole={item.is_anonymous || isPreviewSelf(item) ? undefined : 'button'}
+      accessibilityLabel={
+        isPreviewSelf(item)
+          ? 'You, in this preview'
+          : item.is_anonymous
+            ? 'Anonymous attendee'
+            : `View ${item.name}'s profile`
+      }
     >
       <Avatar imageUrl={item.avatar_url} name={item.name} size={44} />
       <View style={styles.rowText}>
@@ -240,7 +252,7 @@ export const AttendeesBottomSheet = forwardRef<
         </View>
       </View>
       <BottomSheetFlatList
-        data={items}
+        data={previewSelf ? [previewSelf, ...items.filter((i) => i.id !== previewSelf.id)] : items}
         keyExtractor={(item: PublicAttendee) => item.id}
         renderItem={renderItem}
         ListEmptyComponent={renderEmpty}

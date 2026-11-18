@@ -187,6 +187,35 @@ if (run('R5')) {
   await hb.close();
 }
 
+if (run('R6')) {
+  // EJ-4 (docs/EVENT_JOURNEY_REVIEW_2026-11-17.md): the host switched the chat
+  // off while 2+ people are going, and an attendee arrives from an old chat
+  // notification. The screen used to apply its own "2 going" rule, open an
+  // empty room, and say "Waiting for one more attendee" — the wrong reason.
+  const h = await open({
+    ...P,
+    overrides: {
+      '/rest/v1/rpc/get_event_chat_post_status': () => ({
+        json: [{ can_read: false, can_post: false, is_banned: false, is_blocked: false, is_host: false, is_admin: false,
+          muted: false, locked: true, slow_mode_seconds: 0, block_expires_at: null, last_read_at: null, last_post_at: null,
+          chat_mode: 'off', open_policy: 'two_going', pinned_message_id: null }],
+      }),
+    },
+  });
+  const ev = h.data.ev[0];
+  ev.rsvp_count = Math.max(ev.rsvp_count ?? 0, 3);
+  ev.user_rsvp = 'going';
+  await h.go(`/event-chat/${ev.id}`, 9000);
+  const t = await h.text();
+  check('R6 an attendee of a switched-off chat is told it is off', /Chat is off/.test(t), t.match(/[^\n]*Chat is[^\n]*/)?.[0] ?? t.slice(0, 160));
+  check('R6 not that it waits for another attendee', !/Waiting for one more attendee|unlocks when at least 2/i.test(t),
+    t.match(/[^\n]*(Waiting for one more|unlocks when)[^\n]*/i)?.[0] ?? '');
+  check('R6 no composer is offered', !/Message the group|Type a message/i.test(t));
+  check('R6 no runtime errors', h.errors().length === 0, h.errors().slice(0, 2).join(' | '));
+  await h.shot(`${outDir}/R6-chat-off.png`);
+  await h.close();
+}
+
 const passed = results.filter((r) => r.ok).length;
 console.log(`\nSUITE MODERATION: ${passed}/${results.length} passed — screenshots in ${outDir}`);
 process.exit(passed === results.length ? 0 : 1);

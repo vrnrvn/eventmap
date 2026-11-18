@@ -142,7 +142,9 @@ export function makeRouter(data, { unknown = [], overrides = {} } = {}) {
         const e = data.ev.find((x) => x.id === body(r).event_uuid); if (!e) return { json: null };
         const rk = data.ranked.find((x) => x.id === e.id);
         return { json: { event: e, business: data.biz, category: data.categories.find((c) => c.id === e.category_id), links: [], photos: [],
-          rsvp_count: rk.rsvp_count, save_count: rk.save_count, user_rsvp: rk.user_rsvp, user_saved: rk.user_saved, user_following_business: false } };
+          rsvp_count: rk.rsvp_count, save_count: rk.save_count, user_rsvp: rk.user_rsvp, user_saved: rk.user_saved, user_following_business: false,
+          // Opt-in per test (the key exists once 20261102160000 is applied).
+          ...(rk.waitlist ? { waitlist: rk.waitlist } : {}) } };
       }
       case 'notifications': {
         if (r.method === 'PATCH' || r.method === 'DELETE') return { json: [] };
@@ -204,6 +206,8 @@ export function makeRouter(data, { unknown = [], overrides = {} } = {}) {
         return { status: 201, json: [] };
       }
       case 'rpc/get_business_review_summary': return { json: [{ average: 4.5, review_count: 12 }] };
+      // EJ-3: review eligibility (the demo viewer has attended); override per test for `false`.
+      case 'rpc/user_can_review_business': return { json: true };
       case 'rpc/get_business_follower_counts': return { json: (body(r).p_business_ids || []).map((id) => ({ business_id: id, follower_count: 42 })) };
       case 'businesses': return one(data.biz, r);
       case 'business_photos': case 'business_links': return { json: [] };

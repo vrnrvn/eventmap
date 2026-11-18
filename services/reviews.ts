@@ -144,6 +144,21 @@ export const reviewsService = {
     };
   },
 
+  /**
+   * Whether the signed-in user may review this business — the same rule the
+   * insert policy enforces (`user_can_review_business`: a started "going"
+   * RSVP to one of its events, and not the owner). `null` = unknown (no
+   * session check possible, function missing, or a failed call): callers keep
+   * offering the form and let the server decide, as before EJ-3.
+   */
+  async canReview(businessId: string): Promise<boolean | null> {
+    const user = await getSessionUser();
+    if (!user) return false;
+    const { data, error } = await supabase.rpc('user_can_review_business', { p_business_id: businessId });
+    if (error) return null;
+    return data === true;
+  },
+
   async getUserReview(businessId: string): Promise<Review | null> {
     const user = await getSessionUser();
     if (!user) return null;

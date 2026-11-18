@@ -23,9 +23,11 @@ export type EventPlaybookLocal = {
   notifiedFollowers: boolean;
   openedInsights: boolean;
   duplicated: boolean;
+  /** Opened "Preview as attendee" for this event. */
+  previewed: boolean;
 };
 
-export type PlaybookSignal = 'shared' | 'notifiedFollowers' | 'openedInsights' | 'duplicated';
+export type PlaybookSignal = 'shared' | 'notifiedFollowers' | 'openedInsights' | 'duplicated' | 'previewed';
 
 export const EMPTY_PLAYBOOK_LOCAL: EventPlaybookLocal = {
   ticked: [],
@@ -34,6 +36,7 @@ export const EMPTY_PLAYBOOK_LOCAL: EventPlaybookLocal = {
   notifiedFollowers: false,
   openedInsights: false,
   duplicated: false,
+  previewed: false,
 };
 
 export const eventPlaybookKey = (eventId: string) => `eventmap.eventPlaybook.${eventId}`;
@@ -54,6 +57,7 @@ export function parsePlaybookLocal(raw: string | null): EventPlaybookLocal {
       notifiedFollowers: o.notifiedFollowers === true,
       openedInsights: o.openedInsights === true,
       duplicated: o.duplicated === true,
+      previewed: o.previewed === true,
     };
   } catch {
     return { ...EMPTY_PLAYBOOK_LOCAL };

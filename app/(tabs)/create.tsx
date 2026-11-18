@@ -1598,6 +1598,11 @@ export default function CreateScreen() {
           setPublishedEvent(null);
           if (id) router.push(`/event/${id}` as never);
         }}
+        onPreview={() => {
+          const id = publishedEvent?.id;
+          setPublishedEvent(null);
+          if (id) router.push(`/event/${id}?rehearse=1` as never);
+        }}
         onOpenManage={() => {
           const id = publishedEvent?.id;
           setPublishedEvent(null);

@@ -9,7 +9,7 @@ import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/d
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 import { Button } from '@/components/ui/Button';
 import { WebDateTimeInput } from '@/components/WebDateTimeInput';
-import type { Occurrence } from '@/utils/occurrences';
+import { moveIsPastSeriesEnd, type Occurrence } from '@/utils/occurrences';
 import { instantToPickerDate, pickerDateToInstant } from '@/utils/timezone';
 import { formatOccurrenceWhen as formatWhen } from '@/hooks/useOccurrenceActions';
 import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
@@ -18,11 +18,14 @@ import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
 export function MoveDateModal({
   occurrence,
   tz,
+  seriesEndDate,
   onCancel,
   onSave,
 }: {
   occurrence: Occurrence;
   tz: string | null;
+  /** The series' `recurrence_pattern.endDate` ('YYYY-MM-DD'), if it has one. */
+  seriesEndDate?: string | null;
   onCancel: () => void;
   onSave: (start: Date, end: Date) => void;
 }) {
@@ -33,6 +36,16 @@ export function MoveDateModal({
   const [value, setValue] = useState(() => toPicker(occurrence.start));
   const start = fromPicker(value);
   const inPast = start.getTime() <= Date.now();
+  // EJ-14: past the series end the date would read as ended on its own day.
+  const pastSeriesEnd = moveIsPastSeriesEnd(start, tz, seriesEndDate);
+  const seriesEndLabel = seriesEndDate
+    ? new Date(`${seriesEndDate.slice(0, 10)}T12:00:00Z`).toLocaleDateString(undefined, {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        timeZone: 'UTC',
+      })
+    : '';
 
   const openAndroid = () => {
     DateTimePickerAndroid.open({
@@ -73,10 +86,17 @@ export function MoveDateModal({
             <Text style={styles.meta}>Tap to change</Text>
           </TouchableOpacity>
         )}
-        {inPast ? <Text style={styles.metaWarn}>Pick a time in the future.</Text> : null}
+        {inPast ? (
+          <Text style={styles.metaWarn}>Pick a time in the future.</Text>
+        ) : pastSeriesEnd ? (
+          <Text style={styles.metaWarn} accessibilityLiveRegion="polite">
+            The series ends on {seriesEndLabel}, so a date can&apos;t move past it. To hold it later, extend the
+            series end in Edit first.
+          </Text>
+        ) : null}
         <View style={styles.sheetActions}>
           <Button label="Cancel" variant="ghost" onPress={onCancel} />
-          <Button label="Move date" onPress={() => onSave(start, new Date(start.getTime() + duration))} disabled={inPast} />
+          <Button label="Move date" onPress={() => onSave(start, new Date(start.getTime() + duration))} disabled={inPast || pastSeriesEnd} />
         </View>
       </View>
     </Modal>

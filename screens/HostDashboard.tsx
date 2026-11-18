@@ -250,6 +250,7 @@ export default function HostDashboard() {
         <MoveDateModal
           occurrence={dateOps.moving.occurrence}
           tz={dateOps.moving.tz}
+          seriesEndDate={dateOps.moving.seriesEndDate ?? null}
           onCancel={dateOps.cancelMove}
           onSave={(start, end) => void dateOps.saveMove(dateOps.moving!, start, end)}
         />
@@ -263,6 +264,7 @@ function toOccurrenceTarget(entry: AgendaEntry): OccurrenceTarget {
   return {
     eventId: entry.eventId,
     tz: entry.timezone && isValidTimeZone(entry.timezone) ? entry.timezone : null,
+    seriesEndDate: entry.seriesEndDate ?? null,
     occurrence: {
       dateKey: entry.dateKey ?? '',
       start: entry.start,

@@ -63,6 +63,11 @@ export async function startHarness({ repo, dist, backendOrigin, route, seed, vie
     }
   });
   await send('Runtime.enable'); await send('Page.enable');
+  // Headless Chrome clamps --window-size to a minimum width of 500 px, so every
+  // "320 px" / "390 px" run used to happen at 500 px (measured 2026-11-17:
+  // innerWidth 500 for both). Device-metrics emulation is not clamped; it sets
+  // the real CSS viewport. Screenshots follow it.
+  await send('Emulation.setDeviceMetricsOverride', { width: viewport[0], height: viewport[1], deviceScaleFactor: 1, mobile: false });
   await send('Fetch.enable', { patterns: [{ urlPattern: backendOrigin + '/*' }] });
   if (seed) await send('Page.addScriptToEvaluateOnNewDocument', { source: seed });
   const base = `http://127.0.0.1:${appPort}`;

@@ -80,7 +80,7 @@ describe('buildEventPlaybook — before publishing', () => {
   it('a finished draft only has publish left', () => {
     const p = build(draft);
     expect(p.stage).toBe('before');
-    expect(ids(p)).toEqual(['title', 'cover', 'description', 'place', 'when', 'capacity', 'links', 'publish']);
+    expect(ids(p)).toEqual(['title', 'cover', 'description', 'place', 'when', 'capacity', 'links', 'rehearse', 'publish']);
     expect(p.next?.id).toBe('capacity'); // no cap set and not ticked
     expect(p.items.find((i) => i.id === 'publish')?.done).toBe(false);
   });
@@ -125,7 +125,7 @@ describe('buildEventPlaybook — lead-up and day of', () => {
   it('a freshly published event asks for the share and the followers', () => {
     const p = build({});
     expect(p.stage).toBe('leadup');
-    expect(ids(p)).toEqual(['share', 'notify_followers', 'venue_confirmed']);
+    expect(ids(p)).toEqual(['rehearse', 'share', 'notify_followers', 'venue_confirmed']);
     expect(p.doneCount).toBe(0);
   });
 
@@ -246,7 +246,7 @@ describe('playbookVisibility', () => {
   });
 
   it('hides a complete or empty list', () => {
-    const complete = buildEventPlaybook({ event: base, now: NOW, local: { shared: true, notifiedFollowers: true }, manual: ['venue_confirmed'] });
+    const complete = buildEventPlaybook({ event: base, now: NOW, local: { shared: true, notifiedFollowers: true, previewed: true }, manual: ['venue_confirmed'] });
     expect(complete.complete).toBe(true);
     expect(playbookVisibility({ playbook: complete, dismissedStages: [], hostEventCount: 1 })).toBe('hidden');
     const cancelled = buildEventPlaybook({ event: { ...base, status: 'cancelled' }, now: NOW });
@@ -254,12 +254,28 @@ describe('playbookVisibility', () => {
   });
 });
 
+describe('"Walk through it as a guest" (rehearsal)', () => {
+  it('ticks itself once the host opened the preview, and can be ticked by hand', () => {
+    const before = buildEventPlaybook({ event: base, now: NOW });
+    expect(before.items.find((i) => i.id === 'rehearse')).toMatchObject({ done: false, manual: true, target: 'rehearse' });
+    const previewed = buildEventPlaybook({ event: base, now: NOW, local: { previewed: true } });
+    expect(previewed.items.find((i) => i.id === 'rehearse')?.done).toBe(true);
+    const ticked = buildEventPlaybook({ event: base, now: NOW, manual: ['rehearse'] });
+    expect(ticked.items.find((i) => i.id === 'rehearse')?.done).toBe(true);
+  });
+
+  it('is not offered for the unsaved Create form (nothing to preview yet)', () => {
+    const unsaved = buildEventPlaybook({ event: base, now: NOW, canPreview: false });
+    expect(unsaved.items.map((i) => i.id)).not.toContain('rehearse');
+  });
+});
+
 describe('playbookPillLabel', () => {
   it('counts what is left', () => {
-    expect(playbookPillLabel(buildEventPlaybook({ event: base, now: NOW }))).toBe('3 to do');
+    expect(playbookPillLabel(buildEventPlaybook({ event: base, now: NOW }))).toBe('4 to do');
     expect(
       playbookPillLabel(buildEventPlaybook({ event: base, now: NOW, local: { shared: true } }))
-    ).toBe('2 to do');
+    ).toBe('3 to do');
   });
 });
 
@@ -294,7 +310,7 @@ describe('playbookFactsFromHub', () => {
 });
 
 describe('omitPlaybookItems', () => {
-  const draft = buildEventPlaybook({ event: { ...base, publish_state: 'draft' }, now: NOW, manual: ['capacity', 'links'] });
+  const draft = buildEventPlaybook({ event: { ...base, publish_state: 'draft' }, now: NOW, manual: ['capacity', 'links'], local: { previewed: true } });
 
   it('drops items and recomputes the counts', () => {
     const without = omitPlaybookItems(draft, ['publish']);

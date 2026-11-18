@@ -1,5 +1,106 @@
 # Migration work waiting for the owner
 
+## OWNER — database actions remaining (updated 2026-11-17)
+
+**Handoff, 2026-11-17:** Step 1 is complete locally: **130** migrations
+through `20261117160000`, generated types refreshed, and 14/14 SQL suites
+passed in a disposable PG17 container. Hosted databases were not changed.
+Batch C is the next app follow-up.
+
+The original Step 1 instructions below are retained as history; do not
+repeat the file move.
+
+### Step 1 — Apply the event-journey set (7 files, READY, all approved)
+
+**Where:** staged outside the auto-applied folder, in
+[`supabase/prepared/2026-11-17_event_journey/`](../supabase/prepared/2026-11-17_event_journey/README.md).
+No tool applies them by accident. That README has a table of what each
+fixes.
+
+**What they fix:**
+- **1** — suspended accounts and per-date RSVPs; finished dates.
+- **2** — attendance frozen after the end.
+- **3** — one shared notice audience; schedule-change notice; "now ends at";
+  `events.rescheduled_at`.
+- **4** — chat for date-only attendees; chat notices only to people who can
+  open the chat.
+- **5** — moving a date past the series end (rule approved).
+- **6** — pending requests expire at the end (notice approved).
+- **7** — attendance counted per session.
+
+**Validated:** in throwaway Postgres 17 containers, last on 2026-11-17 —
+14/14 SQL suites before applying and after, all 7 regression blocks
+executed, and idempotent on re-apply. Applying without #5 or #6 also
+passes.
+
+```sh
+# a. (optional) re-check on a throwaway container — never the shared cluster
+PG17_NAME=apply_check scripts/pg17-isolated.sh init
+for f in supabase/prepared/2026-11-17_event_journey/2026*.sql; do PG17_NAME=apply_check scripts/pg17-isolated.sh apply "$f"; done
+PG17_NAME=apply_check scripts/pg17-isolated.sh suites      # expect 14 passed
+PG17_NAME=apply_check scripts/pg17-isolated.sh destroy
+
+# b. move them into the migrations folder (order is the filename order; 4 needs 3)
+git mv supabase/prepared/2026-11-17_event_journey/2026*.sql supabase/migrations/
+
+# c. apply to the local stack
+npx supabase migration up
+
+# d. verify: expect 130 | 20261117160000
+#    select count(*), max(version) from supabase_migrations.schema_migrations;
+
+# e. regenerate types (adds events.rescheduled_at and the new functions)
+npm run backend:types
+```
+
+**Then tell the agent to do "Batch C".** These are the app follow-ups that
+need the server change first; until then the app works as it does today:
+- C2 — the chat row counts a per-date "going".
+- C3 — relax the move picker's interim guard and show the server's
+  "would add <date>" message.
+- C4 — Edit's dialog fires for schedule changes and names savers and
+  date-only goers.
+- C5 — "Time changed — update your calendar".
+- C6 (optional) — "You've been to N sessions".
+
+The details are in `docs/EVENT_JOURNEY_REVIEW_PLAN_2026-11-17.md` §5a.
+
+### Step 2 — Not written yet: needs two answers from you first
+
+Designed in `docs/EVENT_JOURNEY_REVIEW_PLAN_2026-11-17.md` §5a "Batch D":
+- **D1 — the chat after an event ends (EJ-7).** Posting stays open for a
+  window after the end, then the chat is read-only. **Answer needed:** is
+  the window 7 days (recommended), 3 or 14?
+- **D2 — reviews per recurring series (EJ-9).** **Answer needed:** should
+  series reviews also count toward the venue's overall rating (recommended:
+  yes)?
+
+Each becomes one prepared migration, validated like Step 1, plus app changes
+after you apply it.
+
+Also identified and unwritten:
+- **EJ-24:** events attended only by date appear in no Joined list.
+- **EJ-17:** host day-of and post-event notices for series dates (the
+  Settings copy currently says one-off only).
+
+### Step 3 — Older pending work (unchanged; details further down this file)
+
+- **§0** hosted-database inventory: do it before touching any hosted
+  project.
+- **§2 / 2b-7** E-R1 server half (decided: option A, unwritten).
+- **2b** recurrence fixes S1, S2 and O-5, `get_host_dashboard` (C3), and
+  check-in / CSV (C4).
+- **§3** host-overview chat fields and the reminder window.
+
+### Step 4 — Hosted projects (only if one exists)
+
+After the §0 inventory, apply what each project is missing **in version
+order** (the Oct 30 security set first), including Step 1's seven files
+once they are in `supabase/migrations/`. Then regenerate types against it to
+confirm parity.
+
+---
+
 **Handoff verification, 2026-11-16:** The local database records all 123
 repository migrations through `20261115100000`; no new migration files were
 prepared in the latest session. Regenerated local schema types are identical

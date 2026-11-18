@@ -1142,6 +1142,7 @@ export type Database = {
           price_label: string | null
           publish_state: string
           recurrence_pattern: Json | null
+          rescheduled_at: string | null
           rsvp_closed: boolean
           rsvp_mode: string
           start_datetime: string
@@ -1175,6 +1176,7 @@ export type Database = {
           price_label?: string | null
           publish_state?: string
           recurrence_pattern?: Json | null
+          rescheduled_at?: string | null
           rsvp_closed?: boolean
           rsvp_mode?: string
           start_datetime: string
@@ -1208,6 +1210,7 @@ export type Database = {
           price_label?: string | null
           publish_state?: string
           recurrence_pattern?: Json | null
+          rescheduled_at?: string | null
           rsvp_closed?: boolean
           rsvp_mode?: string
           start_datetime?: string
@@ -2121,6 +2124,10 @@ export type Database = {
         Args: { p_event_id: string }
         Returns: boolean
       }
+      event_chat_member: {
+        Args: { p_event_id: string; p_user_id: string }
+        Returns: boolean
+      }
       event_has_ended:
         | {
             Args: {
@@ -2140,6 +2147,7 @@ export type Database = {
             Returns: boolean
           }
       event_is_open_for_rsvp: { Args: { p_event_id: string }; Returns: boolean }
+      event_is_over: { Args: { p_event_id: string }; Returns: boolean }
       event_next_effective_occurrence: {
         Args: { p_event_id: string; p_now: string }
         Returns: string
@@ -2172,6 +2180,12 @@ export type Database = {
             }
             Returns: string
           }
+      event_notice_audience: {
+        Args: { p_date?: string; p_event_id: string }
+        Returns: {
+          user_id: string
+        }[]
+      }
       event_recurrence_matches: {
         Args: { p_day: string; p_pattern: Json; p_start_local: string }
         Returns: boolean
@@ -2181,6 +2195,7 @@ export type Database = {
         Returns: boolean
       }
       event_rsvps_closed: { Args: { p_event_id: string }; Returns: boolean }
+      expire_ended_requests: { Args: never; Returns: number }
       get_business_analytics: {
         Args: { business_uuid: string; days?: number }
         Returns: Json
@@ -2571,6 +2586,7 @@ export type Database = {
           price_label: string | null
           publish_state: string
           recurrence_pattern: Json | null
+          rescheduled_at: string | null
           rsvp_closed: boolean
           rsvp_mode: string
           start_datetime: string
@@ -2750,6 +2766,10 @@ export type Database = {
         Returns: boolean
       }
       user_is_event_host: { Args: { event_uuid: string }; Returns: boolean }
+      user_series_sessions_attended: {
+        Args: { p_event_id: string; p_user_id: string }
+        Returns: number
+      }
     }
     Enums: {
       [_ in never]: never

@@ -3,6 +3,7 @@
  * they can be unit-tested under node (see tests/hostEvent.test.ts).
  */
 import { hasEventEnded, isEventInProgress, type EventTimingFields } from '@/utils/eventStatus';
+import type { OccurrenceException } from '@/utils/occurrences';
 import type { EventStatus } from '@/types/database';
 
 export type HostEventPhase = 'draft' | 'cancelled' | 'postponed' | 'live' | 'ended' | 'upcoming';
@@ -22,16 +23,21 @@ export type HostCounts = {
 };
 
 /**
- * Where the event is in its lifecycle. `live` only applies to one-off events
- * that are currently in progress; recurring series are `upcoming` until the
- * series end date passes.
+ * Where the event is in its lifecycle. `live` = happening right now: a
+ * one-off between start and end, or a series while one of its dates runs
+ * (skipped/moved dates applied when `exceptions` are passed). A series is
+ * otherwise `upcoming` until its end date passes.
  */
-export function getHostEventPhase(event: HostEventSummaryInput, now: Date = new Date()): HostEventPhase {
+export function getHostEventPhase(
+  event: HostEventSummaryInput,
+  now: Date = new Date(),
+  exceptions: readonly OccurrenceException[] = []
+): HostEventPhase {
   if (event.status === 'cancelled') return 'cancelled';
   if (event.publish_state === 'draft') return 'draft';
   if (event.status === 'postponed') return 'postponed';
   if (hasEventEnded(event, now)) return 'ended';
-  if (isEventInProgress(event, now)) return 'live';
+  if (isEventInProgress(event, now, exceptions)) return 'live';
   return 'upcoming';
 }
 
@@ -73,23 +79,27 @@ export function summarizeCapacity(going: number, maxAttendees: number | null | u
 /**
  * Which hub actions make sense for an event in a given phase. Cancelled and
  * ended events are read-only apart from insights; recurring series stay
- * editable until their end date.
+ * editable until their end date. A series that is `live` (one of its dates
+ * is running) keeps the whole-series actions an upcoming series has —
+ * postponing or rescheduling the series, notifying followers — because the
+ * series goes on after today's date; a live one-off does not.
  */
-export function getHostActions(phase: HostEventPhase) {
+export function getHostActions(phase: HostEventPhase, { isSeries = false }: { isSeries?: boolean } = {}) {
   const editable = phase === 'upcoming' || phase === 'live' || phase === 'draft' || phase === 'postponed';
+  const upcomingLike = phase === 'upcoming' || (isSeries && phase === 'live');
   return {
     canEdit: editable,
     canCancel: phase === 'upcoming' || phase === 'live' || phase === 'postponed',
-    canNotifyFollowers: phase === 'upcoming',
+    canNotifyFollowers: upcomingLike,
     canManageAttendees: phase === 'upcoming' || phase === 'live' || phase === 'postponed',
     canModerateChat: phase !== 'cancelled' && phase !== 'draft',
     canViewInsights: phase !== 'draft',
     /** Draft → published (publish_event). */
     canPublish: phase === 'draft',
     /** Pause with "new date coming" (postpone_event). */
-    canPostpone: phase === 'upcoming',
+    canPostpone: upcomingLike,
     /** New date/place via reschedule_event; also how a postponed event resumes. */
-    canReschedule: phase === 'upcoming' || phase === 'postponed',
+    canReschedule: upcomingLike || phase === 'postponed',
     /** Copy into a new draft (duplicate_event). */
     canDuplicate: phase !== 'draft',
   };

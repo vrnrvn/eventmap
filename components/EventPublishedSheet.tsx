@@ -7,6 +7,7 @@ import {
   Share2,
   BellRing,
   CalendarPlus,
+  Eye,
   Settings as SettingsIcon,
   ChevronRight,
   Sparkles,
@@ -49,6 +50,7 @@ export function EventPublishedSheet({
   eventsLeftThisMonth,
   onClose,
   onOpenManage,
+  onPreview,
   businessId,
 }: {
   visible: boolean;
@@ -60,6 +62,8 @@ export function EventPublishedSheet({
   eventsLeftThisMonth: number | null;
   onClose: () => void;
   onOpenManage: () => void;
+  /** "Preview as attendee" (docs/EVENT_REHEARSAL_PLAN.md); omitted = no action. */
+  onPreview?: () => void;
   /** Host profile id, to tick "Share an event" on the checklist. */
   businessId?: string | null;
 }) {
@@ -191,6 +195,14 @@ export function EventPublishedSheet({
             busy={busy === 'calendar'}
             onPress={handleCalendar}
           />
+          {onPreview ? (
+            <Action
+              icon={<Eye size={18} color={Colors.primary} />}
+              title="Preview as a guest"
+              description="See the page attendees will see, and try joining. Nothing is saved."
+              onPress={onPreview}
+            />
+          ) : null}
           <Action
             icon={<SettingsIcon size={18} color={Colors.primary} />}
             title="Open Manage event"

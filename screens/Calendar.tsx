@@ -56,7 +56,6 @@ import {
   type Occurrence,
 } from '@/utils/calendar';
 import { describeEventTime, getDeviceTimeZone } from '@/utils/timezone';
-import { isEventInProgress } from '@/utils/eventStatus';
 import { shareCalendarIcs } from '@/utils/eventShare';
 import { notify } from '@/utils/notify';
 import { a11yState } from '@/utils/accessibility';
@@ -317,7 +316,10 @@ export default function CalendarScreen() {
       const when = describeEventTime(item.start, event.timezone, viewerTz);
       const cancelled = isCancelled(event);
       const postponed = event.status === 'postponed';
-      const live = !item.isSeries && !cancelled && isEventInProgress(event);
+      // Each row is one occurrence with its own times (a series date
+      // included), so "live" is simply now within that row's window (EJ-2).
+      const nowMs = Date.now();
+      const live = !cancelled && item.start.getTime() <= nowMs && nowMs < item.end.getTime();
       const badge: EventListItemBadge | null = cancelled
         ? { label: 'Cancelled', tone: 'danger' }
         : postponed

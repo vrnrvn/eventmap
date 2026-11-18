@@ -30,6 +30,7 @@ export type PlaybookItemId =
   | 'when'
   | 'capacity'
   | 'links'
+  | 'rehearse'
   | 'publish'
   // lead-up and day of
   | 'share'
@@ -68,6 +69,8 @@ export type PlaybookTarget =
   | 'insights'
   | 'duplicate'
   | 'reviews'
+  /** "Preview as attendee" (docs/EVENT_REHEARSAL_PLAN.md). */
+  | 'rehearse'
   | 'none';
 
 export type PlaybookItem = {
@@ -160,6 +163,8 @@ export type PlaybookLocalSignals = {
   notifiedFollowers: boolean;
   openedInsights: boolean;
   duplicated: boolean;
+  /** Opened "Preview as attendee" for this event on this device. */
+  previewed: boolean;
 };
 
 export const NO_LOCAL_SIGNALS: PlaybookLocalSignals = {
@@ -167,6 +172,7 @@ export const NO_LOCAL_SIGNALS: PlaybookLocalSignals = {
   notifiedFollowers: false,
   openedInsights: false,
   duplicated: false,
+  previewed: false,
 };
 
 /** A title shorter than this is almost always a placeholder. */
@@ -226,6 +232,11 @@ export function buildEventPlaybook(input: {
   hostType?: HostType;
   facts?: Partial<PlaybookFacts>;
   local?: Partial<PlaybookLocalSignals>;
+  /**
+   * The event exists, so "Preview as attendee" can open it. False for the
+   * unsaved Create form's publish preview (default true).
+   */
+  canPreview?: boolean;
   /** Item ids the host ticked by hand. */
   manual?: readonly string[];
   now?: Date;
@@ -309,6 +320,16 @@ export function buildEventPlaybook(input: {
       manual: true, // "nothing to link" is a valid answer
       target: 'edit_extras',
       stages: ['before'],
+    },
+    {
+      id: 'rehearse',
+      title: 'Walk through it as a guest',
+      description: 'Preview the page as attendees see it and try joining. Nothing is saved.',
+      derived: local.previewed,
+      when: input.canPreview !== false,
+      manual: true, // previewed on another device counts too
+      target: 'rehearse',
+      stages: ['before', 'leadup'],
     },
     {
       id: 'publish',

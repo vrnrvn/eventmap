@@ -93,18 +93,36 @@ import { EventmapMapPin, EventmapCalendar } from '@/components/icons/EventmapIco
 import { GoogleMapView } from '@/components/GoogleMapView';
 import { DeferredMount } from '@/components/DeferredMount';
 import { complaintsService } from '@/services/complaints';
-import { describeRecurrence, getNextOccurrences } from '@/utils/recurrence';
+import { describeRecurrence } from '@/utils/recurrence';
 import {
   dateAttendance,
   exceptionsForIcs,
-  listOccurrences,
+  upcomingDateRows,
   nextDateOverride,
-  nextEffectiveOccurrence,
   type DateAttendance,
 } from '@/utils/occurrences';
+import { RehearsalBanner } from '@/components/RehearsalBanner';
+import { markPlaybookSignal } from '@/utils/eventPlaybookStore';
+import { deriveEventViewer } from '@/utils/eventViewer';
+import {
+  REHEARSAL_NOT_SAVED,
+  REHEARSAL_REAL,
+  REHEARSAL_START,
+  rehearsalDetails,
+  rehearseDate,
+  rehearseJoinWaitlist,
+  rehearseLeave,
+  rehearseLeaveWaitlist,
+  rehearseRsvp,
+  scenarioNow,
+  scenarioOptions,
+  type RehearsalOutcome,
+  type RehearsalScenario,
+  type RehearsalSim,
+} from '@/utils/rehearsal';
 import { occurrenceErrorMessage, occurrencesService } from '@/services/occurrences';
 import { useOccurrenceExceptions } from '@/hooks/useOccurrenceExceptions';
-import { hasEventEnded, isEventInProgress } from '@/utils/eventStatus';
+import { hasEventEnded, startsSoonLabel } from '@/utils/eventStatus';
 import { describeEventTime, formatInZone, getDeviceTimeZone, isValidTimeZone, zoneAbbreviation } from '@/utils/timezone';
 import {
   buildRecurrenceRule,
@@ -119,6 +137,9 @@ import { presentCategory } from '@/utils/categoryPresentation';
 import { ReportReasonSheet } from '@/components/ReportReasonSheet';
 import { a11yState } from '@/utils/accessibility';
 
+
+/** EJ-3: why the review form isn't offered (mirrors user_can_review_business). */
+const REVIEW_NOT_YET_COPY = "Reviews open once you've attended one of this host's events.";
 
 type InitialDetails = { details: EventDetails | null; isPreview: boolean; updatedAt: number };
 
@@ -156,8 +177,10 @@ export default function EventDetail() {
   const viewerTz = useMemo(() => getDeviceTimeZone(), []);
   // `date` (YYYY-MM-DD in the event zone) comes from a series date row in a
   // collection: that date is highlighted in the dates list below.
-  const { id, date: focusDateKey } = useLocalSearchParams<{ id: string; date?: string }>();
-  const { user, isBanned, sessionLoading } = useAuth();
+  // `rehearse=1`: "Preview as attendee" (docs/EVENT_REHEARSAL_PLAN.md Phase 2),
+  // honoured only for the event's own host — see `rehearsing` below.
+  const { id, date: focusDateKey, rehearse } = useLocalSearchParams<{ id: string; date?: string; rehearse?: string }>();
+  const { user, isBanned, sessionLoading, profile } = useAuth();
   // A save / unsave queued offline for this event: shown on the bookmark.
   const pendingSave = usePendingWrite('save', id);
   const { userBusiness } = useApp();
@@ -189,9 +212,81 @@ export default function EventDetail() {
     staleTime: 30 * 1000,
   });
   const [dateRsvpBusy, setDateRsvpBusy] = useState<string | null>(null);
+
+  // "Preview as attendee": the host walks their own page as a guest would and
+  // tries joining; every action changes this local simulation instead of
+  // writing anything (utils/rehearsal.ts). Anyone else opening a
+  // `?rehearse=1` link just gets the normal page.
+  const ownsEvent = !!(userBusiness && details?.event.business_id === userBusiness.id);
+  const rehearsing = rehearse === '1' && ownsEvent;
+  const [sim, setSim] = useState<RehearsalSim>(REHEARSAL_START);
+  // Phase 3: which moment the guest is in, and how full the event is.
+  const [scenario, setScenario] = useState<RehearsalScenario>(REHEARSAL_REAL);
+  // The checklist's "Walk through it as a guest" ticks itself once the host
+  // has opened the preview (device-local, like "Share the link").
+  useEffect(() => {
+    if (rehearsing && details?.event.id) markPlaybookSignal(details.event.id, 'previewed');
+  }, [rehearsing, details?.event.id]);
+  /** Virtual "now" for time-based decisions while previewing (undefined = the real clock). */
+  const rehearsalNow =
+    details && rehearsing ? scenarioNow(details.event, occurrenceExceptions, scenario.when) : undefined;
+  /** The page data as the simulated attendee sees it (the real data otherwise). */
+  const shownDetails = details && rehearsing ? rehearsalDetails(details, sim, scenario.spots) : details;
+  const rehearsalView = () =>
+    shownDetails
+      ? deriveEventViewer({
+          details: shownDetails,
+          userId: user?.id ?? null,
+          userBusinessId: null,
+          exceptions: occurrenceExceptions,
+          now: rehearsalNow,
+        })
+      : null;
+  const applyRehearsal = (out: RehearsalOutcome) => {
+    setSim(out.sim);
+    if (out.haptic === 'success') successHaptic();
+    else if (out.haptic === 'selection') selectionHaptic();
+    if (out.offerCalendar) {
+      // The real post-join prompt, word for word; only its action is a no-op.
+      notify.withAction("You're going. Add it to your calendar?", {
+        label: 'Add',
+        onPress: () => notify.success(REHEARSAL_NOT_SAVED.calendar),
+      });
+    } else if (out.message) {
+      if (out.message.tone === 'error') notify.error(out.message.text);
+      else notify.success(out.message.text);
+    }
+  };
+
   const toggleDateRsvp = useCallback(
     async (dateKey: string, current: DateAttendance) => {
       if (!id || !user) return;
+      if (rehearsing) {
+        applyRehearsal(rehearseDate(sim, dateKey, current));
+        return;
+      }
+      // Same guards as handleRsvp (EJ-1): the server refuses a suspended
+      // account here only once its own check lands (Batch B1), and the
+      // offline / cancelled / ended cases deserve their real reason rather
+      // than "Couldn't update that date".
+      if (isPreview) {
+        notify.error('Still loading this event. Try again in a moment.');
+        return;
+      }
+      if (blockedOffline('change your RSVP for that date')) return;
+      if (isBanned) {
+        notify.error('Your account has been suspended. Please contact support.');
+        return;
+      }
+      const ev = details?.event;
+      if (ev?.status === 'cancelled') {
+        notify.error('This event was cancelled, so it can no longer be joined.');
+        return;
+      }
+      if (ev && hasEventEnded(ev)) {
+        notify.error('This event is over, so it can no longer be joined.');
+        return;
+      }
       const next = nextDateOverride(details?.user_rsvp, current);
       setDateRsvpBusy(dateKey);
       try {
@@ -212,7 +307,9 @@ export default function EventDetail() {
         setDateRsvpBusy(null);
       }
     },
-    [id, user, details?.user_rsvp, queryClient]
+    // applyRehearsal is recreated each render but only reads setters/notify.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [id, user, details?.user_rsvp, details?.event, isPreview, isBanned, queryClient, rehearsing, sim]
   );
   // First load failed (network / server). Kept apart from `details === null`,
   // which means the event really doesn't exist.
@@ -240,11 +337,10 @@ export default function EventDetail() {
   const [reportSheetOpen, setReportSheetOpen] = useState(false);
   const [togglingFollow, setTogglingFollow] = useState(false);
 
-  const isOwner = !!(userBusiness && details?.event.business_id === userBusiness.id);
   // The host's chat settings (mode + who unlocks it); null until loaded, which
   // falls back to the server defaults (open, unlocks at two going).
   const [chatSettings, setChatSettings] = useState<ChatAccessSettings>(null);
-  const chatAccess = eventChatAccess(details?.user_rsvp, details?.rsvp_count ?? 0, chatSettings);
+  const chatAccess = eventChatAccess(shownDetails?.user_rsvp, shownDetails?.rsvp_count ?? 0, chatSettings);
   const chatIsOpen = chatAccess.state === 'open';
 
   const allPhotoUrls = useMemo(() => {
@@ -317,7 +413,7 @@ export default function EventDetail() {
           setLoadError(false);
           // A deleted event shouldn't keep opening from the device cache.
           if (!data) queryClient.removeQueries({ queryKey: queryKeys.eventDetails(id), exact: true });
-          if (data && !hasLoadedRef.current) {
+          if (data && !hasLoadedRef.current && rehearse !== '1') {
             eventsService.trackEventView(id).catch(() => {});
           }
           hasLoadedRef.current = true;
@@ -515,15 +611,18 @@ export default function EventDetail() {
     enabled: !!businessId,
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
-      const [list, avg, mine] = await Promise.all([
+      const [list, avg, mine, canReview] = await Promise.all([
         reviewsService.getReviewsForBusiness(businessId!),
         reviewsService.getAverageRatingAndCount(businessId!),
         viewerId ? reviewsService.getUserReview(businessId!) : Promise.resolve(null),
+        // EJ-3: only offer the form to people the insert policy accepts.
+        viewerId ? reviewsService.canReview(businessId!).catch(() => null) : Promise.resolve(false),
       ]);
       return {
         list,
         avg,
         mine: mine ? { rating: mine.rating, text: mine.text || '' } : null,
+        canReview,
       };
     },
   });
@@ -543,11 +642,28 @@ export default function EventDetail() {
   }, [reviewsQuery.data, reviewsQuery.isError]);
 
   const handleReviewSubmit = async (rating: number, text: string) => {
+    if (rehearsing) {
+      notify.success(REHEARSAL_NOT_SAVED.review);
+      setShowReviewForm(false);
+      return;
+    }
     if (blockedOffline('post a review')) return;
     if (!businessId) return;
     // Only the write can fail the form. The reload after it is best-effort,
     // so a saved review is never reported as "failed".
-    await reviewsService.createOrUpdateReview(businessId, rating, text || null);
+    try {
+      await reviewsService.createOrUpdateReview(businessId, rating, text || null);
+    } catch (err) {
+      // The insert policy refused (eligibility changed since the screen
+      // loaded): say why instead of ReviewForm's generic failure, and keep
+      // the draft in the form.
+      if ((err as { code?: string })?.code === '42501') {
+        notify.error(REVIEW_NOT_YET_COPY);
+        void queryClient.invalidateQueries({ queryKey: ['business-reviews', businessId] });
+        return;
+      }
+      throw err;
+    }
     void queryClient.invalidateQueries({ queryKey: ['business-reviews', businessId], refetchType: 'none' });
     setUserReview({ rating, text });
     setShowReviewForm(false);
@@ -581,6 +697,11 @@ export default function EventDetail() {
 
   const handleRsvp = async (status: 'going' | 'interested') => {
     if (blockedByPreview()) return;
+    if (rehearsing) {
+      const view = rehearsalView();
+      if (view) applyRehearsal(rehearseRsvp(sim, status, view));
+      return;
+    }
     if (blockedOffline('RSVP')) return;
     if (!user || !id) return;
     if (isBanned) {
@@ -654,8 +775,26 @@ export default function EventDetail() {
     }
   };
 
+  /**
+   * A "going" RSVP is attendance once the event is over; the screen hides
+   * Leave then, but a page left open across the end time still shows it
+   * (eventEnded is computed at render). Re-check at tap time, and re-render
+   * so the page flips to its ended state (EJ-12; the server half is Batch B2).
+   */
+  const attendanceFrozenNow = () => {
+    if (!details || details.user_rsvp !== 'going' || !hasEventEnded(details.event)) return false;
+    notify.error("This event is over, so you can't leave it anymore.");
+    setDetails((d) => (d ? { ...d } : d));
+    return true;
+  };
+
   const handleRemoveRsvp = async () => {
     if (blockedByPreview()) return;
+    if (rehearsing) {
+      applyRehearsal(rehearseLeave(sim));
+      return;
+    }
+    if (attendanceFrozenNow()) return;
     if (blockedOffline('change your RSVP')) return;
     if (!user || !id) return;
     setSaving(true);
@@ -684,6 +823,11 @@ export default function EventDetail() {
 
   const handleJoinWaitlist = async () => {
     if (blockedByPreview()) return;
+    if (rehearsing) {
+      const view = rehearsalView();
+      if (view) applyRehearsal(rehearseJoinWaitlist(sim, view));
+      return;
+    }
     if (blockedOffline('join the waitlist')) return;
     if (!user || !id || saving) return;
     setSaving(true);
@@ -730,6 +874,10 @@ export default function EventDetail() {
 
   const handleLeaveWaitlist = async () => {
     if (blockedByPreview()) return;
+    if (rehearsing) {
+      applyRehearsal(rehearseLeaveWaitlist(sim));
+      return;
+    }
     if (blockedOffline('leave the waitlist')) return;
     if (!user || !id || saving) return;
     setSaving(true);
@@ -760,8 +908,13 @@ export default function EventDetail() {
   // handleRemoveRsvp — only the explicit "Leave" button confirms.
   const handleLeaveEvent = () => {
     if (blockedByPreview()) return;
-    if (blockedOffline('leave this event')) return;
-    const cancellingRequest = details?.user_rsvp === 'requested';
+    // The preview rehearses the real confirmation too; handleRemoveRsvp then
+    // changes only the simulation.
+    if (!rehearsing) {
+      if (attendanceFrozenNow()) return;
+      if (blockedOffline('leave this event')) return;
+    }
+    const cancellingRequest = shownDetails?.user_rsvp === 'requested';
     notifyConfirm({
       title: cancellingRequest ? 'Cancel request?' : 'Leave event?',
       message: cancellingRequest
@@ -776,6 +929,13 @@ export default function EventDetail() {
 
   const handleToggleSave = async () => {
     if (blockedByPreview()) return;
+    if (rehearsing) {
+      const on = !sim.saved;
+      setSim((s0) => ({ ...s0, saved: on }));
+      selectionHaptic();
+      if (on) notify.withAction('Saved.', { label: 'Add to collection', onPress: () => notify.success(REHEARSAL_NOT_SAVED.collection) });
+      return;
+    }
     if (!user || !id || !details || togglingSave) return;
     const wasSaved = details.user_saved;
     setTogglingSave(true);
@@ -805,6 +965,16 @@ export default function EventDetail() {
     }
   };
 
+  /** Collections sheet (bookmark long-press, the Collections row). */
+  const openCollections = () => {
+    if (blockedByPreview()) return;
+    if (rehearsing) {
+      notify.success(REHEARSAL_NOT_SAVED.collection);
+      return;
+    }
+    setCollectionsSheetOpen(true);
+  };
+
   const handleShareEvent = async () => {
     if (!id || !details) return;
     try {
@@ -816,7 +986,7 @@ export default function EventDetail() {
       // Desktop browsers mostly lack navigator.share, so the link is copied
       // instead — say so, otherwise the button looks broken.
       if (outcome === 'copied') notify.success('Event link copied to clipboard.');
-      if (outcome !== 'dismissed') eventsService.trackEventInteraction(id, 'share');
+      if (outcome !== 'dismissed' && !rehearsing) eventsService.trackEventInteraction(id, 'share');
     } catch {
       notify.error('Could not share this event.');
     }
@@ -824,6 +994,11 @@ export default function EventDetail() {
 
   const handleToggleFollow = async () => {
     if (blockedByPreview()) return;
+    if (rehearsing) {
+      setSim((s0) => ({ ...s0, following: !s0.following }));
+      selectionHaptic();
+      return;
+    }
     if (!user || !details || togglingFollow) return;
     const wasFollowing = details.user_following_business;
     setTogglingFollow(true);
@@ -875,6 +1050,10 @@ export default function EventDetail() {
 
   const handleOpenCalendar = () => {
     if (!details) return;
+    if (rehearsing) {
+      notify.success(REHEARSAL_NOT_SAVED.calendar);
+      return;
+    }
     const times = calendarTimes();
     if (!times) return;
     const url = getGoogleCalendarEventUrl({
@@ -892,6 +1071,10 @@ export default function EventDetail() {
 
   const handleShareIcs = async () => {
     if (!details) return;
+    if (rehearsing) {
+      notify.success(REHEARSAL_NOT_SAVED.calendar);
+      return;
+    }
     const times = calendarTimes();
     if (!times) return;
     try {
@@ -936,6 +1119,10 @@ export default function EventDetail() {
 
   const handleReportEvent = () => {
     if (blockedByPreview()) return;
+    if (rehearsing) {
+      notify.success(REHEARSAL_NOT_SAVED.report);
+      return;
+    }
     if (blockedOffline('report this event')) return;
     setReportSheetOpen(true);
   };
@@ -1070,7 +1257,9 @@ export default function EventDetail() {
     );
   }
 
-  const { event, business, category, links } = details;
+  // Rendering reads the shown data: the simulated attendee's while previewing.
+  const pageDetails = shownDetails ?? details;
+  const { event, business, category, links } = pageDetails;
   // Why what's shown may be incomplete or old (docs/OFFLINE_PLAN.md §3.4).
   const detailsNote = isPreview
     ? connectivity !== 'online' || lastLoadFailed
@@ -1081,50 +1270,63 @@ export default function EventDetail() {
   const venueLat = Number.isFinite(event.lat) ? event.lat : (business.lat ?? NaN);
   const venueLng = Number.isFinite(event.lng) ? event.lng : (business.lng ?? NaN);
   const canOpenEventChat = chatIsOpen;
-  const hasJoinedEvent = details.user_rsvp === 'going';
-  const hasRequested = details.user_rsvp === 'requested';
-  const approvalMode = event.rsvp_mode === 'approval';
-  const eventEnded = hasEventEnded(event);
-  const eventCancelled = event.status === 'cancelled';
-  const eventPostponed = event.status === 'postponed';
-  const eventDraft = event.publish_state === 'draft';
-  const eventUnlisted = event.visibility === 'unlisted';
-  // Host switched "Accepting RSVPs" off (20261103130000). People already in
-  // keep their seat and may still leave; nobody new can join.
-  const rsvpsClosedByHost = !!event.rsvp_closed && !hasJoinedEvent;
-  // "Closed" = no RSVP changes possible, for whichever reason.
-  const eventClosed = eventEnded || eventCancelled || eventPostponed || eventDraft || rsvpsClosedByHost;
-  const eventLive = !eventCancelled && isEventInProgress(event);
-  const maxAttendees = event.max_attendees ?? null;
-  const eventFull =
-    maxAttendees != null && details.rsvp_count >= maxAttendees && !hasJoinedEvent;
-  // Waitlist exists only once migration 20261102160000 is applied (the RPC
-  // then returns a `waitlist` key); before that the full state stays a plain
-  // disabled button.
-  const waitlist = details.waitlist;
-  const onWaitlist = !!waitlist && (waitlist.position ?? 0) > 0;
-  // Joining the waitlist needs an open event; LEAVING it must survive the
-  // host closing RSVPs or postponing (the row is the user's own). A pending
-  // request takes precedence over the waitlist CTA.
-  const canWaitlist =
-    !!user &&
-    !!waitlist &&
-    !hasRequested &&
-    ((eventFull && !eventClosed) || (onWaitlist && !eventCancelled && !eventEnded && !eventDraft));
-  // Recurring events that already started show their next occurrence in the
-  // header; everything else shows the scheduled start.
-  const displayStartIso = (() => {
-    if (!event.is_recurring || eventEnded) return event.start_datetime;
-    if (occurrenceExceptions.length === 0 && new Date(event.start_datetime).getTime() > Date.now()) {
-      return event.start_datetime;
-    }
-    // Honour skipped dates and moved times; fall back to the plain walk.
-    const next = nextEffectiveOccurrence(event, occurrenceExceptions)?.start ?? getNextOccurrences(event, 1)[0];
-    return next ? next.toISOString() : event.start_datetime;
-  })();
+  // Who is looking, and every state flag they get — one derivation behind
+  // one seam (docs/EVENT_REHEARSAL_PLAN.md Phase 1; the logic lives in
+  // utils/eventViewer.ts, unit-tested, and is unchanged). Phase 2 swaps this
+  // object for a simulated attendee's without touching the render below.
+  const viewer = deriveEventViewer({
+    details: pageDetails,
+    userId: user?.id ?? null,
+    // Previewing: the host is a guest here, never the owner.
+    userBusinessId: rehearsing ? null : (userBusiness?.id ?? null),
+    exceptions: occurrenceExceptions,
+    now: rehearsalNow,
+  });
+  const {
+    isOwner,
+    hasJoined: hasJoinedEvent,
+    hasRequested,
+    approvalMode,
+    ended: eventEnded,
+    cancelled: eventCancelled,
+    postponed: eventPostponed,
+    draft: eventDraft,
+    unlisted: eventUnlisted,
+    rsvpsClosedByHost,
+    closed: eventClosed,
+    live: eventLive,
+    maxAttendees,
+    full: eventFull,
+    waitlist,
+    onWaitlist,
+    canWaitlist,
+    liveOccurrence,
+    displayStartIso,
+  } = viewer;
+  // Previewing and "going": the guest in the faces and the "Who's going" list.
+  const previewSelf: PublicAttendee | null =
+    rehearsing && hasJoinedEvent
+      ? { id: 'rehearsal-preview-self', name: 'You (preview)', avatar_url: profile?.avatar_url ?? null, bio: null }
+      : null;
+  // Who may review (EJ-3). Previewing: the simulated guest, by the server's
+  // rule (going to an event of this host that has started); otherwise the
+  // server's answer for the real viewer.
+  const reviewEligible = rehearsing
+    ? hasJoinedEvent && new Date(event.start_datetime).getTime() <= (rehearsalNow ?? new Date()).getTime()
+    : reviewsQuery.data?.canReview;
 
   return (
     <View style={styles.container}>
+      {rehearsing ? (
+        <RehearsalBanner
+          top={insets.top + 74}
+          draft={details.event.publish_state === 'draft'}
+          scenario={scenario}
+          whenOptions={scenarioOptions(details.event)}
+          onScenario={setScenario}
+          onExit={() => router.replace(`/event/${event.id}` as never)}
+        />
+      ) : null}
       <View style={[styles.heroTopBarWrap, { top: insets.top + 10 }]}>
         <View style={styles.heroTopBar}>
           <TouchableOpacity
@@ -1142,15 +1344,15 @@ export default function EventDetail() {
               <TouchableOpacity
                 style={styles.backButton}
                 onPress={handleToggleSave}
-                onLongPress={() => (blockedByPreview() ? undefined : setCollectionsSheetOpen(true))}
+                onLongPress={openCollections}
                 disabled={togglingSave}
                 accessibilityRole="button"
-                accessibilityLabel={details.user_saved ? 'Remove from saved events' : 'Save event'}
+                accessibilityLabel={pageDetails.user_saved ? 'Remove from saved events' : 'Save event'}
                 accessibilityHint={pendingSave ? "Waiting for a connection; it will sync when you're back online." : undefined}
-                {...a11yState({ selected: details.user_saved, busy: !!pendingSave }, 'button')}
+                {...a11yState({ selected: pageDetails.user_saved, busy: !!pendingSave }, 'button')}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               >
-                {details.user_saved ? (
+                {pageDetails.user_saved ? (
                   <BookmarkCheck size={20} color={pendingSave ? Colors.text.secondary : Colors.primary} />
                 ) : (
                   <Bookmark size={20} color={pendingSave ? Colors.text.secondary : Colors.text.primary} />
@@ -1290,7 +1492,7 @@ export default function EventDetail() {
                     ? event.status_note.trim()
                     : isOwner
                       ? 'Attendees have been told. Set the new date from Manage event to resume.'
-                      : hasJoinedEvent || details.user_rsvp === 'interested'
+                      : hasJoinedEvent || pageDetails.user_rsvp === 'interested'
                         ? 'Your RSVP is kept. You will be notified when the new date is set.'
                         : 'Joining reopens once the host sets a new date.'}
                 </Text>
@@ -1305,7 +1507,7 @@ export default function EventDetail() {
                 <Text style={styles.cancelledNoticeText}>
                   {isOwner
                     ? 'You cancelled this event. Everyone who was going or interested has been notified.'
-                    : hasJoinedEvent || details.user_rsvp === 'interested'
+                    : hasJoinedEvent || pageDetails.user_rsvp === 'interested'
                       ? 'The organizer cancelled it. Your RSVP no longer applies.'
                       : 'The organizer cancelled it, so it can no longer be joined.'}
                 </Text>
@@ -1319,7 +1521,7 @@ export default function EventDetail() {
               </View>
               <View style={styles.metaBody}>
                 <Text style={styles.metaLabel}>
-                  {event.is_recurring && displayStartIso !== event.start_datetime ? 'Next date' : 'Date'}
+                  {event.is_recurring && displayStartIso !== event.start_datetime && !liveOccurrence ? 'Next date' : 'Date'}
                 </Text>
                 <Text style={styles.metaValue}>
                   {formatDate(displayStartIso)}
@@ -1329,7 +1531,14 @@ export default function EventDetail() {
                       ? '  ·  Happening now'
                       : eventEnded
                         ? '  ·  Ended'
-                        : ''}
+                        : (() => {
+                            // Same-day cue ("Today · in 3 h"); the preview's
+                            // virtual clock drives it in "Day of".
+                            const cue = eventPostponed
+                              ? null
+                              : startsSoonLabel(displayStartIso, rehearsalNow ?? new Date(), displayTz);
+                            return cue ? `  ·  ${cue}` : '';
+                          })()}
                 </Text>
               </View>
             </View>
@@ -1384,7 +1593,7 @@ export default function EventDetail() {
                   {event.ticket_url ? (
                     <TouchableOpacity
                       onPress={() => {
-                        eventsService.trackEventInteraction(event.id, 'ticket');
+                        if (!rehearsing) eventsService.trackEventInteraction(event.id, 'ticket');
                         void Linking.openURL(event.ticket_url!).catch(() => notify.error('Could not open the ticket link.'));
                       }}
                       accessibilityRole="link"
@@ -1453,7 +1662,7 @@ export default function EventDetail() {
                 <View style={styles.calendarChoiceRow}>
                   <TouchableOpacity
                     style={styles.calendarChoiceBtn}
-                    onPress={() => (blockedByPreview() ? undefined : setCollectionsSheetOpen(true))}
+                    onPress={openCollections}
                     activeOpacity={0.75}
                     accessibilityRole="button"
                     accessibilityLabel="Add to collection"
@@ -1468,21 +1677,24 @@ export default function EventDetail() {
 
           <TouchableOpacity
             style={styles.attendeesSection}
-            onPress={() => (details.rsvp_count > 0 ? attendeesSheetRef.current?.present() : null)}
-            activeOpacity={details.rsvp_count > 0 ? 0.85 : 1}
-            disabled={details.rsvp_count === 0}
+            onPress={() => (pageDetails.rsvp_count > 0 ? attendeesSheetRef.current?.present() : null)}
+            activeOpacity={pageDetails.rsvp_count > 0 ? 0.85 : 1}
+            disabled={pageDetails.rsvp_count === 0}
             accessibilityRole="button"
             accessibilityLabel={
-              details.rsvp_count === 0
+              pageDetails.rsvp_count === 0
                 ? 'Be the first to RSVP'
-                : `${details.rsvp_count} going, see who's coming`
+                : `${pageDetails.rsvp_count} going, see who's coming`
             }
           >
             <View style={styles.attendeeRow}>
               <View style={styles.attendeeGroup}>
                 {(() => {
-                  const faces = previewAttendees.slice(0, 4);
-                  const moreCount = Math.max(0, details.rsvp_count - faces.length);
+                  // Previewing: the simulated guest is one of the faces too.
+                  // (Named "You" here: Avatar initials take each word's first
+                  // character, and "You (preview)" rendered as "Y(".)
+                  const faces = (previewSelf ? [{ ...previewSelf, name: 'You' }, ...previewAttendees] : previewAttendees).slice(0, 4);
+                  const moreCount = Math.max(0, pageDetails.rsvp_count - faces.length);
                   return (
                     <>
                       {faces.map((a) => (
@@ -1498,11 +1710,11 @@ export default function EventDetail() {
                 })()}
               </View>
               <Text style={styles.attendeeText}>
-                {details.rsvp_count === 0
+                {pageDetails.rsvp_count === 0
                   ? 'Be the first to RSVP'
                   : maxAttendees != null
-                    ? `${details.rsvp_count} / ${maxAttendees} going — tap to see who’s coming`
-                    : `${details.rsvp_count} going — tap to see who’s coming`}
+                    ? `${pageDetails.rsvp_count} / ${maxAttendees} going — tap to see who’s coming`
+                    : `${pageDetails.rsvp_count} going — tap to see who’s coming`}
               </Text>
             </View>
           </TouchableOpacity>
@@ -1514,6 +1726,13 @@ export default function EventDetail() {
             <TouchableOpacity
               style={[styles.chatPromptRow, !canOpenEventChat && styles.chatPromptRowDisabled]}
               onPress={() => {
+                if (rehearsing) {
+                  // The chat as this guest would see it — read-only, nothing
+                  // sent (Phase 4). The row is only enabled when the
+                  // simulated guest has access by the real rule.
+                  if (canOpenEventChat) router.push(`/event-chat/${event.id}?rehearse=1` as never);
+                  return;
+                }
                 if (canOpenEventChat) {
                   router.push(`/event-chat/${event.id}` as never);
                 }
@@ -1550,7 +1769,10 @@ export default function EventDetail() {
                 </View>
                 <Text
                   style={[styles.chatPromptSubtitle, chatUnread > 0 && styles.chatPromptSubtitleUnread]}
-                  numberOfLines={1}
+                  // A message preview truncates to one line; a reason the chat
+                  // is locked must be read whole ("Join the event to unlock
+                  // the chat" was cut off on a 320 px phone).
+                  numberOfLines={canOpenEventChat ? 1 : 2}
                 >
                   {canOpenEventChat
                     ? chatPreview
@@ -1572,10 +1794,11 @@ export default function EventDetail() {
             </TouchableOpacity>
           )}
 
-          {/* Hosts rarely RSVP to their own event, so the attendee chat row
-              above never shows for them — but the DB (20261028130000/180000)
-              grants hosts chat read + moderation. Give them an entry point. */}
-          {isOwner && details.user_rsvp !== 'going' && (
+          {/* The attendee chat row above never shows for the owner, but the DB
+              (20261028130000/180000) grants hosts chat read + moderation, so
+              they get this entry point — gated on ownership alone: a host who
+              also holds a "going" RSVP used to get neither row (EJ-5). */}
+          {isOwner && (
             <TouchableOpacity
               style={styles.chatPromptRow}
               onPress={() => router.push(`/event-chat/${event.id}` as never)}
@@ -1602,7 +1825,7 @@ export default function EventDetail() {
             activeOpacity={0.85}
             accessibilityRole="button"
             accessibilityLabel={`View business ${business.name}${business.verified ? ', verified' : ''}${
-              user && !isOwner && details.user_following_business ? ', following' : ''
+              user && !isOwner && pageDetails.user_following_business ? ', following' : ''
             }`}
             // The Follow chip is nested in this row (one VoiceOver element).
             accessibilityActions={
@@ -1610,7 +1833,7 @@ export default function EventDetail() {
                 ? [
                     {
                       name: 'toggleFollow',
-                      label: details.user_following_business
+                      label: pageDetails.user_following_business
                         ? `Unfollow ${business.name}`
                         : `Follow ${business.name}`,
                     },
@@ -1643,15 +1866,15 @@ export default function EventDetail() {
                 saves a trip to the venue page just to follow. */}
             {user && !isOwner ? (
               <TouchableOpacity
-                style={[styles.followChip, details.user_following_business && styles.followChipActive]}
+                style={[styles.followChip, pageDetails.user_following_business && styles.followChipActive]}
                 onPress={handleToggleFollow}
                 disabled={togglingFollow}
                 activeOpacity={0.8}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 accessibilityRole="button"
-                {...a11yState({ selected: details.user_following_business }, 'button')}
+                {...a11yState({ selected: pageDetails.user_following_business }, 'button')}
                 accessibilityLabel={
-                  details.user_following_business
+                  pageDetails.user_following_business
                     ? `Unfollow ${business.name}`
                     : `Follow ${business.name}`
                 }
@@ -1659,10 +1882,10 @@ export default function EventDetail() {
                 <Text
                   style={[
                     styles.followChipText,
-                    details.user_following_business && styles.followChipTextActive,
+                    pageDetails.user_following_business && styles.followChipTextActive,
                   ]}
                 >
-                  {details.user_following_business ? 'Following' : 'Follow'}
+                  {pageDetails.user_following_business ? 'Following' : 'Follow'}
                 </Text>
               </TouchableOpacity>
             ) : (
@@ -1699,8 +1922,8 @@ export default function EventDetail() {
                   {describeRecurrence(event.recurrence_pattern, event.start_datetime, { withEnd: true })}
                 </Text>
               </View>
-              {listOccurrences(event, occurrenceExceptions, { count: 5 }).map((o) => {
-                const attendance = dateAttendance(details.user_rsvp, dateRsvpsQuery.data ?? [], o.dateKey);
+              {upcomingDateRows(event, occurrenceExceptions, { count: 5, now: rehearsalNow }).map((o) => {
+                const attendance = dateAttendance(pageDetails.user_rsvp, rehearsing ? sim.dateOverrides : (dateRsvpsQuery.data ?? []), o.dateKey);
                 const canToggle = !!user && !isOwner && o.status !== 'cancelled' && !eventEnded;
                 const focused = !!focusDateKey && o.dateKey === focusDateKey;
                 return (
@@ -1716,7 +1939,7 @@ export default function EventDetail() {
                   }
                 >
                   {formatDateTime(o.start.toISOString())}
-                  {o.status === 'cancelled' ? ' · cancelled' : o.status === 'moved' ? ' · moved' : ''}
+                  {o.status === 'cancelled' ? ' · cancelled' : o.inProgress ? ' · happening now' : o.status === 'moved' ? ' · moved' : ''}
                   {o.note ? ` — ${o.note}` : ''}
                 </Text>
                 {canToggle ? (
@@ -1753,7 +1976,7 @@ export default function EventDetail() {
                 <TouchableOpacity
                   style={styles.directionsBtn}
                   onPress={() => {
-                    eventsService.trackEventInteraction(event.id, 'directions');
+                    if (!rehearsing) eventsService.trackEventInteraction(event.id, 'directions');
                     void Linking.openURL(`https://www.google.com/maps?q=${encodeURIComponent(event.address || `${event.lat},${event.lng}`)}`);
                   }}
                   accessibilityRole="button"
@@ -1878,7 +2101,9 @@ export default function EventDetail() {
                 count={averageRating.count}
               />
             </View>
-            {user && !isOwner && (
+            {user && !isOwner && !userReview && reviewEligible === false ? (
+              <Text style={styles.reviewNotYetText}>{REVIEW_NOT_YET_COPY}</Text>
+            ) : user && !isOwner && (
               showReviewForm ? (
                 <>
                 <Text style={styles.reviewFormTitle}>
@@ -1913,6 +2138,10 @@ export default function EventDetail() {
                 onReport={
                   user
                     ? (reviewId) => {
+                        if (rehearsing) {
+                          notify.success(REHEARSAL_NOT_SAVED.report);
+                          return;
+                        }
                         notifyConfirm({
                           title: 'Report Review',
                           message: 'Report this review for inappropriate content?',
@@ -2043,7 +2272,7 @@ export default function EventDetail() {
                         : approvalMode
                             ? 'Request to join'
                             : maxAttendees != null
-                              ? `Join Event (${details.rsvp_count} / ${maxAttendees})`
+                              ? `Join Event (${pageDetails.rsvp_count} / ${maxAttendees})`
                               : 'Join Event'}
               </Text>
               {saving ? (
@@ -2087,29 +2316,29 @@ export default function EventDetail() {
                 <TouchableOpacity
                   style={[
                     styles.secondaryActionButton,
-                    details.user_rsvp === 'interested' && styles.secondaryActionActive,
+                    pageDetails.user_rsvp === 'interested' && styles.secondaryActionActive,
                   ]}
                   onPress={() =>
-                    details.user_rsvp === 'interested' ? handleRemoveRsvp() : handleRsvp('interested')
+                    pageDetails.user_rsvp === 'interested' ? handleRemoveRsvp() : handleRsvp('interested')
                   }
                   disabled={saving}
                   activeOpacity={0.8}
                   accessibilityRole="button"
-                  accessibilityLabel={details.user_rsvp === 'interested' ? 'Remove interest' : 'Mark as interested'}
-                  {...a11yState({ selected: details.user_rsvp === 'interested' }, 'button')}
+                  accessibilityLabel={pageDetails.user_rsvp === 'interested' ? 'Remove interest' : 'Mark as interested'}
+                  {...a11yState({ selected: pageDetails.user_rsvp === 'interested' }, 'button')}
                 >
                   {/* Labelled, not icon-only (review J6): the star's meaning
                       used to live in a hint line that only sometimes rendered. */}
                   <View style={styles.secondaryActionInner}>
                     <Star
                       size={20}
-                      color={details.user_rsvp === 'interested' ? Colors.text.inverse : Colors.primary}
-                      fill={details.user_rsvp === 'interested' ? Colors.text.inverse : 'transparent'}
+                      color={pageDetails.user_rsvp === 'interested' ? Colors.text.inverse : Colors.primary}
+                      fill={pageDetails.user_rsvp === 'interested' ? Colors.text.inverse : 'transparent'}
                     />
                     <Text
                       style={[
                         styles.secondaryActionText,
-                        details.user_rsvp === 'interested' && styles.secondaryActionTextActive,
+                        pageDetails.user_rsvp === 'interested' && styles.secondaryActionTextActive,
                       ]}
                       maxFontSizeMultiplier={FontScaleCaps.control}
                     >
@@ -2131,7 +2360,7 @@ export default function EventDetail() {
                 ? onWaitlist
                   ? `We'll notify you the moment a spot opens. ${waitlist?.count ?? 0} waiting.`
                   : `${waitlist?.count ?? 0} ${waitlist?.count === 1 ? 'person is' : 'people are'} waiting. You'll be notified when a spot opens.`
-                : details.user_rsvp === 'interested'
+                : pageDetails.user_rsvp === 'interested'
                   ? 'Marked as interested. Join to unlock the event chat.'
                   : 'Not sure yet? Tap the star to keep an eye on it.'}
             </Text>
@@ -2141,10 +2370,11 @@ export default function EventDetail() {
       {id && (
         <>
           <AddToCollectionSheet
-            event={collectionsSheetOpen && details ? { id, title: details.event.title } : null}
+            // Never in the preview: the sheet creates collections and pins events.
+            event={collectionsSheetOpen && details && !rehearsing ? { id, title: pageDetails.event.title } : null}
             onClose={() => setCollectionsSheetOpen(false)}
           />
-          <AttendeesBottomSheet ref={attendeesSheetRef} eventId={id} refreshToken={attendeesRefresh} />
+          <AttendeesBottomSheet ref={attendeesSheetRef} eventId={id} refreshToken={attendeesRefresh} previewSelf={previewSelf} />
         </>
       )}
       <ReportReasonSheet
@@ -2834,6 +3064,12 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamilies.medium,
     fontWeight: Typography.weights.medium,
     color: Colors.primary,
+  },
+  reviewNotYetText: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamilies.regular,
+    color: Colors.text.secondary,
+    marginBottom: Spacing.md,
   },
   errorText: {
     fontSize: Typography.sizes.sm,

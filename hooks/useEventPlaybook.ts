@@ -149,7 +149,9 @@ export function useEventPlaybook(input: {
             notifiedFollowers: local.notifiedFollowers,
             openedInsights: local.openedInsights,
             duplicated: local.duplicated,
+            previewed: local.previewed,
           },
+          canPreview: !!input.eventId,
           manual: resolved.ticked,
         })
       : null;

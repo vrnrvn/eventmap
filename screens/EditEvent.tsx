@@ -673,7 +673,7 @@ export default function EditEvent() {
         title: isPostponed ? 'Set the new date?' : 'Notify attendees?',
         message: isPostponed
           ? 'This reopens joining and tells everyone the event is back on at the new time.'
-          : `Changing the time or location sends a "rescheduled" notification to everyone who's going, interested or has saved this event${going > 0 ? ` (${going} going)` : ''}. Save anyway?`,
+          : `Changing the time or location sends a "rescheduled" notification to everyone who's going, interested, waiting for your approval or on the waitlist${going > 0 ? ` (${going} going)` : ''}. Save anyway?`,
         confirmLabel: isPostponed ? 'Set date' : 'Save and notify',
         cancelLabel: 'Keep editing',
       });

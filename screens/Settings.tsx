@@ -1102,7 +1102,7 @@ export default function SettingsScreen() {
                       <View style={styles.privacyContent}>
                         <Text style={styles.privacyTitle}>Remind me on the day</Text>
                         <Text style={styles.privacyDesc}>
-                          A few hours before each event starts
+                          A few hours before each one-off event starts (not yet for series)
                         </Text>
                       </View>
                       <Switch
@@ -1124,7 +1124,7 @@ export default function SettingsScreen() {
                       <View style={styles.privacyContent}>
                         <Text style={styles.privacyTitle}>Summary after the event</Text>
                         <Text style={styles.privacyDesc}>
-                          How it went, and what to do next
+                          After each one-off event: how it went, and what to do next
                         </Text>
                       </View>
                       <Switch

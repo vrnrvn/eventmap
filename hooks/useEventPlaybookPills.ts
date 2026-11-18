@@ -81,6 +81,7 @@ export function useEventPlaybookPills(
           notifiedFollowers: stored.notifiedFollowers,
           openedInsights: stored.openedInsights,
           duplicated: stored.duplicated,
+          previewed: stored.previewed,
         },
         manual: state.ticked,
       });

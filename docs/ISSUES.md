@@ -109,6 +109,35 @@ archive.
 
 ---
 
+## Owner to-do (updated 2026-11-17, in order)
+
+The work of 2026-11-17 is the event-journey review (R1–R5) and the "Preview
+as attendee" feature (rehearsal Phases 1–5). Everything agent-doable is done
+and verified (Done log, top entry). What is left needs you:
+
+1. **Review and commit the working tree.** About 45 changed or new files,
+   nothing committed. The Done log entries of 2026-11-17 are a natural commit
+   map: review fixes (Batch A), prepared migrations, rehearsal Phases 1–5,
+   and the harness viewport fix.
+2. **Database:** follow `docs/MIGRATIONS_PENDING.md` → "OWNER — database
+   actions remaining". Step 1 applies the 7 approved event-journey migrations
+   (commands and verification included); then ask for Batch C.
+3. **Two answers** that unblock the last designed features:
+   - the post-event chat window (7 days recommended);
+   - whether series reviews count toward the venue rating (yes recommended).
+
+   See `docs/EVENT_JOURNEY_REVIEW_PLAN_2026-11-17.md` §5a "Batch D".
+4. **Narrow-screen layout issues, newly visible** (see "Narrow widths and
+   large text" under Low). They predate this work. They need a screen-by-screen
+   visual pass, not a blind edit.
+5. **Device pass**, now including the preview:
+   - on a phone, open a **draft** as "Preview as attendee";
+   - walk join / leave / waitlist and the Scenario panel;
+   - open the chat preview with VoiceOver / TalkBack;
+   - and the existing device list below.
+6. **`npm install --save-dev axe-core`.** The WCAG engine pass in the A11y,
+   HostUi and HostDashboard suites is still skipped without it.
+
 ## Owner to-do after the 2026-11-15 roadmap (in order)
 
 Everything agent-doable is done and verified (see the Done log entry "final
@@ -134,7 +163,29 @@ regression pass"). What is left needs you:
 6. **Decisions still open:** D3 (numeric price columns — nothing waits on it),
    J2 (optimistic RSVP), and the older product decisions listed below.
 
-## Status at a glance (updated 2026-11-15)
+## Status at a glance (updated 2026-11-17)
+
+**Final regression pass, 2026-11-17.** Everything ran in the foreground; no
+database was touched except throwaway containers.
+
+| Check | Result |
+| --- | --- |
+| Typecheck, app and admin | clean |
+| Lint | 0 errors / 7 warnings (baseline) |
+| Unit tests | **1,256 in 100 files** |
+| Browser suites (all 20), fake backend | **1,277/1,285 checks pass** |
+| SQL suites, throwaway PG17 container | **14/14**, both before and after applying the 7 prepared migrations |
+
+**The 8 browser failures are pre-existing layout issues, not regressions.**
+They became visible because the harness now renders at real 320 / 390 px
+(see EJ-26):
+- **HostUi, 7:** clipped category chip, Create's "Still needed" line, Manage
+  event's tab labels, a checklist row.
+- **HostDashboard, 1:** agenda rows at 1.6× text.
+
+`suiteRehearsal` is **108/108**.
+
+## Status at a glance (previous, 2026-11-15)
 
 **Final regression pass, 2026-11-15** (all foreground, no database touched):
 app + admin typecheck clean; app lint 0 errors / 7 warnings and admin lint 0 /
@@ -424,7 +475,9 @@ height, no bookmark on Discover cards) are not duplicated here.
 
 **Open:**
 
-- [ ] **J2** Joining is not optimistic while saving is — two adjacent controls
+- [x] **J2 — DECIDED 2026-11-17: keep Join non-optimistic** (many outcomes —
+  going / requested / full / closed / waitlisted — would often roll back; J1's
+  in-flight state covers the wait). Original note: Joining is not optimistic while saving is — two adjacent controls
   on the same screen behave differently under latency. Needs a decision
   (optimistic RSVP vs. accept the wait) rather than a fix. **[decision]**
 **Phase 7 — done 2026-11-15** (see the Done log):
@@ -439,6 +492,133 @@ height, no bookmark on Discover cards) are not duplicated here.
 - [x] **C10, targeted:** `FontScaleCaps` applied to single-line controls,
   chips, list rows, the compare surfaces, Create's action bar and the join
   bar. Device verification still pending (web reports `fontScale` 1).
+
+### Event-journey review (2026-11-17)
+
+Findings with file:line evidence and repro output in
+[`docs/EVENT_JOURNEY_REVIEW_2026-11-17.md`](EVENT_JOURNEY_REVIEW_2026-11-17.md);
+phases and status in
+[`docs/EVENT_JOURNEY_REVIEW_PLAN_2026-11-17.md`](EVENT_JOURNEY_REVIEW_PLAN_2026-11-17.md)
+§0. **All review phases done 2026-11-17.** Batch A is fixed. Batch B is **7 prepared migrations, NOT applied**, in `supabase/prepared/2026-11-17_event_journey/` (README = apply runbook; #5 and #6's notice wait for an OK). Batch C, the client follow-ups, comes after the apply.
+
+- [~] **EJ-1 [DB] Suspended accounts can RSVP to single series dates.** *Client half fixed 2026-11-17 (Batch A2): the per-date chips now have `handleRsvp`'s guards. Server guard = Batch B1.*
+  `set_occurrence_rsvp` (`20261109150000:117`) checks `user_is_banned_from_event`
+  but not `user_is_banned`; its siblings `join_event_with_capacity` and
+  `join_event_waitlist` refuse suspended accounts. Reproduced in isolation: the
+  row is written and counts toward the date's capacity. Contradicts the
+  2026-11-08 "suspended lose all writes, server-side" decision. Client half:
+  `toggleDateRsvp` (`screens/EventDetail.tsx:192`) lacks `handleRsvp`'s
+  preview/offline/ban guards.
+- [x] **EJ-2 Recurring series are never "Happening now".** *Fixed 2026-11-17 (Batch A1): `occurrenceInProgress` (exceptions applied, midnight-crossing dates found); `isEventInProgress`, the host phase, the playbook stage and Calendar rows use it; a live series keeps Postpone/Reschedule/Notify. Tests: `tests/seriesInProgress.test.ts`.* `isEventInProgress`
+  is one-off only (`utils/eventStatus.ts:44`), so the event page, My Events,
+  Joined, Profile, Calendar and the host phase model never show a series as
+  live, while Host Dashboard does (`utils/hostDashboard.ts:142,165`). The host
+  checklist drops from "day of" to "lead-up" mid-session, because the next start
+  has moved to the following date. No unit test covers `isEventInProgress`.
+- [x] **EJ-3 "Write a review" is shown to people the server refuses.** *Fixed 2026-11-17 (Batch A4): eligibility asked with the reviews load; ineligible viewers see "Reviews open once you've attended one of this host's events."; a late RLS refusal shows the same copy and keeps the draft. Browser: `suiteAttendee` A1 (now strict) + new A5. Series nuance stays [DB].*
+  `EventDetail.tsx:1881` offers it to every signed-in non-owner;
+  `user_can_review_business` requires a started "going" RSVP; the person sees
+  "Failed to submit review" after writing it. Client-only fix: the function is
+  callable as an RPC. Series nuance (L, [DB]): joining a series whose first date
+  is past makes you eligible at once.
+- [x] **EJ-4 Chat screen re-implements the access rule.** *Fixed 2026-11-17 (Batch A5): all three sites use `eventChatAccess`; off mode says "Chat is off". Browser: new `suiteModeration` R6.*
+  `app/event-chat/[id].tsx:212,495,671` hard-code `rsvp_count >= 2`; in **off**
+  mode an attendee reached via an old chat notification sees "Waiting for one
+  more attendee before the chat opens". Use `utils/eventChatAccess.ts`.
+- [x] **EJ-5 Host with a "going" RSVP gets no chat row** *Fixed 2026-11-17 (Batch A6): "Manage chat" gated on ownership alone.* on their event page
+  (`EventDetail.tsx:1513` hides by `isOwner`, `:1578` by `user_rsvp`).
+- [ ] **EJ-6 / EJ-8 (latent, note only):** an owner's own join in approval mode
+  becomes a `requested` row (reproduced); reminders/cancel notices don't exclude
+  a host's own RSVP. No UI path reaches either today.
+- [~] **EJ-10** *Interim copy fixed 2026-11-17 (A8): the row now reads "Open your event's page (you'll see it as its host)"; the real fix is the rehearsal feature.* ManageEvent "Preview page" said "See the event the way attendees
+  do" but opens the owner view (`screens/ManageEvent.tsx:1258-1263`). Fixed by
+  `docs/EVENT_REHEARSAL_PLAN.md`; else change the copy.
+- [~] **EJ-12 [DB] Leaving after the event ended is allowed.** *Client half fixed 2026-11-17 (A3): Leave re-checks "ended" at tap time for a going RSVP. Server half = Batch B2.* The `rsvps` DELETE
+  policy is ownership-only (`20261106160000:501-506`); UI freezes but a stale
+  page or API call deletes. Reproduced: attendance erased, host told "Someone
+  left your event", the waitlisted person told **"A spot opened up"** for a
+  finished event.
+- [~] **EJ-13 Today's finished series session stays joinable.** *Client fixed 2026-11-17 (A1): `upcomingDateRows` drops finished dates and flags the running one ("· happening now"). Server half (compare the occurrence end) = Batch B10.* Non-strict
+  `listOccurrences` + `canToggle` without an end check (`EventDetail.tsx:1704`);
+  server accepts `p_date >= today`. Reproduced an hour after the session ended.
+  Fix together with EJ-2.
+- [~] **EJ-14 [DB] Moving a series' final date past `endDate`** *Interim client guard 2026-11-17 (A7): the move picker refuses any date past the series end and explains why. Server extend-or-refuse = Batch B5 (recommendation awaiting owner OK).* (allowed by
+  `reschedule_occurrence` and `MoveDateModal`) makes the series read ended on
+  the moved session's day: RSVPs closed, ended notice, no chat row, no reminder.
+  Reproduced. Extend `endDate` with the move (recommended) or refuse.
+- [~] **EJ-15 "Running late" notice.** *Dialog audience copy fixed 2026-11-17 (A8); notice wording = Batch B9.* Extending only the end with people going
+  sends "Event rescheduled — … now starts <unchanged time>" (reproduced). Edit's
+  dialog also names savers (not notified) and omits the waitlist (notified).
+- [~] **EJ-17 Host day-of / post-event notices skip series** *Copy fixed 2026-11-17 (A8): Settings now says "one-off event … (not yet for series)"; per-occurrence notices later [DB].* (`is_recurring = false`,
+  `20261113110000:47,80`) while Settings says "each event".
+- [ ] **EJ-19 [DB] Date-only attendees get no lifecycle notice and no chat.**
+  Cancel, postpone, reschedule, per-date cancel/move/restore and announcements
+  all build audiences from `rsvps` only; chat access needs a series RSVP.
+  Reproduced: the host cancelled the one date sam signed up for — sam was not
+  told and her row stays "going". Reminders do include them. Fix with one
+  shared audience helper (also closes EJ-21).
+- [ ] **EJ-20 [DB] Changing a series pattern is silent.** The time-change guard
+  and the update notice compare only start/end/place; Edit sends the pattern as
+  a plain update without its confirm dialog. Reproduced: dates dropped, nobody
+  notified, a date-only RSVP pruned.
+- [ ] **EJ-21 Notice audiences disagree** — savers hear cancel and per-date
+  changes but not postpone/reschedule; the waitlist cancel trigger ignores the
+  `event_update` opt-out.
+- [ ] **EJ-22 [DB] Chat notices ignore chat access.** Every `going` row is
+  notified; an announcement produced both `host_announcement` and `chat_message`
+  for an attendee who couldn't open the locked chat (reproduced).
+- [ ] **EJ-23 External calendar entries go stale after a reschedule** — nothing
+  on the event page offers re-adding. *Server half prepared (migration 3,
+  `events.rescheduled_at`); the banner is Batch C5.*
+- [x] **EJ-25 Waitlist offered where the server refuses it** (found 2026-11-17,
+  rehearsal Phase 3). *Fixed 2026-11-17:* a full event whose host switched the
+  waitlist off (`waitlist_off`) or that takes requests (`approval_required`)
+  showed "Join the waitlist", then the refusal. `deriveEventViewer` now requires
+  an open waitlist to join (leaving still works). Tests: `tests/eventViewer.test.ts`,
+  `suiteAttendee` A8.
+- [x] **Opportunity — BUILT 2026-11-17** (owner agreed): the event page has no same-day cue ("Today · starts in
+  2 h") — "Day of" and "Days before" look identical to an attendee. Small
+  product improvement, surfaced by the rehearsal preview. **[decision]**, optional.
+- [ ] **EJ-24 [DB] Events attended only by date appear in no Joined list**
+  (found 2026-11-17): `get_user_going_events` reads `rsvps` only. Not in the
+  prepared set.
+- **Prepared, NOT applied (2026-11-17), the server halves of:** EJ-1 + EJ-13
+  (migration 1), EJ-12 (2), EJ-19/20/21 + EJ-15/23 (3), EJ-19 chat + EJ-22 (4),
+  EJ-14 (5, **needs your OK**), EJ-18 (6, **notice needs your OK**), EJ-16 (7).
+  The checkboxes above stay open until these are applied and Batch C ships.
+
+### Test tooling (2026-11-17)
+
+- [x] **EJ-26 The browser harness never rendered narrower than 500 px.**
+  Headless Chrome clamps `--window-size` to a minimum width of 500, so every
+  "320 px" and "390 px" check in every suite (HostUi, HostDashboard, Visual,
+  A11y, Compare, …) actually ran at 500 px. Measured: `innerWidth` was 500 for
+  both. **Fixed:** `harness.mjs` now sets the viewport with
+  `Emulation.setDeviceMetricsOverride`, which isn't clamped. Re-measured at
+  320 / 390 / 1280. Earlier "passes at 320 / 390 px" in this file and in the
+  2026-11-14 review should be read as 500 px.
+
+### Narrow widths and large text — newly visible 2026-11-17 (pre-existing)
+
+Found by the first real 320 / 390 px runs, after EJ-26. None of these
+components changed in the 2026-11-17 work. They need a screen-by-screen
+visual pass with screenshots (`scripts/fake-backend-e2e/suiteHostUi.mjs`,
+`suiteHostDashboard.mjs` H15).
+
+- [ ] **Category chip:** "Markets & Pop-ups" is clipped on the publish preview
+  card and the published sheet, at 390 and 320 px.
+- [ ] **Create's sticky bar:** "Still needed: Title, Description, Catego…" is
+  truncated at 320 px. The list of missing fields is the useful part.
+- [ ] **Manage event's tab labels:** "Overview", "Attendees" and "Settings"
+  are clipped at 320 px.
+- [ ] **Publish preview checklist:** "Add a cover photo" is clipped at 320 px.
+- [ ] **Host dashboard agenda rows at 1.6× text, 390 px:** the time line ("12:00
+  PM UTC 7:00 AM your time…") and "4 people on the waitlist" clip sideways.
+- [x] **Fixed while finding them:**
+  - the event page's locked-chat reason ("Join the event to unlock the chat")
+    was cut to one line at 320 px; it may now wrap to two;
+  - the preview banner squeezed its title to one word per line at 320 px; its
+    controls now wrap as a group.
 
 ### Low (worth doing when nearby)
 - [ ] **Design tokens:** measured 2026-11-15 with
@@ -794,6 +974,32 @@ PUBLIC` + explicit grants to `authenticated` for RPCs; require a session for
 
 ## Needs a product decision
 
+- [x] **[decision]** **EJ-7 Chat after an event ends — DECIDED 2026-11-17:** open
+  for a while after the end, not forever. Proposed: 7 days of posting, then
+  read-only history (design D1 in `docs/EVENT_JOURNEY_REVIEW_PLAN_2026-11-17.md`
+  §5a; window length to confirm). Original note: **EJ-7 Chat after an event ends.** Open on the server
+  indefinitely (`user_can_access_event_chat` has no time condition), but the event
+  page removes the entry row once ended (`EventDetail.tsx:1513`), so only old
+  notifications reach it. Cancelled events state the chat stays open. Options: keep
+  open and show the row (recommended, client-only), read-only after N days [DB], or
+  close at the end. See `docs/EVENT_JOURNEY_REVIEW_2026-11-17.md` EJ-7.
+- [x] **[decision]** **EJ-9 — DECIDED 2026-11-17:** reviews per venue; per event
+  only for recurring series (design D2, same doc; whether series reviews also
+  count toward the venue rating to confirm — recommended yes). Original note:
+  **EJ-9 Reviews are per business, not per event.** Confirmed
+  as the design (one row per user × business; a second event's review edits the
+  first). Is that the product, or is event-level feedback wanted (new feature)?
+- [ ] **[decision]** **EJ-16 What "attended" means for a series.** Today it is
+  series-level and only once the series has ended, so an open-ended weekly series
+  is never credited, and per-date "Can't go" is ignored. Recommendation: count per
+  occurrence (each past date a goer didn't opt out of). Check-in would supersede it.
+- [ ] **[decision]** **EJ-18 Pending requests after the event ends** — part of the
+  existing approval-mode decision below: `host_review_rsvp` refuses after the
+  end and the requester is never told (reproduced). Suggested: auto-decline with
+  a notice when the event ends.
+- [ ] **[decision]** **EJ-19 chat for date-only attendees** — should someone going
+  to one date of a series read/post in its chat? Recommendation: yes, on the
+  date(s) they're going.
 - [ ] **[decision]** **Toasts over the onboarding progress label.** An error
   toast is positioned at `insets.top + 16` and can cover the "Step N of 6"
   label during the onboarding flow (flow 9). Fixing it is a design call, not
@@ -872,11 +1078,299 @@ rebuilding the cluster group; redundant `LinkifiedText` memo; web jpeg resize
 edge case; double fetch after RSVP; AST a11y guard can't see touchables in
 child components; public profile has no focus refresh (pushed screen,
 pull-to-refresh is enough); HMAC for anonymous attendee ids (row ids are
-never exposed, so the hash isn't reversible in practice).
+never exposed, so the hash isn't reversible in practice); rewriting the
+"prepared, NOT applied" status headers in the 32 applied migration files
+(EJ-11, 2026-11-17 — history comments only; the Ground rules' verify query is
+the authority on applied state).
 
 ---
 
 # Done log
+
+## 2026-11-17 — rehearsal Phase 5 + final regression pass
+
+Client and test code only. No database except throwaway containers, and no
+background processes. One batch did overrun the tool's time limit and was
+auto-moved to the background; it was stopped at once and the rest ran one
+suite per command. No orphaned processes of this session remained. A running
+suite seen at the time belonged to another session's `oak` worktree and was
+left alone.
+
+**Phase 5 (the agent-doable part):** `suiteRehearsal` V20–V22 check the
+banner, the open Scenario panel and the chat preview at real 320 / 390 px and
+at 1.3× / 1.6× text:
+- no horizontal overflow and no clipped text;
+- every control named, at least 44 px, and inside the screen.
+
+Writing them exposed **EJ-26**: the harness clamped every viewport to
+500 px. It is fixed in `harness.mjs`. At true widths, two things were fixed:
+- the preview banner's cramped title (its controls now wrap as a group);
+- the event page's truncated locked-chat reason.
+
+Seven HostUi failures and one HostDashboard failure were flagged as
+pre-existing (above). Left for the owner: the axe engine pass (`axe-core`
+not installed) and the device pass with a draft.
+
+**Final regression:** see "Status at a glance". Typecheck (app and admin)
+clean, lint at baseline, 1,256 unit tests. Browser: 20 suites, 1,277/1,285
+(the 8 are the flagged layout issues). SQL: 14/14 before and after the 7
+prepared migrations, re-validated after their header edits.
+
+**Docs:**
+- `docs/MIGRATIONS_PENDING.md` now opens with the owner's ordered database
+  runbook.
+- Plan, rehearsal plan and this tracker are updated.
+
+Nothing is committed.
+
+## 2026-11-17 — rehearsal Phase 4 + the owner's decisions
+
+Client code only; no database access; nothing in the background.
+
+**Phase 4:**
+- A read-only chat preview: the attendee's view, no moderation, nothing
+  sent (no read marker, presence, typing or reports).
+- Entry points: the checklist item "Walk through it as a guest" (ticks
+  itself) and "Preview as a guest" on the published sheet.
+
+**Closed in passing:**
+- A preview gap where "Add to collection" opened the real, writing,
+  collections sheet.
+- My banner's direct `lucide-react-native` import, against the repo's icon
+  rule.
+
+**Decisions:**
+- **Applied in the docs:** #5 and #6's notice are marked approved in the
+  prepared folder; J2 is closed (keep Join non-optimistic).
+- **Built:** the same-day cue (`startsSoonLabel`, 4 tests).
+- **Designed as Batch D:** EJ-7 (chat open 7 days after the end, then
+  read-only) and EJ-9 (series reviews), each with one sub-question for the
+  owner. See plan §5a.
+
+**Verification:**
+
+| Check | Result |
+| --- | --- |
+| Typecheck | clean |
+| Lint | 0 errors / 7 warnings (baseline) |
+| Unit tests | **1,256 in 100 files** |
+| `suiteRehearsal` | **76/76** (V14–V19 new) |
+| Regression | Attendee 27/27 · B 46/46 · Privacy 15/15 · Moderation 38/38 · Host 92/92 (new H4 check) · HostUi 174/174 |
+
+Nothing is committed.
+
+## 2026-11-17 — rehearsal Phase 3: scenarios
+
+Client code only; no database access; nothing in the background. The preview
+gains a collapsible Scenario panel:
+- **When:** right now / days before / day of / happening now / ended.
+- **Spots:** as it is / spots left / full.
+
+**When** is a virtual clock that every time-based decision on the page reads;
+the event's own dates never change. The collapsed banner names any simulated
+moment, and a going guest appears as "You (preview)" in the faces and in
+"Who's going". Details are in `docs/EVENT_REHEARSAL_PLAN.md` §10.
+
+Fixed in passing:
+- **EJ-25** (a waitlist offered where the server refuses it).
+- A "Y(" avatar initial on the guest's face.
+
+**Verification:**
+
+| Check | Result |
+| --- | --- |
+| Typecheck | clean |
+| Lint | 0 errors / 7 warnings (baseline) |
+| Unit tests | **1,250** (rehearsal 17, viewer 14) |
+| `suiteRehearsal` | **58/58** (V9–V13 new; zero-write checks throughout) |
+| Regression | Attendee 27/27 (A8 new) · B 46/46 · Privacy 15/15 |
+
+Two first-run failures, both resolved:
+- **V12** was a test-side date edge: after 21:00 UTC a date "in 3 h" is
+  tomorrow, and the app was right.
+- **V13** found the "Y(" defect.
+
+Nothing is committed.
+
+## 2026-11-17 — rehearsal Phase 2: "Preview as attendee"
+
+Client code only; no database access; nothing in the background. A host can
+open their own event as a guest would and try joining, with nothing saved.
+- **Gating:** `?rehearse=1`, honoured only for the owner.
+- **Data and transitions:** simulated page data and pure transitions in
+  `utils/rehearsal.ts`.
+- **UI:** a banner (`components/RehearsalBanner.tsx`; announced to screen
+  readers; Exit is 64×44).
+- **Entry:** ManageEvent's row is now "Preview as attendee", with "View as
+  owner" below it.
+
+Details and the gaps noted are in `docs/EVENT_REHEARSAL_PLAN.md` §9.
+
+Fixed in passing:
+- The fake backend's details RPC never returned the `waitlist` key, so no
+  browser suite could reach waitlist UI. It now passes the key through when a
+  test sets it on the row.
+- Harness gotcha, noted in the suite: `click()` matches `aria-label` before
+  visible text, so the waitlist button is "Event full. Join the waitlist".
+
+**Verification:**
+
+| Check | Result |
+| --- | --- |
+| Typecheck | clean |
+| Lint | 0 errors / 7 warnings (baseline) |
+| Unit tests | **1,243 in 99 files** (11 new in `tests/rehearsal.test.ts`) |
+| New `suiteRehearsal` | **36/36**, a zero-write assertion after every tapping scenario |
+| Regression | Attendee 24/24 · B 46/46 · Privacy 15/15 · HostUi 174/174 |
+
+The first suite run had 16 failures, all from my fixture: fake events carry a
+small default capacity, so every scenario started full. The fixture now
+starts with room. Nothing is committed.
+
+## 2026-11-17 — rehearsal Phase 1: the event page's viewer seam
+
+Client code only; no database access; nothing in the background. Phase 1 of
+`docs/EVENT_REHEARSAL_PLAN.md`: the ~16 role/state flags the event page
+derived inline (and `isOwner`) moved into one pure function,
+`deriveEventViewer` (`utils/eventViewer.ts`), which `screens/EventDetail.tsx`
+calls once and destructures under the same local names — a refactor with no
+behaviour change, and the seam rehearsal Phase 2 overrides. The owner
+delegated the four scope decisions to the recommendations (plan §6): Phases
+1–3 ship together, read-only dressed chat, "Preview as attendee", rehearsal
+as the ManageEvent row's primary action.
+
+Verified: typecheck clean; lint 0 errors / 7 warnings (baseline); **1,232
+unit tests in 98 files** (13 new in `tests/eventViewer.test.ts`); browser on
+a fresh dead-address export — **Attendee 24/24, B 46/46, Privacy 15/15**
+(owner, attendee and signed-out visitor states all unchanged). Nothing is
+committed.
+
+## 2026-11-17 — event-journey review: Batch B (prepared) + R5
+
+**Batch B is 7 prepared migrations, NOT applied.** They are staged in
+`supabase/prepared/2026-11-17_event_journey/`, outside the folder the CLI and
+`pg17-isolated.sh init` read, so nothing can apply them by accident. Each was
+written from the live definition dumped out of a throwaway container. All
+validation ran in throwaway PG17 containers (`eventmap_pg17_elm_b_1117`,
+`…_b2_1117`), each destroyed afterwards:
+
+| Check | Result |
+| --- | --- |
+| SQL suites before applying | 14/14 |
+| Apply all 7 | clean |
+| SQL suites after applying | 14/14 |
+| Re-apply all 7 (idempotency) | clean, 14/14 |
+| Without #5 and #6 | 14/14 |
+
+The shared DB was never connected to, and the local DB is unchanged
+(123 / `20261115100000`). Nothing ran in the background.
+
+**Found by the first post-apply run, fixed before the results above:**
+- `split_series_from` would have sent the new "Schedule changed" notice.
+- `test-attendance-rpcs` encoded per-event "attended"; it now checks either
+  meaning.
+
+**R5:**
+- New `scripts/test-event-journey.sql`: 7 blocks, each skipping when its
+  migration is absent.
+- Its role-switched block first asserts the policy's functions are executable
+  (the segfault guard). My first version also demanded EXECUTE on trigger
+  functions, which Postgres doesn't check when a trigger fires; it was
+  narrowed, with a comment explaining why.
+- `suiteAttendee` A6/A7 cover "during the event". **A6 found a defect in my
+  Batch A1:** the header showed next week's date beside "Happening now". It is
+  fixed in `screens/EventDetail.tsx`.
+
+**Corrections to my own earlier review:**
+- R3's audience matrix said postpone skips savers; it doesn't (the table is
+  `saves`, my grep searched `saved_events`).
+- New finding **EJ-24**.
+
+**Verification (app):**
+
+| Check | Result |
+| --- | --- |
+| Typecheck | clean |
+| Lint | 0 errors / 7 warnings (baseline) |
+| Unit tests | 1,219 |
+| Browser, fresh dead-address export | Attendee 24/24 · B 46/46 |
+
+Nothing is committed.
+
+## 2026-11-17 — event-journey review: R4 + Batch A (app-only fixes)
+
+**R4:** sequencing and the owner's decisions are recorded in
+`docs/EVENT_JOURNEY_REVIEW_PLAN_2026-11-17.md` §5a:
+- EJ-16: attendance counts per session.
+- EJ-18: requests go away at the end (a short notice is recommended).
+- EJ-19: date-only goers get chat.
+- EJ-14: extend-or-refuse is recommended and awaiting your OK.
+
+**Batch A, all eight items, client code only:**
+- **A1, EJ-2 + EJ-13:** a single occurrence-aware "in progress" rule.
+- **A2, EJ-1:** chip guards.
+- **A3, EJ-12:** Leave re-checks at tap time.
+- **A4, EJ-3:** review eligibility.
+- **A5, EJ-4:** chat access rule and the off copy.
+- **A6, EJ-5:** Manage chat row.
+- **A7, EJ-14 interim:** move-picker guard.
+- **A8, copy:** EJ-15/21 dialog, EJ-17 Settings, EJ-10 row.
+
+New tests:
+- **Unit:** `tests/seriesInProgress.test.ts`, 12 tests. The first version of
+  `occurrenceInProgress` missed a date moved to a later day. The test caught
+  it, and the function now looks moved dates up from their original day.
+- **Browser:**
+  - `suiteAttendee` A1's review check was `/review/i`, which the rating
+    summary always met. It is now strict, and new A5 covers the ineligible
+    case.
+  - `suiteModeration` gains R6 (chat switched off, 3 going).
+  - The fake backend answers `user_can_review_business`.
+
+**Verification, all foreground, no database:**
+
+| Check | Result |
+| --- | --- |
+| Typecheck | clean |
+| Lint | 0 errors / 7 warnings (baseline; none in touched files) |
+| Unit tests | **1,219 in 97 files** (baseline 1,207 / 96) |
+| Browser suites, one fresh web export (dead-address bundle, safety greps passed) | Attendee 17/17 · Moderation 38/38 · B 46/46 · HostUi 174/174 · HostDashboard 105/105 (axe passes skipped: `axe-core` still not installed) · Notifications 55/55, the first browser run since routing changed in `aafa2f9` |
+| Total | **435 checks, 0 failures** |
+
+Nothing is committed.
+
+## 2026-11-17 — event-journey review, R2 + R3
+
+Review only; nothing fixed. **R2** covered during and after the event:
+EJ-12…EJ-18. **R3** covered cross-cutting seams, lead-up and create: EJ-19…EJ-23.
+Each phase was code walks plus one rolled-back batch in its own throwaway PG17
+container (`eventmap_pg17_oak_r2_1117`, `…_r3_1117`), destroyed straight after.
+Impersonation was via JWT claims only. The shared DB was never connected to and
+nothing ran in the background; the one test run was `tests/notificationRoute.test.ts`
+in the foreground (10/10).
+
+Process notes, mine:
+- Two fixtures needed correcting before results were recorded: RSVPs can't be
+  inserted on an already-closed event, and the ids weren't hex.
+- One draft claim was **retracted** after the repro: waitlisted people *are*
+  told about cancellations, by `clear_event_waitlist_on_cancel`, which my code
+  reading had missed.
+- One pattern-change fixture ("every 2 weeks") still landed on the test date
+  and was replaced with "every 3 weeks".
+
+## 2026-11-17 — event-journey review, R1 (seed verification)
+
+Review only; nothing fixed. Eleven seed findings from the journey mapping were
+re-verified at `50a2a57`. Ten were confirmed and one became a "won't do"
+(EJ-1…EJ-11, see `docs/EVENT_JOURNEY_REVIEW_2026-11-17.md`). Server-side claims
+were reproduced in a throwaway PG17 container (`PG17_NAME=eventmap_pg17_oak_r1_1117`,
+unique so it cannot collide with another `oak` worktree). The repro was one
+rolled-back transaction, impersonating via JWT claims only. The container was
+destroyed afterwards. The shared DB was never connected to; nothing ran in the
+background. Headline: **EJ-1**, a server gap where suspended accounts can take
+per-date series seats. One repro-script slip of mine: the first fixture date
+was off by a day, which made the subject case look refused. Corrected and
+re-run before recording.
 
 ## 2026-11-16 — review round 3 + full regression
 

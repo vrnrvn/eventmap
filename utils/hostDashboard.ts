@@ -53,6 +53,8 @@ export type AgendaEntry = {
   capacity: number | null;
   waitlist: number | null;
   timezone: string | null;
+  /** Series only: `recurrence_pattern.endDate`, for the move picker (EJ-14). */
+  seriesEndDate?: string | null;
 };
 
 export type AgendaDay = {
@@ -180,6 +182,7 @@ export function buildAgenda(input: AgendaInput): AgendaDay[] {
         capacity,
         waitlist: status === 'cancelled' ? null : waitlist,
         timezone,
+        seriesEndDate: e.recurrence_pattern?.endDate ?? null,
       });
     }
   }

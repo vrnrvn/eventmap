@@ -114,6 +114,11 @@ WHERE id IN (:'alex', :'sam');
 -- ---------------------------------------------------------------------------
 -- 1. Owner view: upcoming vs past split
 -- ---------------------------------------------------------------------------
+-- Per-session attendance (EJ-16, docs/EVENT_JOURNEY_REVIEW_2026-11-17.md;
+-- prepared migration 20261117160000) changes what "past"/"attended" mean for
+-- series. The checks below hold either way: :per_session says which applies.
+SELECT EXISTS (SELECT 1 FROM pg_proc WHERE pronamespace = 'public'::regnamespace
+                AND proname = 'user_series_sessions_attended') AS per_session \gset
 SELECT pg_temp.act_as(:'alex');
 
 SELECT pg_temp.check(
@@ -123,8 +128,9 @@ SELECT pg_temp.check(
 
 SELECT pg_temp.check(
   (SELECT array_agg(x->>'id' ORDER BY x->>'id') FROM json_array_elements(get_user_going_events(:'alex', 'past')) x)
-    = ARRAY[:'past_ev', :'rec_done']::text[],
-  'owner past = ended event + recurring with passed end date');
+    = CASE WHEN :'per_session' THEN ARRAY[:'past_ev', :'rec_done', :'rec_open']::text[]
+           ELSE ARRAY[:'past_ev', :'rec_done']::text[] END,
+  'owner past = ended event + recurring with passed end date (+ a running series with attended sessions, per session)');
 
 SELECT pg_temp.check(
   (SELECT (x->>'id') FROM json_array_elements(get_user_going_events(:'alex', 'upcoming')) WITH ORDINALITY AS t(x, n) WHERE n = 1) = :'live_ev',
@@ -136,7 +142,8 @@ SELECT pg_temp.check(
 
 SELECT pg_temp.check(
   json_array_length(get_user_going_events(:'alex', 'past', 1, 0)) = 1
-  AND (get_user_going_events(:'alex', 'past', 1, 1)->0->>'id') = :'rec_done',
+  AND (get_user_going_events(:'alex', 'past', 1, 1)->0->>'id')
+      = (SELECT x->>'id' FROM json_array_elements(get_user_going_events(:'alex', 'past')) WITH ORDINALITY AS t(x, n) WHERE n = 2),
   'past list paginates with limit/offset');
 
 SELECT pg_temp.check(
@@ -144,13 +151,16 @@ SELECT pg_temp.check(
   'legacy get_user_upcoming_events wrapper still works');
 
 SELECT pg_temp.check(
-  json_array_length(get_user_past_events(:'alex')) = 2,
+  json_array_length(get_user_past_events(:'alex')) = CASE WHEN :'per_session' THEN 3 ELSE 2 END,
   'get_user_past_events wrapper works');
 
 SELECT pg_temp.check(
   (get_user_attendance_counts(:'alex')->>'upcoming_count')::int = 3
-  AND (get_user_attendance_counts(:'alex')->>'attended_count')::int = 2,
-  'owner counts: 3 upcoming, 2 attended');
+  -- Per session: past_ev (1) + rec_open's five finished weekly dates
+  -- (-30, -23, -16, -9, -2 days) + rec_done (0: its end date precedes its
+  -- first date, so no session ever ran). Before: one per ended event = 2.
+  AND (get_user_attendance_counts(:'alex')->>'attended_count')::int = CASE WHEN :'per_session' THEN 6 ELSE 2 END,
+  'owner counts: 3 upcoming, attended 2 (per event) / 6 (per session)');
 
 SELECT pg_temp.check(
   (SELECT bool_and((x::jsonb) ? 'is_recurring' AND (x::jsonb) ? 'recurrence_pattern' AND (x::jsonb) ? 'rsvp_count')

@@ -174,6 +174,7 @@ export function SeriesDatesSection({ event, canEdit }: { event: SeriesEvent; can
         <MoveDateModal
           occurrence={actions.moving.occurrence}
           tz={actions.moving.tz}
+          seriesEndDate={event.recurrence_pattern?.endDate ?? null}
           onCancel={actions.cancelMove}
           onSave={(s, e) => void actions.saveMove(actions.moving!, s, e)}
         />

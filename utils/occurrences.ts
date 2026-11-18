@@ -105,6 +105,82 @@ export function listOccurrences(
   return out.filter((o) => (o.status === 'cancelled' ? !lastLive || o.start <= lastLive.start : live.includes(o)));
 }
 
+/**
+ * The occurrence running at `now` (start <= now < end), with exceptions
+ * applied, or null. A skipped date is never in progress and a moved date
+ * runs at its new time (docs/EVENT_JOURNEY_REVIEW_2026-11-17.md EJ-2).
+ *
+ * The walk starts at `now - duration` so a session that crossed midnight
+ * (22:00–02:00) is still found at 01:00; the non-strict walk also lists
+ * the earlier slot of that day, so a few candidates are enough.
+ */
+export function occurrenceInProgress(
+  event: SeriesEvent,
+  exceptions: readonly OccurrenceException[] = [],
+  now: Date = new Date()
+): Occurrence | null {
+  if (!event.is_recurring || !event.recurrence_pattern) return null;
+  const duration = Math.max(new Date(event.end_datetime).getTime() - new Date(event.start_datetime).getTime(), 0);
+  if (duration === 0) return null;
+  const t = now.getTime();
+  const running = (o: Occurrence) => o.status !== 'cancelled' && o.start.getTime() <= t && t < o.end.getTime();
+  // A moved date is generated from its ORIGINAL day, which can be any
+  // distance from its new time, so look those up from their own day.
+  for (const x of exceptions) {
+    if (x.kind !== 'rescheduled' || !x.new_start || !x.new_end) continue;
+    if (!(new Date(x.new_start).getTime() <= t && t < new Date(x.new_end).getTime())) continue;
+    const dayBefore = new Date(Date.parse(`${x.occurrence_date.slice(0, 10)}T00:00:00Z`) - 24 * 60 * 60 * 1000);
+    const hit = listOccurrences(event, exceptions, { count: 3, now: dayBefore, includeCancelled: false }).find(
+      (o) => o.dateKey === x.occurrence_date.slice(0, 10)
+    );
+    if (hit && running(hit)) return hit;
+  }
+  const from = new Date(t - duration);
+  return listOccurrences(event, exceptions, { count: 3, now: from, includeCancelled: false }).find(running) ?? null;
+}
+
+/**
+ * The attendee's "upcoming dates" rows: up to `count` dates that have not
+ * finished yet (a date that already ended today is dropped, so it can't be
+ * RSVP'd after the fact — EJ-13), with the running one flagged. Cancelled
+ * dates within that span are kept, as in `listOccurrences`.
+ */
+export function upcomingDateRows(
+  event: SeriesEvent,
+  exceptions: readonly OccurrenceException[],
+  { count = 5, now = new Date() }: { count?: number; now?: Date } = {}
+): Array<Occurrence & { inProgress: boolean }> {
+  const t = now.getTime();
+  // +1: the non-strict walk can include one date that already finished today.
+  const notFinished = listOccurrences(event, exceptions, { count: count + 1, now }).filter((o) => o.end.getTime() > t);
+  const out: Array<Occurrence & { inProgress: boolean }> = [];
+  let happening = 0;
+  for (const o of notFinished) {
+    if (o.status !== 'cancelled') {
+      if (happening === count) break;
+      happening += 1;
+    }
+    out.push({ ...o, inProgress: o.status !== 'cancelled' && o.start.getTime() <= t });
+  }
+  return out;
+}
+
+/**
+ * Whether moving a date to `newStart` would put it after the series' end
+ * date. A series counts as ended once its `endDate` day has passed
+ * (event_has_ended), so a date moved beyond it would read as ended on the
+ * day it happens — no RSVPs, no reminder (EJ-14). Interim client guard until
+ * the server extends or refuses (Batch B5).
+ */
+export function moveIsPastSeriesEnd(
+  newStart: Date,
+  timezone: string | null | undefined,
+  seriesEndDate: string | null | undefined
+): boolean {
+  if (!seriesEndDate || !/^\d{4}-\d{2}-\d{2}/.test(seriesEndDate)) return false;
+  return occurrenceDateKey(newStart, timezone) > seriesEndDate.slice(0, 10);
+}
+
 /** Next date actually happening (skips cancelled, uses moved times), or null. */
 export function nextEffectiveOccurrence(
   event: SeriesEvent,

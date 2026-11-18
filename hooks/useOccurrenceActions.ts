@@ -41,7 +41,13 @@ async function askNotify(title: string, message: string, confirmLabel: string): 
 }
 
 /** The date being acted on: which series, its zone, and the occurrence. */
-export type OccurrenceTarget = { eventId: string; tz: string | null; occurrence: Occurrence };
+export type OccurrenceTarget = {
+  eventId: string;
+  tz: string | null;
+  occurrence: Occurrence;
+  /** The series' end date ('YYYY-MM-DD'), so the move picker can refuse past it (EJ-14). */
+  seriesEndDate?: string | null;
+};
 
 export function useOccurrenceActions() {
   const queryClient = useQueryClient();
