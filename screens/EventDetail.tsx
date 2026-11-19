@@ -27,6 +27,7 @@ import { eventsService } from '@/services/events';
 import { getEventDataVersion } from '@/utils/eventDataVersion';
 import { eventChatService } from '@/services/eventChat';
 import { eventChatAccess, type ChatAccessSettings } from '@/utils/eventChatAccess';
+import { calendarNeedsUpdate } from '@/utils/calendarStale';
 import { goBackOr } from '@/utils/navigation';
 import { socialService } from '@/services/social';
 import { isCollectionsUnavailable } from '@/services/collections';
@@ -212,6 +213,15 @@ export default function EventDetail() {
     staleTime: 30 * 1000,
   });
   const [dateRsvpBusy, setDateRsvpBusy] = useState<string | null>(null);
+  // EJ-23: when the host moved the time after this viewer joined, the calendar
+  // entry they added still has the old one. Only asked once the event says it
+  // was rescheduled at all.
+  const rsvpAtQuery = useQuery({
+    queryKey: queryKeys.myRsvpAt(id ?? 'none', user?.id ?? 'anon'),
+    enabled: !!id && !!user?.id && !!details?.event?.rescheduled_at,
+    queryFn: () => eventsService.getMyRsvpAt(id!, user!.id),
+    staleTime: 60 * 1000,
+  });
 
   // "Preview as attendee": the host walks their own page as a guest would and
   // tries joining; every action changes this local simulation instead of
@@ -340,8 +350,21 @@ export default function EventDetail() {
   // The host's chat settings (mode + who unlocks it); null until loaded, which
   // falls back to the server defaults (open, unlocks at two going).
   const [chatSettings, setChatSettings] = useState<ChatAccessSettings>(null);
-  const chatAccess = eventChatAccess(shownDetails?.user_rsvp, shownDetails?.rsvp_count ?? 0, chatSettings);
-  const chatIsOpen = chatAccess.state === 'open';
+  // The server's own answer for this viewer (user_can_access_event_chat, EJ-19
+  // aware). false until the status has loaded.
+  const [chatCanRead, setChatCanRead] = useState(false);
+  // EJ-19: a per-date "going" counts as going for the chat, like the server.
+  // Previewing uses the simulated guest's per-date answers, never the host's.
+  const viewerDateOverrides = rehearsing ? sim.dateOverrides : (dateRsvpsQuery.data ?? []);
+  const viewerDateGoing = viewerDateOverrides.some((o) => o.status === 'going');
+  const chatAccess = eventChatAccess(shownDetails?.user_rsvp, shownDetails?.rsvp_count ?? 0, chatSettings, {
+    dateGoing: viewerDateGoing,
+  });
+  // The local rule is the reason shown in the row's copy; the server's
+  // can_read is what actually governs (it also knows about other people's
+  // date-only RSVPs, which this client can't see). Previewing ignores it: the
+  // host can always read their own chat, the simulated guest may not.
+  const chatIsOpen = chatAccess.state === 'open' || (!rehearsing && chatCanRead && chatAccess.state !== 'off');
 
   const allPhotoUrls = useMemo(() => {
     if (!details) return [];
@@ -490,7 +513,9 @@ export default function EventDetail() {
       eventChatService
         .getPostStatus(id)
         .then((status) => {
-          if (!cancelled) setChatSettings({ chat_mode: status.chat_mode, open_policy: status.open_policy });
+          if (cancelled) return;
+          setChatSettings({ chat_mode: status.chat_mode, open_policy: status.open_policy });
+          setChatCanRead(status.can_read === true);
         })
         .catch(() => {});
       return () => {
@@ -1314,6 +1339,11 @@ export default function EventDetail() {
   const reviewEligible = rehearsing
     ? hasJoinedEvent && new Date(event.start_datetime).getTime() <= (rehearsalNow ?? new Date()).getTime()
     : reviewsQuery.data?.canReview;
+  // EJ-23: the host moved the time after this viewer joined, so the calendar
+  // entry they added is wrong. Not while previewing (the RSVP time read here
+  // is the host's own) and not once the event is over.
+  const calendarStale =
+    !rehearsing && !eventEnded && calendarNeedsUpdate(event.rescheduled_at, rsvpAtQuery.data ?? null);
 
   return (
     <View style={styles.container}>
@@ -1625,7 +1655,12 @@ export default function EventDetail() {
               <CalendarPlus size={18} color={Colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.metaLabel}>Add to calendar</Text>
+              <Text style={styles.metaLabel}>{calendarStale ? 'Time changed — update your calendar' : 'Add to calendar'}</Text>
+              {calendarStale ? (
+                <Text style={styles.calendarStaleNote} accessibilityLiveRegion="polite">
+                  The host moved this event after you joined. Add it again to replace the old entry.
+                </Text>
+              ) : null}
               <View style={styles.calendarChoiceRow}>
                 <TouchableOpacity
                   style={styles.calendarChoiceBtn}
@@ -1745,7 +1780,7 @@ export default function EventDetail() {
                   ? 'Open event chat'
                   : chatAccess.state === 'off'
                     ? 'Event chat, turned off by the host'
-                    : hasJoinedEvent
+                    : chatAccess.state === 'waiting'
                       ? 'Event chat, unlocks when 2 people are going'
                       : 'Event chat, join the event to unlock'
               }
@@ -1777,12 +1812,14 @@ export default function EventDetail() {
                   {canOpenEventChat
                     ? chatPreview
                       ? `${chatPreview.sender?.name ?? 'Someone'}: ${chatPreview.body}`
-                      : chatAccess.state === 'open' && chatAccess.announcementsOnly
+                      : chatSettings?.chat_mode === 'announcements'
                         ? 'Announcements from the host'
                         : 'Chat with everyone going'
                     : chatAccess.state === 'off'
                       ? 'The host turned the chat off'
-                      : hasJoinedEvent
+                      : // 'waiting' means the viewer is going — by the series
+                        // RSVP or just one date (EJ-19) — but is still alone.
+                        chatAccess.state === 'waiting'
                         ? 'Unlocks when 2 people are going'
                         : 'Join the event to unlock the chat'}
                 </Text>
@@ -2668,6 +2705,12 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.border.light,
+  },
+  calendarStaleNote: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamilies.regular,
+    color: Colors.warningText,
+    marginTop: 2,
   },
   calendarChoiceRow: {
     flexDirection: 'row',

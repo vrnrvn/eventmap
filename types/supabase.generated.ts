@@ -1132,6 +1132,7 @@ export type Database = {
           cover_image_url: string | null
           created_at: string
           description: string
+          duplicated_from: string | null
           end_datetime: string
           event_type: string | null
           id: string
@@ -1166,6 +1167,7 @@ export type Database = {
           cover_image_url?: string | null
           created_at?: string
           description?: string
+          duplicated_from?: string | null
           end_datetime: string
           event_type?: string | null
           id?: string
@@ -1200,6 +1202,7 @@ export type Database = {
           cover_image_url?: string | null
           created_at?: string
           description?: string
+          duplicated_from?: string | null
           end_datetime?: string
           event_type?: string | null
           id?: string
@@ -1237,6 +1240,13 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "events_duplicated_from_fkey"
+            columns: ["duplicated_from"]
+            isOneToOne: false
+            referencedRelation: "events"
             referencedColumns: ["id"]
           },
         ]
@@ -1326,16 +1336,19 @@ export type Database = {
         Row: {
           event_id: string
           kind: string
+          occurrence_start: string | null
           sent_at: string
         }
         Insert: {
           event_id: string
           kind: string
+          occurrence_start?: string | null
           sent_at?: string
         }
         Update: {
           event_id?: string
           kind?: string
+          occurrence_start?: string | null
           sent_at?: string
         }
         Relationships: [
@@ -2115,7 +2128,16 @@ export type Database = {
         Args: { p_event_id: string; p_stage: string }
         Returns: Json
       }
-      duplicate_event: { Args: { p_event_id: string }; Returns: string }
+      duplicate_event: {
+        Args: {
+          p_client_request_id?: string
+          p_end?: string
+          p_event_id: string
+          p_start?: string
+          p_title?: string
+        }
+        Returns: string
+      }
       ensure_profile_exists: {
         Args: { p_name?: string; p_user_id: string }
         Returns: undefined
@@ -2126,6 +2148,10 @@ export type Database = {
       }
       event_chat_member: {
         Args: { p_event_id: string; p_user_id: string }
+        Returns: boolean
+      }
+      event_chat_posting_open: {
+        Args: { p_event_id: string }
         Returns: boolean
       }
       event_has_ended:
@@ -2331,12 +2357,26 @@ export type Database = {
         Args: { p_days?: number; p_event_id: string }
         Returns: Json
       }
+      get_event_sessions_attended: {
+        Args: { p_event_id: string }
+        Returns: number
+      }
       get_events_collection_membership: {
         Args: { p_event_ids: string[] }
         Returns: Json
       }
       get_events_compare: {
         Args: { p_event_ids: string[]; p_lat?: number; p_lng?: number }
+        Returns: Json
+      }
+      get_host_dashboard: {
+        Args: {
+          p_business_id: string
+          p_from?: string
+          p_limit?: number
+          p_overview_limit?: number
+          p_to?: string
+        }
         Returns: Json
       }
       get_host_events_counts: { Args: { p_event_ids: string[] }; Returns: Json }
@@ -2576,6 +2616,7 @@ export type Database = {
           cover_image_url: string | null
           created_at: string
           description: string
+          duplicated_from: string | null
           end_datetime: string
           event_type: string | null
           id: string
@@ -2716,6 +2757,10 @@ export type Database = {
       stash_removed_chat_body: {
         Args: { p_message_id: string }
         Returns: undefined
+      }
+      submit_review: {
+        Args: { p_business_id: string; p_rating: number; p_text?: string }
+        Returns: string
       }
       submit_verification_request: {
         Args: { p_evidence_url: string; p_note?: string }

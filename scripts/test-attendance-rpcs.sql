@@ -83,7 +83,10 @@ SELECT v.id::uuid, :'biz', v.title, 'attendance rpc test', (SELECT id FROM categ
 FROM (VALUES
   (:'past_ev',  'Past event',            now() - interval '2 days', now() - interval '2 days' + interval '2 hours', false, NULL::jsonb),
   (:'live_ev',  'In-progress event',     now() - interval '1 hour', now() + interval '1 hour',                      false, NULL::jsonb),
-  (:'rec_done', 'Recurring, finished',   now() - interval '30 days', now() - interval '30 days' + interval '1 hour', true,  '{"frequency":"weekly","interval":1,"endDate":"2020-01-01"}'::jsonb),
+  -- endDate = the start day (legal since 20261118130000 O-5, which refuses an
+  -- endDate before the first date): one session ran, 30 days ago, then it ended.
+  (:'rec_done', 'Recurring, finished',   now() - interval '30 days', now() - interval '30 days' + interval '1 hour', true,
+     jsonb_build_object('frequency','weekly','interval',1,'endDate', to_char((now() - interval '30 days') AT TIME ZONE 'UTC', 'YYYY-MM-DD'))),
   (:'rec_open', 'Recurring, no end',     now() - interval '30 days', now() - interval '30 days' + interval '1 hour', true,  '{"frequency":"weekly","interval":1}'::jsonb)
 ) AS v(id, title, start_at, end_at, recurring, pattern);
 
@@ -157,10 +160,10 @@ SELECT pg_temp.check(
 SELECT pg_temp.check(
   (get_user_attendance_counts(:'alex')->>'upcoming_count')::int = 3
   -- Per session: past_ev (1) + rec_open's five finished weekly dates
-  -- (-30, -23, -16, -9, -2 days) + rec_done (0: its end date precedes its
-  -- first date, so no session ever ran). Before: one per ended event = 2.
-  AND (get_user_attendance_counts(:'alex')->>'attended_count')::int = CASE WHEN :'per_session' THEN 6 ELSE 2 END,
-  'owner counts: 3 upcoming, attended 2 (per event) / 6 (per session)');
+  -- (-30, -23, -16, -9, -2 days) + rec_done's single session (its endDate is
+  -- its start day, so exactly one ran). Before: one per ended event = 2.
+  AND (get_user_attendance_counts(:'alex')->>'attended_count')::int = CASE WHEN :'per_session' THEN 7 ELSE 2 END,
+  'owner counts: 3 upcoming, attended 2 (per event) / 7 (per session)');
 
 SELECT pg_temp.check(
   (SELECT bool_and((x::jsonb) ? 'is_recurring' AND (x::jsonb) ? 'recurrence_pattern' AND (x::jsonb) ? 'rsvp_count')

@@ -4,12 +4,49 @@ import { sessionSeed } from './seed.mjs';
 export { sleep, UID };
 export const results = [];
 export function check(name, ok, detail = '') { results.push({ name, ok: !!ok, detail }); console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ' — ' + detail : ''}`); }
-export async function open({ repo, dist, dataOpts = {}, seedExtra = {}, expOffsetS = 3600, overrides = {}, viewport, offline = false, noSession = false }) {
+
+/* ───────────────────────── Test clock (lifecycle harness) ──────────────────
+ * The page's idea of "now", shifted by a controllable offset — the browser
+ * twin of scripts/test-lifecycle.sql's set_phase. An offset clock (not a
+ * frozen one) keeps timers, animations and React Query freshness working;
+ * only "when it is" moves. Runs before any app code via the seed script.
+ * Suites drive it with h.clock.set(iso) / h.clock.advance(ms) — both apply to
+ * documents loaded afterwards (navigate/reload), which is also how a device
+ * clock change reaches a cold page.
+ */
+const clockScript = `(() => {
+  if (globalThis.__lcClock) return;
+  const Real = Date;
+  let offsetMs = Number(localStorage.getItem('__lcClockOffsetMs') || 0);
+  const now = () => Real.now() + offsetMs;
+  class TestDate extends Real {
+    constructor(...a) { a.length === 0 ? super(now()) : super(...a); }
+    static now() { return now(); }
+  }
+  TestDate.parse = Real.parse; TestDate.UTC = Real.UTC;
+  globalThis.Date = TestDate;
+  globalThis.__lcClock = {
+    set(iso) { offsetMs = new Real(iso).getTime() - Real.now(); localStorage.setItem('__lcClockOffsetMs', String(offsetMs)); },
+    advance(ms) { offsetMs += ms; localStorage.setItem('__lcClockOffsetMs', String(offsetMs)); },
+    offsetMs: () => offsetMs,
+  };
+})();`;
+
+export async function open({ repo, dist, dataOpts = {}, seedExtra = {}, expOffsetS = 3600, overrides = {}, viewport, offline = false, noSession = false, clock = false }) {
   const data = makeData(dataOpts); const unknown = [];
   const base = makeRouter(data, { unknown, overrides });
   const ctl = { offline };
+  const session = noSession ? '' : sessionSeed(seedExtra, expOffsetS);
   const h = await startHarness({ repo, dist, viewport, backendOrigin: 'http://127.0.0.1:9',
-    seed: noSession ? null : sessionSeed(seedExtra, expOffsetS), route: (r) => (ctl.offline ? { abort: true } : base(r)) });
+    seed: clock ? clockScript + '\n' + session : (noSession ? null : session), route: (r) => (ctl.offline ? { abort: true } : base(r)) });
+  if (clock) {
+    h.clock = {
+      /** Point the page's clock at `iso`; takes effect on the next load. */
+      set: (iso) => h.eval(`__lcClock.set(${JSON.stringify(iso)})`),
+      advance: (ms) => h.eval(`__lcClock.advance(${ms})`),
+      offsetMs: () => h.eval('__lcClock.offsetMs()'),
+    };
+  }
   h.data = data; h.unknown = unknown; h.ctl = ctl;
   h.count = (pred) => h.requests.filter((r) => (typeof pred === 'string' ? `${r.method} ${r.path.replace('/rest/v1/', '')}` === pred : pred(r))).length;
   h.errors = () => h.log.filter((l) => l.startsWith('EXCEPTION') || (l.startsWith('ERROR') && !/Failed to load resource|net::ERR|status of 404|Error loading|Failed to load (notifications|profile|business|following)|fetch failed|TypeError: Failed to fetch|Unable to restore session|Failed to load events/i.test(l)));

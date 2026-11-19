@@ -183,6 +183,11 @@ export type Event = {
   event_type?: EventPresetId | null;
   /** Host's note for a postponed event. */
   status_note?: string | null;
+  /**
+   * Last time reschedule_event moved the start or end (20261117120000).
+   * EJ-23: a calendar entry added before this is stale.
+   */
+  rescheduled_at?: string | null;
   created_at: string;
   updated_at: string;
 };

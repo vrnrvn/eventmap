@@ -238,6 +238,25 @@ export const eventsService = {
   },
 
   /**
+   * When the signed-in user RSVP'd to this event, or null if they haven't.
+   * Read straight from `rsvps` under the "Users can view their own RSVPs"
+   * policy (own rows only); `get_event_details` carries the status but not
+   * the time. EJ-23 compares it with `events.rescheduled_at` to know whether
+   * the calendar entry they added is now stale. Never throws: a stale-calendar
+   * hint is not worth failing the page over.
+   */
+  async getMyRsvpAt(eventId: string, userId: string): Promise<string | null> {
+    const { data, error } = await supabase
+      .from('rsvps')
+      .select('created_at')
+      .eq('event_id', eventId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) return null;
+    return (data as { created_at: string } | null)?.created_at ?? null;
+  },
+
+  /**
    * Records a share / ticket / calendar / directions tap for host insights
    * (track_event_interaction, 20261104090000). Fire-and-forget: never throws,
    * and is a no-op while that migration isn't applied. The server dedupes to

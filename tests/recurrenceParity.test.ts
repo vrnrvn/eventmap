@@ -20,11 +20,25 @@ import fixture from './fixtures/recurrenceParity.json';
  *    the next chosen day. Listed in
  *    KNOWN_START_DIVERGENCE so any new divergence still fails.
  */
-type Case = { name: string; start: string; pattern: RecurrencePattern; next: [string, string][] };
+type Case = { name: string; start: string; pattern: RecurrencePattern; first: string[]; next: [string, string][] };
 
 describe('recurrence parity with SQL event_next_occurrence', () => {
   it('fixture covers every pattern shape', () => {
-    expect((fixture as Case[]).length).toBeGreaterThanOrEqual(14);
+    // 18 since 2b-3: long-interval, far-future and leap/month-end shapes.
+    expect((fixture as Case[]).length).toBeGreaterThanOrEqual(18);
+  });
+
+  // 2b-3: the server's FIRST FIVE dates (chained from the start) must be the
+  // client's. This is what catches a drifted walk even when the "now" grid
+  // happens to miss the window — monthly-31's third entry is the S1 fix.
+  it.each((fixture as Case[]).map((c) => [c.name, c] as const))('first five: %s', (_name, c) => {
+    const event = { start_datetime: c.start, is_recurring: true, recurrence_pattern: c.pattern, timezone: 'UTC' };
+    const start = new Date(c.start);
+    const got = getNextOccurrences(event, 8, start)
+      .filter((d) => d.getTime() >= start.getTime())
+      .slice(0, 5)
+      .map((d) => d.toISOString().replace('.000Z', 'Z'));
+    expect(got).toEqual(c.first);
   });
 
   /** name → "now" instants where only the future-start rule differs. */

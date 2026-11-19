@@ -37,4 +37,44 @@ describe('eventChatAccess (mirrors user_can_access_event_chat)', () => {
       announcementsOnly: false,
     });
   });
+
+  // EJ-19 (20261117130000): a per-date "going" counts as going.
+  describe('date-only goers', () => {
+    it('counts a per-date going as going, unlocked by one series goer', () => {
+      // The date-only goer is not inside rsvp_count, so one series goer is
+      // already "someone else going".
+      expect(eventChatAccess(null, 1, null, { dateGoing: true })).toEqual({
+        state: 'open',
+        announcementsOnly: false,
+      });
+    });
+
+    it('waits, rather than asking them to join, while they are alone', () => {
+      expect(eventChatAccess(null, 0, null, { dateGoing: true })).toEqual({ state: 'waiting' });
+    });
+
+    it("opens immediately under 'any_going'", () => {
+      expect(eventChatAccess(null, 0, { chat_mode: 'open', open_policy: 'any_going' }, { dateGoing: true })).toEqual({
+        state: 'open',
+        announcementsOnly: false,
+      });
+    });
+
+    it("'off' still wins", () => {
+      expect(eventChatAccess(null, 5, { chat_mode: 'off' }, { dateGoing: true })).toEqual({ state: 'off' });
+    });
+
+    it('a series goer is unaffected by the new input', () => {
+      expect(eventChatAccess('going', 1, null, { dateGoing: true })).toEqual({ state: 'waiting' });
+      expect(eventChatAccess('going', 2, null, { dateGoing: true })).toEqual({
+        state: 'open',
+        announcementsOnly: false,
+      });
+    });
+
+    it('still asks a non-attendee to join', () => {
+      expect(eventChatAccess(null, 5, null, { dateGoing: false })).toEqual({ state: 'join' });
+      expect(eventChatAccess('interested', 5, null, { dateGoing: false })).toEqual({ state: 'join' });
+    });
+  });
 });

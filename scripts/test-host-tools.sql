@@ -581,10 +581,14 @@ BEGIN
     '%event_closed%');
   -- 11.9 Publishing a recurring draft whose series ended is refused.
   PERFORM pg_temp.login(f.host);
+  -- The endDate must follow the start since 20261118130000 (O-5): a series
+  -- that ran for a week and finished 53 days ago is the legal way to say
+  -- "already over".
   PERFORM pg_temp.expect_error('11.9 publish an ended recurring draft',
     format($q$SELECT publish_event(create_event_with_limit_check(%L, 'Old series', 'd', %L,
       now() - interval '60 days', now() - interval '60 days' + interval '1 hour', 37.7, -122.4, 'x',
-      NULL, true, '{"frequency":"weekly","interval":1,"endDate":"2020-01-01"}'::jsonb, NULL, NULL, 'draft'))$q$,
+      NULL, true, jsonb_build_object('frequency','weekly','interval',1,
+        'endDate', to_char((now() - interval '53 days') AT TIME ZONE 'UTC', 'YYYY-MM-DD')), NULL, NULL, 'draft'))$q$,
       f.biz, f.cat),
     '%already over%');
   PERFORM pg_temp.logout();

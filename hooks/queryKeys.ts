@@ -81,6 +81,8 @@ export const queryKeys = {
   /** Viewer's per-date RSVP overrides and per-date going counts for a series. */
   dateRsvps: (eventId: string, userId: string) => ['event', 'date-rsvps', eventId, userId] as const,
   dateGoingCounts: (eventId: string, keys: string) => ['event', 'date-going', eventId, keys] as const,
+  /** When the viewer RSVP'd, for the EJ-23 stale-calendar hint. */
+  myRsvpAt: (eventId: string, userId: string) => ['event', 'my-rsvp-at', eventId, userId] as const,
   /** All event categories (hooks/useCategories). */
   categories: () => ['categories'] as const,
   /** Discover's last unfiltered area (utils/discoverSnapshot), kept on the device. */

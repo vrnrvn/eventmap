@@ -1,5 +1,11 @@
 # EventMap roadmap
 
+**Current work (2026-11-18):** the "Finish what's paid for" roadmap — Batch C
+→ "Run it again" (duplicate) → a time-simulation test harness → Batch D and
+the older backlog. Status, and the two prepared migrations waiting to be
+applied, are in
+[`docs/ROADMAP_PROGRESS_2026-11-18.md`](docs/ROADMAP_PROGRESS_2026-11-18.md).
+
 This is ongoing product work. Estimates exclude the local setup already implemented.
 
 | Planned work | Deliverable | Estimate |

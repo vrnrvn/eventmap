@@ -169,8 +169,11 @@ export function upcomingDateRows(
  * Whether moving a date to `newStart` would put it after the series' end
  * date. A series counts as ended once its `endDate` day has passed
  * (event_has_ended), so a date moved beyond it would read as ended on the
- * day it happens — no RSVPs, no reminder (EJ-14). Interim client guard until
- * the server extends or refuses (Batch B5).
+ * day it happens — no RSVPs, no reminder (EJ-14). Since 20261117140000 the
+ * server handles it: reschedule_occurrence extends `endDate` to the moved day
+ * when that adds no other date, and refuses otherwise, naming the date it
+ * would add. This is now advisory only — the move picker says what will
+ * happen instead of blocking it.
  */
 export function moveIsPastSeriesEnd(
   newStart: Date,

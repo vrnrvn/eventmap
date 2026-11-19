@@ -437,7 +437,7 @@ export function buildEventPlaybook(input: {
     {
       id: 'run_again',
       title: 'Run it again',
-      description: 'Copy this event into a new draft, or turn it into a repeating series.',
+      description: 'Copy this event into a new draft on a date you pick, or turn it into a repeating series.',
       derived: facts.ranAgain ?? local.duplicated,
       target: 'duplicate',
       stages: ['after'],

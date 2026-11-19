@@ -1,6 +1,52 @@
 # Migration work waiting for the owner
 
+**Handoff, 2026-11-18 (New York):** The nine Sitting A migrations are
+applied locally, with 139 recorded through `20261119130000`. Types are
+refreshed and 17 isolated SQL suites passed. The staging locations and
+counts below describe the pre-apply state. Only `20261119110000` remains
+staged from this set, pending the `submit_review()` client release.
+
 ## OWNER — database actions remaining (updated 2026-11-17)
+
+**Update, 2026-11-18:** Batch C is built (C2–C5) and "Run it again"
+(duplicate) shipped its client half. The shared database was not touched: it
+still records **130** migrations through `20261117160000`, verified read-only.
+Running status: [`docs/ROADMAP_PROGRESS_2026-11-18.md`](ROADMAP_PROGRESS_2026-11-18.md).
+
+**READ FIRST: [`docs/STATUS_AND_APPLY_DAY_2026-11-19.md`](STATUS_AND_APPLY_DAY_2026-11-19.md)** —
+the apply-day runbook for all ten prepared migrations, including the ONE
+file that must wait for a client release (D2's `20261119110000`), the
+final regression results, and what is finished vs half-finished.
+
+**Two prepared migrations are waiting for you.** Both are validated on
+throwaway PG17 containers (14/14 suites each), both are idempotent, and
+**nothing in the app depends on either**, so they can wait until the roadmap's
+client work is finished. Apply in any order; they touch different objects, and
+one `npm run backend:types` afterwards covers both.
+
+| Folder | File | Unblocks |
+| --- | --- | --- |
+| `supabase/prepared/2026-11-18_batch_c/` | `20261118100000_series_sessions_attended_self.sql` | C6, "You've been to N sessions" — `user_series_sessions_attended` is revoked from `authenticated` by design, so the viewer's own number has no granted path |
+| `supabase/prepared/2026-11-18_duplicate_v2/` | `20261118110000_duplicate_event_v2.sql` | `duplicate_event`: keeps the source's local time of day (it lands on the current clock time today), `p_start`/`p_end`/`p_title`, an idempotency key, chat set-up copied server-side, and a `duplicated_from` lineage column |
+| `supabase/prepared/2026-11-18_phase4/` | `20261118120000_effective_occurrence_everywhere.sql` | **E-R1** (§2 below — now WRITTEN and validated): ranking, saved/going, calendar and the collections stop ignoring per-date exceptions. Apply before the EJ-24 file |
+| `supabase/prepared/2026-11-18_phase4/` | `20261118130000_recurrence_edge_fixes.sql` | **2b-4 / 2b-5 / 2b-6**: monthly month-end drift, the long-interval v2 walk, endDate-before-start refused. 2b-3's widened parity fixture validates it (client == server on 18 shapes) |
+| `supabase/prepared/2026-11-18_phase4/` | `20261118140000_joined_lists_date_only.sql` | **EJ-24**: events attended only by per-date RSVP appear in Joined / attended |
+| `supabase/prepared/2026-11-18_phase4/` | `20261118150000_post_event_chat_window.sql` | **Batch D1** (EJ-7, answered 2026-11-18: 7 days): posting open for a week after the end, then read-only; history stays readable |
+
+| `supabase/prepared/2026-11-19_host_dashboard_rpc/` | `20261119130000_get_host_dashboard.sql` | **C3 / 2b-9** — the host dashboard in one request instead of up to 17. Adds an RPC nothing calls yet, so applying it is inert until the client cutover; needs `npm run backend:types` |
+| `supabase/prepared/2026-11-19_series_host_notices/` | `20261119120000_series_host_notices.sql` | **EJ-17** — a series host's day-of and post-event notices, per occurrence (they never fired at all before). Independent; apply in any order |
+| `supabase/prepared/2026-11-19_series_reviews/` | `20261119100000_submit_review_rpc.sql` then `20261119110000_series_reviews.sql` | **D2** — reviews per recurring series. **These two are the ONE case where order matters across a client release:** apply step 1, ship the client release that submits through `submit_review()`, then apply step 2. That folder's README is the contract |
+
+Each folder's README has the apply runbook, the full validation table, the
+rollback, and the client work that follows. **Batch D2 (series reviews) is
+answered (they count toward the venue rating) but deliberately NOT staged:**
+the designed schema change breaks the deployed client's review upsert the
+moment it applies (partial unique indexes can't arbitrate
+`onConflict: 'user_id,business_id'`), so it must ship as a migration + client
+pair. **Shape decided 2026-11-18 (option a):** first a client release that
+submits reviews through a new `submit_review(...)` RPC (its own migration,
+no constraint change), then the schema migration, then the D2 client half.
+Details in the phase-4 README.
 
 **Handoff, 2026-11-17:** Step 1 is complete locally: **130** migrations
 through `20261117160000`, generated types refreshed, and 14/14 SQL suites
@@ -53,15 +99,29 @@ npx supabase migration up
 npm run backend:types
 ```
 
-**Then tell the agent to do "Batch C".** These are the app follow-ups that
-need the server change first; until then the app works as it does today:
-- C2 — the chat row counts a per-date "going".
-- C3 — relax the move picker's interim guard and show the server's
-  "would add <date>" message.
-- C4 — Edit's dialog fires for schedule changes and names savers and
-  date-only goers.
-- C5 — "Time changed — update your calendar".
-- C6 (optional) — "You've been to N sessions".
+**Batch C — done 2026-11-18, except the optional C6.** The app follow-ups that
+needed the server change first:
+- C1 — types: already refreshed at the 11-17 handoff (`rescheduled_at` and the
+  new functions are in `types/supabase.generated.ts`). **Done.**
+- C2 — the chat row counts a per-date "going". **Done**
+  (`utils/eventChatAccess.ts` gained a `dateGoing` input; the event page also
+  keeps the server's own `can_read`, which is the only thing that knows about
+  *other* people's date-only RSVPs).
+- C3 — the move picker no longer refuses a date past the series end; it says
+  the series end moves with it, and the server's "would add <date>" refusal
+  surfaces through `occurrenceErrorMessage`. **Done** (`components/MoveDateModal.tsx`).
+- C4 — Edit's dialog fires for schedule (pattern) changes too and names savers
+  and date-only goers. **Done** (`utils/eventEditNotice.ts`, unit-tested).
+- C5 — "Time changed — update your calendar". **Done**
+  (`utils/calendarStale.ts`; compares `events.rescheduled_at` with the viewer's
+  own `rsvps.created_at`).
+- C6 (optional) — "You've been to N sessions". **Blocked on one small
+  migration, prepared and validated, not applied:**
+  `supabase/prepared/2026-11-18_batch_c/`.
+  `user_series_sessions_attended` is revoked from `authenticated` by design, so
+  there is no granted path to the viewer's own number; the prepared file adds a
+  self-only wrapper. The client half is written down in that folder's README,
+  not coded, because nothing may depend on an unapplied object.
 
 The details are in `docs/EVENT_JOURNEY_REVIEW_PLAN_2026-11-17.md` §5a.
 

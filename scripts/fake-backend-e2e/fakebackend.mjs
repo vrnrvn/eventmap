@@ -137,7 +137,22 @@ export function makeRouter(data, { unknown = [], overrides = {} } = {}) {
       case 'app_banners': return { json: [] };
       case 'rpc/get_user_business': return { json: data.business ? [data.biz] : [] };
       case 'rpc/ensure_profile_exists': return { json: null };
-      case 'rpc/get_ranked_events': { const b = body(r); const off = b.p_offset || 0; return { json: data.ranked.slice(off, off + (b.result_limit || 100)) }; }
+      case 'rpc/get_ranked_events': { const b = body(r); const off = b.p_offset || 0;
+        // Lifecycle harness: this server-computed flag is derived at request
+        // time from the row's own dates, so a suite that moves an event's
+        // dates can no longer disagree with it. One-offs end with
+        // end_datetime; a series only once its pattern's endDate day has
+        // passed (UTC-day approximation of event_has_ended). The stored
+        // ranked.has_ended remains the fallback for rows without dates and
+        // is what the other handlers (collections, calendar) still read.
+        const endedNow = (e) => {
+          if (e.is_recurring && e.recurrence_pattern) {
+            const d = e.recurrence_pattern.endDate;
+            return d ? Date.parse(`${d}T23:59:59Z`) < Date.now() : false;
+          }
+          return e.end_datetime ? Date.parse(e.end_datetime) <= Date.now() : e.has_ended;
+        };
+        return { json: data.ranked.slice(off, off + (b.result_limit || 100)).map((e) => ({ ...e, has_ended: endedNow(e) })) }; }
       case 'rpc/get_event_details': {
         const e = data.ev.find((x) => x.id === body(r).event_uuid); if (!e) return { json: null };
         const rk = data.ranked.find((x) => x.id === e.id);

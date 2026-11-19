@@ -36,7 +36,8 @@ export function MoveDateModal({
   const [value, setValue] = useState(() => toPicker(occurrence.start));
   const start = fromPicker(value);
   const inPast = start.getTime() <= Date.now();
-  // EJ-14: past the series end the date would read as ended on its own day.
+  // EJ-14: past the series end, moving the date also moves the series end
+  // (the server does it); tell the host rather than refusing.
   const pastSeriesEnd = moveIsPastSeriesEnd(start, tz, seriesEndDate);
   const seriesEndLabel = seriesEndDate
     ? new Date(`${seriesEndDate.slice(0, 10)}T12:00:00Z`).toLocaleDateString(undefined, {
@@ -89,14 +90,18 @@ export function MoveDateModal({
         {inPast ? (
           <Text style={styles.metaWarn}>Pick a time in the future.</Text>
         ) : pastSeriesEnd ? (
-          <Text style={styles.metaWarn} accessibilityLiveRegion="polite">
-            The series ends on {seriesEndLabel}, so a date can&apos;t move past it. To hold it later, extend the
-            series end in Edit first.
+          // EJ-14, once 20261117140000 is applied: the server extends the
+          // series end to the moved day when that adds no other date, and
+          // otherwise refuses naming the date it would add (surfaced by
+          // occurrenceErrorMessage). Say what will happen; don't block it.
+          <Text style={styles.meta} accessibilityLiveRegion="polite">
+            This is past the series end ({seriesEndLabel}), so the series end moves with it. If that would add
+            another date to the series, you&apos;ll be asked to extend the series end in Edit first.
           </Text>
         ) : null}
         <View style={styles.sheetActions}>
           <Button label="Cancel" variant="ghost" onPress={onCancel} />
-          <Button label="Move date" onPress={() => onSave(start, new Date(start.getTime() + duration))} disabled={inPast || pastSeriesEnd} />
+          <Button label="Move date" onPress={() => onSave(start, new Date(start.getTime() + duration))} disabled={inPast} />
         </View>
       </View>
     </Modal>

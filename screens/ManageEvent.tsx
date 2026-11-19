@@ -65,7 +65,8 @@ import {
   type HostAttendee,
   type HostAttendeeStatus,
 } from '@/services/hostTools';
-import { carryOverToDuplicate } from '@/services/eventPresetSettings';
+import { duplicateSourceFromEvent, useDuplicateEvent } from '@/hooks/useDuplicateEvent';
+import { RunItAgainSheet } from '@/components/RunItAgainSheet';
 import { markChecklistSignal } from '@/utils/hostChecklistStore';
 import { HostTipCard } from '@/components/HostTipCard';
 import { useHostTip } from '@/hooks/useHostTip';
@@ -324,6 +325,9 @@ export default function ManageEvent() {
   const { userBusiness } = useApp();
   const { profile } = useAuth();
   const queryClient = useQueryClient();
+  // "Run it again" (the Duplicate row): the sheet's state lives in the hook,
+  // the sheet itself is rendered at the end of this screen.
+  const duplicate = useDuplicateEvent();
   const [tab, setTab] = useState<Tab>(() =>
     LINKABLE_TABS.includes(tabParam as Tab) ? (tabParam as Tab) : 'overview'
   );
@@ -982,28 +986,12 @@ export default function ManageEvent() {
     }
   }, [id, event, refetchAll]);
 
-  const handleDuplicate = useCallback(async () => {
+  // "Run it again": the host picks the date up front, instead of the copy
+  // landing a week out at whatever time it happens to be (utils/duplicateDate).
+  const handleDuplicate = useCallback(() => {
     if (!id || !event) return;
-    if (blockedOffline('duplicate this event')) return;
-    const ok = await confirmAction({
-      title: 'Duplicate event',
-      message: 'Create a draft copy with the same details, links and photos, dated a week later? You can edit it before publishing.',
-      confirmLabel: 'Duplicate',
-    });
-    if (!ok) return;
-    try {
-      const newId = await hostToolsService.duplicateEvent(id);
-      markPlaybookSignal(id, 'duplicated');
-      const carried = await carryOverToDuplicate(newId, {
-        eventType: event.event_type ?? null,
-        chatMode: chatStatus?.chat_mode ?? null,
-      });
-      notify.success(carried ? 'Draft created.' : 'Draft created. Set the chat option again in Manage event.');
-      router.push(`/business/edit-event/${newId}` as never);
-    } catch (err) {
-      notify.error(err instanceof HostToolsUnavailableError ? err.message : 'Could not duplicate. Please try again.');
-    }
-  }, [id, event, chatStatus?.chat_mode]);
+    duplicate.start(duplicateSourceFromEvent({ ...event, id }, chatStatus?.chat_mode ?? null));
+  }, [id, event, chatStatus?.chat_mode, duplicate]);
 
   const handleToggleUnlisted = useCallback(
     async (unlisted: boolean) => {
@@ -1084,7 +1072,7 @@ export default function ManageEvent() {
           openInsights();
           return;
         case 'duplicate':
-          void handleDuplicate();
+          handleDuplicate();
           return;
         case 'reviews':
           if (userBusiness) router.push(`/business/${userBusiness.id}` as never);
@@ -1277,9 +1265,9 @@ export default function ManageEvent() {
           {actions.canDuplicate ? (
             <SettingsRow
               icon={<Copy size={16} color={Colors.primary} />}
-              title="Duplicate"
-              description="New draft with the same details, a week later"
-              onPress={() => void handleDuplicate()}
+              title="Run it again"
+              description="New draft with the same details, on a date you pick"
+              onPress={handleDuplicate}
             />
           ) : null}
         </SettingsSection>
@@ -2019,6 +2007,15 @@ export default function ManageEvent() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {duplicate.source ? (
+        <RunItAgainSheet
+          source={duplicate.source}
+          busy={duplicate.busy}
+          onCancel={duplicate.cancel}
+          onConfirm={(when) => void duplicate.confirm(when)}
+        />
+      ) : null}
     </View>
   );
 }

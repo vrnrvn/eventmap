@@ -128,7 +128,7 @@ describe('host phase and actions while a series date runs', () => {
   });
 });
 
-describe('moveIsPastSeriesEnd (EJ-14 interim guard)', () => {
+describe('moveIsPastSeriesEnd (EJ-14 advisory; the server extends or refuses)', () => {
   it('refuses a new date after the series end, in the event zone', () => {
     expect(moveIsPastSeriesEnd(at('2026-11-27T18:00:00Z'), 'UTC', '2026-11-24')).toBe(true);
     expect(moveIsPastSeriesEnd(at('2026-11-24T18:00:00Z'), 'UTC', '2026-11-24')).toBe(false);

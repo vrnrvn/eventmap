@@ -1,6 +1,6 @@
 # Full event-journey review — plan (2026-11-17)
 
-**Status (final, 2026-11-17): all review phases done (R1–R5). Batch A is fixed. Batch B is prepared, validated and approved, but NOT applied. What remains needs you: apply Batch B (`docs/MIGRATIONS_PENDING.md` → "OWNER — database actions remaining"), then ask for Batch C. Two answers unblock Batch D.** Findings live in
+**Status (2026-11-18): all review phases done (R1–R5). Batch A is fixed. Batch B was applied by the owner on 2026-11-17 (130 migrations through `20261117160000`). Batch C is built, except the optional C6, which needs one small prepared migration applied (`supabase/prepared/2026-11-18_batch_c/`). Two answers still unblock Batch D.** Findings live in
 [`docs/EVENT_JOURNEY_REVIEW_2026-11-17.md`](EVENT_JOURNEY_REVIEW_2026-11-17.md).
 Scope: the whole
 life of an event — joining it, creating it, the event playing out, and
@@ -26,8 +26,8 @@ doc plus `docs/ISSUES.md` entries before anything is fixed.
 | Batch A (app-only fixes) | **Done 2026-11-17** | All 8 items (§5a). Fully fixed: EJ-2, EJ-3, EJ-4, EJ-5. Client half fixed, server half in Batch B: EJ-1, EJ-12, EJ-13. Interim: EJ-14 guard, EJ-10 copy. Copy: EJ-15/21, EJ-17. Verified: 1,219 unit tests; 435 browser checks across 6 suites, 0 failures |
 | Batch B (prepared migrations) | **Done 2026-11-17 — prepared, NOT applied** | 7 files in `supabase/prepared/2026-11-17_event_journey/` (outside the auto-applied folder; README has the apply runbook). Validated in throwaway PG17 containers: 14/14 SQL suites before, after, after re-apply, and without the optional #5/#6. Two existing suites failed on the first run and were fixed (§5a). **#5 and #6's notice wait for your OK.** |
 | R5 Regression residue | **Done 2026-11-17** | `tests/seriesInProgress.test.ts`; `scripts/test-event-journey.sql` (7 blocks); Attendee A5–A8, Moderation R6; final pass 2026-11-17: 20 browser suites 1,277/1,285 (8 = pre-existing layout issues made visible by EJ-26), SQL 14/14 before/after the prepared set |
-| Batch C (client follow-ups after apply) | **Waiting for the owner's apply** | C2–C6 in §5a; listed in `docs/MIGRATIONS_PENDING.md` Step 1 |
-| Batch D (chat window, series reviews) | **Designed; needs two answers** | §5a "Batch D" |
+| Batch C (client follow-ups after apply) | **Done 2026-11-18, except optional C6** | Batch B was applied on 2026-11-17 (130 migrations, verified read-only). C1 types were already refreshed; C2–C5 built and unit-tested (1,279 tests pass). **C6 is blocked on one prepared migration**, `supabase/prepared/2026-11-18_batch_c/`: `user_series_sessions_attended` is revoked from `authenticated` by design, so the viewer's own number has no granted path. Validated in a throwaway PG17 container (14/14 suites), not applied; its client half is written down, not coded |
+| Batch D (chat window, series reviews) | **Answered 2026-11-18** (owner delegated to the recommendations) | D1 = 7 days: prepared and validated, `supabase/prepared/2026-11-18_phase4/20261118150000_post_event_chat_window.sql`. D2 = series reviews count toward the venue rating: accepted, but the migration is deferred — the designed unique-index change breaks the deployed client's review upsert on apply; hazard + safe shapes in that folder's README |
 
 Evidence for R1–R3: code at `50a2a57`, the latest defining migration for each
 object, and one rolled-back repro per phase, each in its own throwaway PG17

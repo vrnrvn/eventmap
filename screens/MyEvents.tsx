@@ -31,11 +31,14 @@ import { Button } from '@/components/ui/Button';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { EventListItem, formatEventDate } from '@/components/EventListItem';
 import { Event } from '@/types/database';
+import { duplicateSourceFromEvent, useDuplicateEvent } from '@/hooks/useDuplicateEvent';
+import { RunItAgainSheet } from '@/components/RunItAgainSheet';
 import { hasEventEnded, isEventInProgress } from '@/utils/eventStatus';
 import { alpha, Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 import {
   ArrowLeft,
   BarChart3,
+  Copy,
   Megaphone,
   Pencil,
   CalendarX,
@@ -84,6 +87,8 @@ export default function MyEvents() {
    */
   const businessId = userBusiness?.id;
   const [scope, setScope] = useState<Scope>('upcoming');
+  // "Run it again" on a past or cancelled row; the sheet renders below.
+  const duplicate = useDuplicateEvent();
   const [events, setEvents] = useState<Event[]>([]);
   const nextById = useEffectiveNextDates(events);
   const [loading, setLoading] = useState(true);
@@ -388,6 +393,21 @@ export default function MyEvents() {
                   </TouchableOpacity>
                 )}
 
+                {/* Past and cancelled events: the "run it again" path, with
+                    the date chosen up front (hooks/useDuplicateEvent). */}
+                {!draft && (ended || cancelled) && (
+                  <TouchableOpacity
+                    style={styles.editBtn}
+                    onPress={() => duplicate.start(duplicateSourceFromEvent(item))}
+                    activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Run ${item.title} again`}
+                  >
+                    <Copy size={14} color={Colors.primary} />
+                    <Text style={styles.editBtnText}>Run it again</Text>
+                  </TouchableOpacity>
+                )}
+
                 <TouchableOpacity
                   style={styles.iconActionBtn}
                   onPress={() =>
@@ -419,7 +439,7 @@ export default function MyEvents() {
         </View>
       );
     },
-    [handleCancelEvent, handleNotifyFollowers, counts, nextById, playbookPills]
+    [handleCancelEvent, handleNotifyFollowers, counts, nextById, playbookPills, duplicate]
   );
 
   const keyExtractor = useCallback((item: Event) => item.id, []);
@@ -494,7 +514,7 @@ export default function MyEvents() {
               : scope === 'past'
                 ? 'Events that have ended or were cancelled will show up here.'
                 : scope === 'drafts'
-                  ? 'Save an event as a draft, or duplicate one from Manage event, and it will wait here until you publish it.'
+                  ? 'Save an event as a draft, or run a past one again, and it will wait here until you publish it.'
                   : 'Create your next event to start reaching your local community.'}
           </Text>
           {hasBusiness && scope === 'upcoming' && (
@@ -675,6 +695,15 @@ export default function MyEvents() {
           removeClippedSubviews={Platform.OS === 'android'}
         />
       )}
+
+      {duplicate.source ? (
+        <RunItAgainSheet
+          source={duplicate.source}
+          busy={duplicate.busy}
+          onCancel={duplicate.cancel}
+          onConfirm={(when) => void duplicate.confirm(when)}
+        />
+      ) : null}
     </View>
   );
 }

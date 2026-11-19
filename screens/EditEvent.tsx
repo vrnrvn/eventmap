@@ -50,6 +50,7 @@ import {
 import { parseRecurrenceEndDate, type RecurrenceOption } from '@/utils/recurrence';
 import { notify, notifyConfirm } from '@/utils/notify';
 import { confirmAction } from '@/utils/confirm';
+import { editNoticePrompt } from '@/utils/eventEditNotice';
 import { eventsService, extrasToUpdates } from '@/services/events';
 import { hostToolsService, isCapacityBelowAttendanceError, isRescheduleRequiredError } from '@/services/hostTools';
 import {
@@ -661,23 +662,28 @@ export default function EditEvent() {
     // postponed event resumes. Make sure the host means it first.
     const placeChanged = 'address' in updates || 'lat' in updates || 'lng' in updates;
     const timePlaceChanged = 'start_datetime' in updates || 'end_datetime' in updates || placeChanged;
+    // EJ-20: a pattern change is a plain update that now sends its own
+    // "Schedule changed" notice — it must be confirmed, but it must NOT go
+    // through reschedule_event.
+    const scheduleChanged = 'recurrence_pattern' in updates || 'is_recurring' in updates;
     const isPostponed = originalEvent.current?.status === 'postponed';
     let viaReschedule = false;
-    // reschedule_event notifies going, interested and savers, so the prompt
-    // can't be gated on the going count alone (details only carry that one).
-    // Drafts have no audience yet and save silently.
+    // The notices reach savers and date-only goers too, so the prompt can't be
+    // gated on the going count alone (details only carry that one). Drafts
+    // have no audience yet and save silently.
     const isDraft = originalEvent.current?.publish_state === 'draft';
-    if (timePlaceChanged && (isPostponed || !isDraft)) {
-      const going = goingCount.current;
-      const proceed = await confirmAction({
-        title: isPostponed ? 'Set the new date?' : 'Notify attendees?',
-        message: isPostponed
-          ? 'This reopens joining and tells everyone the event is back on at the new time.'
-          : `Changing the time or location sends a "rescheduled" notification to everyone who's going, interested, waiting for your approval or on the waitlist${going > 0 ? ` (${going} going)` : ''}. Save anyway?`,
-        confirmLabel: isPostponed ? 'Set date' : 'Save and notify',
-        cancelLabel: 'Keep editing',
-      });
+    const prompt = editNoticePrompt({
+      timePlaceChanged,
+      scheduleChanged,
+      isPostponed,
+      isDraft,
+      goingCount: goingCount.current,
+    });
+    if (prompt) {
+      const proceed = await confirmAction(prompt);
       if (!proceed) return;
+    }
+    if (timePlaceChanged && (isPostponed || !isDraft)) {
       viaReschedule = true;
     }
 
