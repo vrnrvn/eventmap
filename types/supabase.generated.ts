@@ -2212,6 +2212,13 @@ export type Database = {
           user_id: string
         }[]
       }
+      event_occurrence_in_progress: {
+        Args: { p_event_id: string; p_now: string }
+        Returns: {
+          o_end: string
+          o_start: string
+        }[]
+      }
       event_recurrence_matches: {
         Args: { p_day: string; p_pattern: Json; p_start_local: string }
         Returns: boolean
@@ -2381,6 +2388,47 @@ export type Database = {
       }
       get_host_events_counts: { Args: { p_event_ids: string[] }; Returns: Json }
       get_host_onboarding_status: { Args: never; Returns: Json }
+      get_live_events: {
+        Args: {
+          p_limit?: number
+          p_preferred_category_ids?: string[]
+          p_seed?: string
+          p_soon_minutes?: number
+          radius_km?: number
+          user_lat: number
+          user_lng: number
+        }
+        Returns: {
+          address: string
+          business_id: string
+          business_logo_url: string
+          business_name: string
+          category_id: string
+          category_label: string
+          category_slug: string
+          cover_image_url: string
+          created_at: string
+          description: string
+          distance_km: number
+          end_datetime: string
+          id: string
+          is_premium: boolean
+          is_recurring: boolean
+          lat: number
+          live_status: string
+          lng: number
+          max_attendees: number
+          occ_end: string
+          occ_start: string
+          recurrence_pattern: Json
+          rsvp_count: number
+          save_count: number
+          start_datetime: string
+          title: string
+          user_rsvp: string
+          user_saved: boolean
+        }[]
+      }
       get_occurrence_attendees_page: {
         Args: {
           p_date: string

@@ -303,3 +303,8 @@ New: `app/live.tsx`, `screens/LiveEvents.tsx`, `components/SeriesReviewsSection.
 `scripts/fake-backend-e2e/suiteLive.mjs`, `tests/{hostDashboardRpc,liveEvents,liveParity,reviewsService}.test.ts`,
 `tests/fixtures/liveParity.json`, `supabase/prepared/2026-11-20_live_events/`
 (migration + README), this document.
+**Handoff (2026-11-19, New York):** The live-events migration was moved to
+`supabase/migrations/` and applied locally. Verified 140 migrations through
+`20261120100000`, refreshed types, and 18 passing isolated SQL suites.
+Series reviews remains staged because older sibling worktrees still use
+the original review upsert. The two-file apply commands are historical.
