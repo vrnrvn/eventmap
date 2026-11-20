@@ -39,7 +39,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useIsRestoring, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/hooks/queryKeys';
 import { HostTipCard } from '@/components/HostTipCard';
-import { eventChatAccess } from '@/utils/eventChatAccess';
+import { chatPostingWindow, eventChatAccess } from '@/utils/eventChatAccess';
+import { formatEventDayLabel } from '@/utils/formatEventWhen';
 import { REHEARSAL_CHAT_BAR, REHEARSAL_NOT_SAVED } from '@/utils/rehearsal';
 import { useHostTip } from '@/hooks/useHostTip';
 import { getConnectivity, subscribeConnectivity } from '@/utils/connectivity';
@@ -219,6 +220,11 @@ export default function EventChatScreen() {
   const chatAccess = eventChatAccess(details?.user_rsvp, details?.rsvp_count ?? 0, postStatus);
   const attendeeAccess = chatAccess.state === 'open';
   const chatTurnedOff = chatAccess.state === 'off';
+  // D1 (EJ-7): posting closes CHAT_AFTER_END_DAYS after the event is over
+  // (the server's can_post already says so); this mirror only chooses the
+  // copy — "closed on <day>" instead of a misleading "waiting for attendees".
+  const postingWindow = details ? chatPostingWindow(details.event) : null;
+  const postingWindowClosed = postingWindow != null && !postingWindow.open;
   // Reading: attendees, plus hosts/admins moderating. Posting: server-decided
   // (attendee access minus bans and per-chat blocks).
   const canChat = attendeeAccess || (postStatus?.can_read ?? false);
@@ -1639,8 +1645,12 @@ export default function EventChatScreen() {
       return (
         <View style={styles.centerState}>
           <MessageCircle size={44} color={Colors.text.tertiary} />
-          <Text style={styles.centerTitle}>No messages yet</Text>
-          <Text style={styles.centerText}>Messages from attendees will show up here.</Text>
+          <Text style={styles.centerTitle}>{postingWindowClosed ? 'No messages were posted' : 'No messages yet'}</Text>
+          <Text style={styles.centerText}>
+            {postingWindowClosed
+              ? 'This chat is closed for new messages.'
+              : 'Messages from attendees will show up here.'}
+          </Text>
         </View>
       );
     }
@@ -1866,7 +1876,11 @@ export default function EventChatScreen() {
         <View style={styles.lockedNotice} accessibilityRole="alert">
           <Info size={16} color={Colors.text.secondary} />
           <Text style={styles.lockedNoticeText}>
-            This event was cancelled by the organizer. The chat stays open for everyone who was going.
+            {postingWindowClosed
+              ? 'This event was cancelled by the organizer. The chat is closed for new messages; the history stays readable.'
+              : postingWindow?.closesOn
+                ? `This event was cancelled by the organizer. The chat stays open for everyone who was going until ${formatEventDayLabel(postingWindow.closesOn)}.`
+                : 'This event was cancelled by the organizer. The chat stays open for everyone who was going.'}
           </Text>
         </View>
       ) : null}
@@ -1902,7 +1916,9 @@ export default function EventChatScreen() {
         <View style={[styles.lockedNotice, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <ShieldAlert size={16} color={Colors.text.secondary} />
           <Text style={styles.lockedNoticeText}>
-            {postStatus?.is_banned
+            {postingWindowClosed
+              ? `This chat closed on ${formatEventDayLabel(postingWindow.closesOn ?? new Date())}. You can still read the history.`
+              : postStatus?.is_banned
               ? 'Your account is suspended, so you can read but not post.'
               : postStatus?.is_blocked
                 ? postStatus.block_expires_at

@@ -1,5 +1,13 @@
 # Status and apply-day runbook — 2026-11-19
 
+> **Historical as of 2026-11-20.**
+> * Every file in this runbook is applied (140 / `20261120100000`), except
+>   `20261119110000_series_reviews.sql`.
+> * For that file, use `STATUS_2026-11-20_LIVE_REVIEWS_DASHBOARD.md` §3.2,
+>   not §3 here. Its version is now older than the latest applied one, so it
+>   needs `--include-all`.
+> * Next work: [`ROADMAP_2026-11-20.md`](ROADMAP_2026-11-20.md).
+
 **Handoff, 2026-11-18 (New York):** Sitting A is complete locally. The nine
 files are now in `supabase/migrations/`; the local database records 139
 migrations through `20261119130000`, and generated types are refreshed.

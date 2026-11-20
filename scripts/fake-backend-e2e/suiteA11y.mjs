@@ -1,7 +1,8 @@
 // Accessibility pass on the web build against the FAKE backend (no database).
 //
 //   node scripts/fake-backend-e2e/suiteA11y.mjs <repo> <dist> [scenarios] [axePath] [outDir]
-//   Scenarios: S,A,E,L,K,V and T (large text 1.3×/1.6× on the main screens).
+//   Scenarios: S,A,E,L,K,V and T (large text 1.3×/1.6× on the main screens),
+//   N (live page, series reviews), B (Plan B section and the "Can't make it?" sheet).
 //
 // Per screen: axe-core (WCAG 2.0/2.1 A + AA), controls with no accessible
 // name, controls under 44 px / 24 px, heading presence, Tab order and visible
@@ -280,6 +281,49 @@ if (run('T')) {
     check(`T@${factor} no uncaught exceptions`, h.errors().length === 0, h.errors().slice(0, 2).join(' | '));
     await h.close();
   }
+}
+
+// --- B: Plan B (2026-11-20, docs/PLAN_B_PLAN.md P1) -------------------------
+// The section on a cancelled event, and the "Can't make it?" sheet open.
+// Real clock: fixtures are dated from now, like makeData's.
+if (run('B')) {
+  const atH = (h) => new Date(Date.now() + h * 36e5).toISOString();
+  const cand = (h, i, s0, e0, extra = {}) => Object.assign(h.data.ranked[i], { start_datetime: atH(s0), end_datetime: atH(e0),
+    next_start_datetime: atH(s0), is_recurring: false, recurrence_pattern: null, status: 'active', user_rsvp: null, max_attendees: null, ...extra });
+  const setEv = (h, i, fields, rk = {}) => { Object.assign(h.data.ev[i], fields); Object.assign(h.data.ranked[i], fields, rk); return h.data.ev[i].id; };
+
+  const hc = await open({ ...P, viewport: [390, 844] });
+  const cid = setEv(hc, 1, { status: 'cancelled', start_datetime: atH(5), end_datetime: atH(8) });
+  cand(hc, 2, 5.25, 7, { category_id: hc.data.ev[1].category_id, distance_km: 0.6 });
+  cand(hc, 3, 5, 7, { distance_km: 1.2 });
+  cand(hc, 6, 6, 8, { distance_km: 2.5 });
+  await screenPass(hc, 'planb-cancelled', `/event/${cid}`, 9000);
+  const heading = await hc.eval(`[...document.querySelectorAll('[role=heading]')].some((e) => /Still want to go out/.test(e.innerText))`);
+  check('B planb-cancelled section title is a heading', heading === true);
+  await hc.close();
+
+  const hl = await open({ ...P, viewport: [390, 844] });
+  const lid = setEv(hl, 1, { status: 'active', start_datetime: atH(1 / 3), end_datetime: atH(3), is_recurring: false,
+    recurrence_pattern: null, max_attendees: null }, { user_rsvp: 'going' });
+  cand(hl, 2, -1, 2, { distance_km: 0.7 });
+  cand(hl, 3, 0.6, 2, { distance_km: 1.5 });
+  await hl.go(`/event/${lid}`, 9000);
+  check('B cant-make-it row opens the sheet', (await hl.click("Can't make it?")) === 'ok');
+  await sleep(3500);
+  const violations = await axe(hl);
+  const serious = (violations || []).filter((v) => ['serious', 'critical'].includes(v.impact) && !AXE_WARN.has(v.id));
+  check('B cant-make-it sheet axe: no serious/critical violations', serious.length === 0, serious.map((v) => `${v.id}×${v.count}`).join(', '));
+  const info = await hl.eval(INSPECT);
+  check('B cant-make-it sheet every visible control has a name', info.unlabeled.length === 0, info.unlabeled.slice(0, 3).map((u) => u.html).join(' || '));
+  check('B cant-make-it sheet no control under 24 px', info.tiny.length === 0, info.tiny.slice(0, 4).map((t) => `${t.role}:${t.name} ${t.w}×${t.h}`).join(', '));
+  const sheetHeading = await hl.eval(`[...document.querySelectorAll('[role=heading]')].some((e) => /Can.t make it/.test(e.innerText))`);
+  check('B cant-make-it sheet title is a heading', sheetHeading === true);
+  await hl.shot(path.join(outDir, 'planb-cant-make-it.png'));
+  await escape(hl);
+  await sleep(900);
+  check('B cant-make-it sheet closes on Escape', !/Free your spot so someone waiting/.test(await hl.text()));
+  check('B no uncaught exceptions', hl.errors().length === 0, hl.errors().slice(0, 2).join(' | '));
+  await hl.close();
 }
 
 // --- N: surfaces added 2026-11-19 (live page, series reviews) -------------

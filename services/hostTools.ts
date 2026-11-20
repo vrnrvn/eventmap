@@ -470,9 +470,25 @@ export const hostToolsService = {
     return { status: 'active', notified: 0 };
   },
 
-  /** Copies the event into a new draft and returns its id. */
-  async duplicateEvent(eventId: string): Promise<string> {
-    const { data, error } = await supabase.rpc('duplicate_event', { p_event_id: eventId });
+  /**
+   * Copies the event into a new draft and returns its id — one call
+   * (duplicate_event v2, 20261118110000): the chosen start/end and title are
+   * written by the server, which also copies event_type and the chat set-up
+   * and records `duplicated_from`. `requestKey` makes it idempotent: the same
+   * key returns the draft already made instead of a second one (a double tap,
+   * or a retry after a lost response).
+   */
+  async duplicateEvent(
+    eventId: string,
+    opts: { start: Date; end: Date; title: string; requestKey: string }
+  ): Promise<string> {
+    const { data, error } = await supabase.rpc('duplicate_event', {
+      p_event_id: eventId,
+      p_start: opts.start.toISOString(),
+      p_end: opts.end.toISOString(),
+      p_title: opts.title,
+      p_client_request_id: opts.requestKey,
+    });
     if (error) {
       if (isMissingDbFunction(error)) throw new HostToolsUnavailableError('Duplicating events');
       throw error;
@@ -480,6 +496,20 @@ export const hostToolsService = {
     const id = typeof data === 'string' ? data : (data as { id?: string })?.id;
     if (!id) throw new Error('No copy was returned');
     return id;
+  },
+
+  /**
+   * How many drafts/events were copied from this one (`events.duplicated_from`,
+   * 20261118110000). Owners can read their own events, drafts included, so
+   * this is a plain head count on an indexed column.
+   */
+  async countCopies(eventId: string): Promise<number> {
+    const { count, error } = await supabase
+      .from('events')
+      .select('id', { count: 'exact', head: true })
+      .eq('duplicated_from', eventId);
+    if (error) throw error;
+    return count ?? 0;
   },
 
   /** Lifts an event ban and the chat block that came with the removal. */

@@ -428,6 +428,15 @@ export default function ManageEvent() {
   const going = overview?.going ?? details?.rsvp_count ?? 0;
   const capacity = summarizeCapacity(going, event?.max_attendees);
 
+  // "Run it again" done on ANY device: drafts copied from this event
+  // (`duplicated_from`, v2). Only asked once the event is over — the only
+  // stage the playbook shows that step — and only for the owner.
+  const copiesQuery = useQuery({
+    queryKey: ['host', 'event', id, 'copies'],
+    queryFn: () => hostToolsService.countCopies(id!),
+    enabled: !!id && isOwner && (phase === 'ended' || phase === 'cancelled'),
+  });
+
   /**
    * Per-event checklist (docs/HOST_EVENT_PLAYBOOK_PLAN.md P2). Owner only,
    * like the tips. Facts come from what this screen already loads; anything
@@ -444,9 +453,10 @@ export default function ManageEvent() {
             links: details?.links?.length ?? null,
             photos: details?.photos?.length ?? null,
             pinnedMessageId: chatStatus ? (chatStatus.pinned_message_id ?? null) : undefined,
+            copies: copiesQuery.data ?? null,
           })
         : {},
-    [event, overview, details?.links?.length, details?.photos?.length, chatStatus]
+    [event, overview, details?.links?.length, details?.photos?.length, chatStatus, copiesQuery.data]
   );
   // A series stages off its next occurrence, not its first date.
   const playbookInput = useMemo(
@@ -990,8 +1000,9 @@ export default function ManageEvent() {
   // landing a week out at whatever time it happens to be (utils/duplicateDate).
   const handleDuplicate = useCallback(() => {
     if (!id || !event) return;
-    duplicate.start(duplicateSourceFromEvent({ ...event, id }, chatStatus?.chat_mode ?? null));
-  }, [id, event, chatStatus?.chat_mode, duplicate]);
+    // The chat set-up and event type are copied server-side (v2).
+    duplicate.start(duplicateSourceFromEvent({ ...event, id }));
+  }, [id, event, duplicate]);
 
   const handleToggleUnlisted = useCallback(
     async (unlisted: boolean) => {

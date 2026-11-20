@@ -1,6 +1,6 @@
 import { eventsService } from './events';
 import { hostToolsService } from './hostTools';
-import { eventChatService, type ChatMode } from './eventChat';
+import { eventChatService } from './eventChat';
 import { presetSettingsToApply, type EventPresetId } from '@/utils/eventPresets';
 
 /**
@@ -55,34 +55,4 @@ export async function applyPresetSettings(
     }
   }
   return { skipped: false, failed };
-}
-
-/**
- * `duplicate_event` copies capacity, waitlist and RSVP mode but not the chat
- * mode (it lives in event_chat_settings) or the preset id. A copy should be
- * set up like its source — that is what hosts expect from "Duplicate" — so
- * the two are carried over here, best-effort, after the copy exists.
- *
- * Returns true when everything that needed copying was copied.
- */
-export async function carryOverToDuplicate(
-  newEventId: string,
-  source: { eventType?: EventPresetId | null; chatMode?: ChatMode | null }
-): Promise<boolean> {
-  let ok = true;
-  if (source.eventType) {
-    try {
-      await eventsService.updateEvent(newEventId, { event_type: source.eventType });
-    } catch {
-      // Analytics only; a missing column is expected before 20261110120000.
-    }
-  }
-  if (source.chatMode && source.chatMode !== 'open') {
-    try {
-      await eventChatService.setMode(newEventId, { mode: source.chatMode });
-    } catch {
-      ok = false;
-    }
-  }
-  return ok;
 }

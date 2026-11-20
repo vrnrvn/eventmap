@@ -1,10 +1,25 @@
 # Status — live events, series reviews, host dashboard (2026-11-20)
 
+> **Correction, 2026-11-20 (re-verified read-only against the DB and git):**
+> * This work **is committed**: `8f18450` (code and docs) and `c34139c` (the
+>   live-events migration moved into `supabase/migrations/`, plus types).
+> * **`20261120100000_get_live_events.sql` is applied** to the shared local
+>   DB: 140 migrations through `20261120100000`. Its function bodies match the
+>   repo file, and `get_live_events` / `event_occurrence_in_progress` are in
+>   `types/supabase.generated.ts`.
+> * The only prepared file left is `20261119110000_series_reviews.sql`.
+> * Typecheck is clean and `npx vitest run` passes 1,376/1,376.
+> * Where the text below says "nothing is committed", "two pending files" or
+>   "live events: partial", it describes the state before that commit.
+> * §3.1's `SCRATCH_DB` option is not available to agents; see the note there.
+> * Next work: [`ROADMAP_2026-11-20.md`](ROADMAP_2026-11-20.md).
+
 **Read this first.** Single source of truth for the work done on branch
 `hfi/ffea3d71-7239-4d64-9f7e-4241cceea0f1/oak` between 2026-11-19 and
 2026-11-20: what is finished, what is partial, what the database still needs,
-and how it was verified. **Nothing is committed** (owner instruction); every
-change listed below is in the working tree.
+and how it was verified. ~~**Nothing is committed** (owner instruction); every
+change listed below is in the working tree.~~ Committed since; see the
+correction above.
 
 Companion docs: [`STATUS_AND_APPLY_DAY_2026-11-19.md`](STATUS_AND_APPLY_DAY_2026-11-19.md)
 (the older apply-day runbook — still valid for everything before this work),
@@ -23,10 +38,10 @@ and the READMEs in `supabase/prepared/2026-11-19_series_reviews/` and
 | Reviews submit through `submit_review()` (D2 step 2) | **Finished** | Nothing. Function already in the local DB |
 | Drafts excluded from "upcoming" lists | **Finished** | Nothing |
 | Series reviews UI (D2 step 4) | **Partial — built, dormant** | Owner applies `20261119110000_series_reviews.sql` (§3); the UI turns on by itself |
-| Live events page (phase 3) | **Finished on fallback; one-request path partial** | Owner applies `20261120100000_get_live_events.sql` (§3); the page upgrades by itself |
+| Live events page (phase 3) | **Finished; RPC applied locally (`c34139c`)** | §3.3's real-DB `/live` check (the `untypedRpc` clean-up was done 2026-11-20) |
 | Clock-independent browser tests | **Finished** | Nothing |
 | UI/UX review + accessibility fixes | **Finished** | Two reviewed, documented follow-ups (§6) |
-| Commit | **Not done** | Owner decision |
+| Commit | **Done** (`8f18450`, `c34139c`) | Nothing |
 
 ---
 
@@ -47,7 +62,7 @@ and the READMEs in `supabase/prepared/2026-11-19_series_reviews/` and
 | Order | File | Effect when applied | Safe to apply now? |
 | --- | --- | --- | --- |
 | 1 | `supabase/prepared/2026-11-19_series_reviews/20261119110000_series_reviews.sql` | Reviews per recurring series: `reviews.event_id`, two partial unique indexes (replacing `UNIQUE (user_id, business_id)`), `user_can_review_event`, `review_event_venue`, `get_event_review_summary`, `submit_review` gains `p_event_id`. Series reviews count toward the venue average (owner decision) | **Only after the precondition in §3.1** |
-| 2 | `supabase/prepared/2026-11-20_live_events/20261120100000_get_live_events.sql` | `event_occurrence_in_progress()` + `get_live_events()`. No schema change; nothing else references them | Yes, any time — inert until the live page probes it |
+| 2 | ~~`supabase/prepared/2026-11-20_live_events/20261120100000_get_live_events.sql`~~ **now `supabase/migrations/20261120100000_get_live_events.sql`, APPLIED** | `event_occurrence_in_progress()` + `get_live_events()`. No schema change; nothing else references them | Done (`c34139c`) |
 
 The two are independent; the order above is just filename order.
 
@@ -67,14 +82,43 @@ of:
 
 * **(recommended)** commit this branch and bring its `services/reviews.ts`
   (the `submit_review()` path) into those branches; or
-* apply only in a per-worktree scratch DB (`SCRATCH_DB`, see
-  `scripts/db-scratch.sh`) until they are updated; or
+* ~~apply only in a per-worktree scratch DB (`SCRATCH_DB`, see
+  `scripts/db-scratch.sh`) until they are updated~~. **Not an option
+  (corrected 2026-11-20):** `db-scratch.sh` refuses to run without
+  `ALLOW_SHARED_CLUSTER=1`, because a scratch database lives inside the shared
+  cluster (`docs/ISSUES.md` ground rules). Validate in a throwaway
+  `scripts/pg17-isolated.sh` container instead, which tests the file but does
+  not let the app use it; or
 * accept that review saving is broken in those worktrees until they update.
 
 Check with: `git show <their-commit>:services/reviews.ts | grep -n onConflict`
 (no match = safe).
 
+**Re-checked 2026-11-20:** both sibling worktrees are still at `a5ba608`, and
+that commit still matches (`services/reviews.ts:52`). They also carry 31 and 39
+uncommitted changes, which could not be inspected from this worktree. Check
+from inside each one with `grep -n onConflict services/reviews.ts`.
+**Precondition: unmet.**
+
 ### 3.2 Commands
+
+> **Updated 2026-11-20. File 2 is already applied, so skip its `apply` and
+> `git mv` lines.** Differences from the block below, for file 1 alone:
+>
+> * **Out-of-order version.** File 1 (`20261119110000`) is *older* than the
+>   latest applied version (`20261120100000`). The Supabase CLI does not
+>   insert an older local file behind the latest applied one unless you pass
+>   `--include-all`; the flag is confirmed in the installed CLI v2.98.2. In
+>   step 3 below, use `npx supabase migration up --local --include-all`.
+> * **Before step 3**, run `npx supabase migration list --local` and confirm
+>   that `20261119110000` is the only local-only row.
+> * **Always pass `--local`.** This worktree is `supabase link`ed to a hosted
+>   project (see `MIGRATIONS_PENDING.md` §0), and `migration list` defaults
+>   to `--linked`. Never pass `--linked`.
+> * **Step 4's check becomes:** `select count(*), max(version) …` →
+>   **141 | 20261120100000**. The maximum does not change. Then confirm
+>   `select 1 from supabase_migrations.schema_migrations where version = '20261119110000';`
+>   returns a row.
 
 ```sh
 # 0. Commit this branch first (a clean point to return to).
@@ -115,6 +159,11 @@ npm run typecheck && npx vitest run
    `untypedRpc` helper (they were not in the generated types). Replace with
    `supabase.rpc(...)`; the `.eq('event_id' as never, ...)` casts in
    `services/reviews.ts` can drop `as never`.
+   **Update 2026-11-20:** the `services/liveEvents.ts` half is DONE (typed
+   `supabase.rpc('get_live_events', …)`, covered by
+   `tests/liveEventsService.test.ts`). The `services/reviews.ts` half still
+   waits for series reviews step 3, because its functions are not in the
+   types until then.
 2. **Real-DB checks** (the fake backend cannot cover these):
    * A recurring event you attended: "Reviews of this series" shows with its
      own average; "Review this series" submits; after submitting, the button

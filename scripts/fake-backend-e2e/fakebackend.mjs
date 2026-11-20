@@ -155,7 +155,8 @@ export function makeRouter(data, { unknown = [], overrides = {} } = {}) {
         return { json: data.ranked.slice(off, off + (b.result_limit || 100)).map((e) => ({ ...e, has_ended: endedNow(e) })) }; }
       case 'rpc/get_event_details': {
         const e = data.ev.find((x) => x.id === body(r).event_uuid); if (!e) return { json: null };
-        const rk = data.ranked.find((x) => x.id === e.id);
+        // A draft made in-run (duplicate_event below) has no ranked row.
+        const rk = data.ranked.find((x) => x.id === e.id) ?? { rsvp_count: 0, save_count: 0, user_rsvp: null, user_saved: false };
         return { json: { event: e, business: data.biz, category: data.categories.find((c) => c.id === e.category_id), links: [], photos: [],
           rsvp_count: rk.rsvp_count, save_count: rk.save_count, user_rsvp: rk.user_rsvp, user_saved: rk.user_saved, user_following_business: false,
           // Opt-in per test (the key exists once 20261102160000 is applied).
@@ -171,7 +172,8 @@ export function makeRouter(data, { unknown = [], overrides = {} } = {}) {
       case 'events': {
         const id = eqv(q.id);
         if (id) { const e = data.ev.find((x) => x.id === id); return one(e ? { status: e.status, cover_image_url: e.cover_image_url } : null, r); }
-        const rows = data.ev.filter((e) => !q.business_id || e.business_id === eqv(q.business_id));
+        const rows = data.ev.filter((e) => (!q.business_id || e.business_id === eqv(q.business_id))
+          && (!q.duplicated_from || e.duplicated_from === eqv(q.duplicated_from)));
         return counted(page(rows, r), rows.length, r);
       }
       case 'rpc/get_event_attendees_page': { const b = body(r); const off = b.p_offset || 0, lim = b.p_limit || 30;
@@ -198,7 +200,27 @@ export function makeRouter(data, { unknown = [], overrides = {} } = {}) {
       case 'rpc/get_event_review_summary': case 'rpc/user_can_review_event':
         return { status: 404, json: { code: 'PGRST202', message: 'not found' } };
       case 'saves': case 'rsvps': return r.method === 'GET' ? one(null, r) : { json: [] };
-      case 'rpc/get_event_chat_post_status': return { json: [{ can_read: true, can_post: true, is_banned: false, is_blocked: false,
+      // duplicate_event v2 (20261118110000): one call with the date, title and
+      // an idempotency key. Records every call in data.duplicateCalls; the same
+      // key returns the draft already made, like the server.
+      case 'rpc/duplicate_event': {
+        const b = body(r);
+        data.duplicateCalls = (data.duplicateCalls || []).concat([b]);
+        if (data.failDuplicate) { data.failDuplicate -= 1; return { status: 500, json: { message: 'boom' } }; }
+        data.duplicateKeys ??= {};
+        if (b.p_client_request_id && data.duplicateKeys[b.p_client_request_id]) return { json: data.duplicateKeys[b.p_client_request_id] };
+        const src = data.ev.find((e) => e.id === b.p_event_id);
+        if (!src) return { status: 400, json: { code: 'P0001', message: 'event_not_found' } };
+        const id = `dddddddd-dddd-4ddd-8ddd-${String(data.duplicateCalls.length).padStart(12, '0')}`;
+        data.ev.push({ ...src, id, title: b.p_title || `${src.title} (copy)`, start_datetime: b.p_start, end_datetime: b.p_end,
+          publish_state: 'draft', status: 'active', is_recurring: false, recurrence_pattern: null, duplicated_from: src.id });
+        if (b.p_client_request_id) data.duplicateKeys[b.p_client_request_id] = id;
+        return { json: id };
+      }
+      // data.chatPostClosed: D1's posting window (end + 7 days) has passed.
+      // A flag, not a computation: the lifecycle suite moves the PAGE's clock
+      // while this router keeps the real one, so it cannot tell time itself.
+      case 'rpc/get_event_chat_post_status': return { json: [{ can_read: true, can_post: !data.chatPostClosed, is_banned: false, is_blocked: false,
         is_host: false, is_admin: false, muted: false, locked: false, slow_mode_seconds: data.slowMode ?? 0, block_expires_at: null,
         last_read_at: null, last_post_at: data.lastPostAt ?? null, chat_mode: 'open', open_policy: 'two_going', pinned_message_id: null }] };
       case 'rpc/get_event_chat_messages': { const b = body(r); const lim = b.p_limit || 100;

@@ -75,3 +75,18 @@ export function runAgainWhen(
   const duration = Math.max(0, source.end.getTime() - source.start.getTime());
   return { start, end: new Date(start.getTime() + duration) };
 }
+
+/**
+ * `duplicate_event` v2's refusals (20261118110000) in the host's words; any
+ * other failure gets the generic retry line. The sheet already keeps the start
+ * in the future, so the first two only fire on a clock that drifted while it
+ * was open.
+ */
+export function duplicateRefusalMessage(err: unknown): string {
+  const message = (err as { message?: string } | null)?.message ?? '';
+  if (/new start must be in the future/i.test(message)) return 'Pick a start time in the future.';
+  if (/new end must be after the new start/i.test(message)) return 'The end has to be after the start.';
+  if (/account suspended/i.test(message)) return 'Your account is suspended, so you can’t create events.';
+  if (/only the event host/i.test(message)) return 'Only the host can run this event again.';
+  return 'Could not duplicate. Please try again.';
+}

@@ -553,6 +553,13 @@ export function playbookFactsFromHub(input: {
   photos?: number | null;
   /** `pinned_message_id` from the chat status; undefined = status not loaded. */
   pinnedMessageId?: string | null;
+  /**
+   * Events copied from this one (`events.duplicated_from`, 20261118110000).
+   * A copy proves "run it again" on any device. Zero or unknown says nothing
+   * (a draft may have been deleted, or the event made recurring instead), so
+   * the device-local flag still applies then.
+   */
+  copies?: number | null;
 }): Partial<PlaybookFacts> {
   const now = input.now ?? new Date();
   const hours = hoursUntilStart(input.event, now);
@@ -573,6 +580,7 @@ export function playbookFactsFromHub(input: {
   if (announced && hoursSinceEnd != null && hoursSinceEnd >= 0 && hoursSinceEnd <= DAY_OF_HOURS) {
     facts.thankYouSent = true;
   }
+  if ((input.copies ?? 0) > 0) facts.ranAgain = true;
   return facts;
 }
 

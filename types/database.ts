@@ -3,6 +3,11 @@ export type SocialHandles = {
   facebook?: string;
 };
 
+/**
+ * `profiles.notification_preferences` (jsonb). Absent = on, except where
+ * noted. Every key the server reads is listed (checked against the
+ * migrations 2026-11-20: `notification_preferences->>'…'`).
+ */
 export type NotificationPreferences = {
   /** "Still interested?" nudge the day before an event marked as interested. */
   interested_reminder?: boolean;
@@ -10,9 +15,17 @@ export type NotificationPreferences = {
   new_event_from_followed?: boolean;
   event_update?: boolean;
   rsvp?: boolean;
+  /** Written by Settings; no server code reads it yet. */
   nearby_event?: boolean;
   /** Announcements sent by hosts of events you RSVP'd to (20261103130000). */
   host_announcement?: boolean;
+  /** Event chat messages (`chat_message` push routing). */
+  chat_message?: boolean;
+  /**
+   * "New event matching your interests" (`notify_interested_for_event`,
+   * 20261109170000 / 20261112100000). **Opt-in: absent = off.**
+   */
+  interest_events?: boolean;
 };
 
 export type Profile = {

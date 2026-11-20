@@ -1,6 +1,15 @@
 # Prepared migration — EJ-17, host notices for series (2026-11-19)
 
-**Status: PREPARED, NOT APPLIED.** One file, independent of every other
+> **Status 2026-11-20: APPLIED locally** as
+> `supabase/migrations/20261119120000_series_host_notices.sql`, and the
+> `host_event_notices` cron job is scheduled. **The Settings copy follow-up
+> is DONE (2026-11-20).** `screens/Settings.tsx` now says "A few hours before
+> each event starts, including every date of a series" and "After each event
+> or series date: how it went, and what to do next". Verified rendered in
+> business mode at 390/320 px (`suiteHostUi` U5 18/18 plus a direct text
+> check).
+
+*Original status:* **PREPARED, NOT APPLIED.** One file, independent of every other
 prepared folder; apply it in any order with the rest.
 
 | # | File | Fixes | Owner decision |

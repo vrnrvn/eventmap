@@ -66,23 +66,3 @@ describe('applyPresetSettings', () => {
     expect(r).toEqual({ skipped: false, failed: [] });
   });
 });
-
-describe('carryOverToDuplicate', () => {
-  it('copies the preset id and a non-default chat mode', async () => {
-    const { carryOverToDuplicate } = await import('@/services/eventPresetSettings');
-    expect(await carryOverToDuplicate('copy', { eventType: 'large', chatMode: 'announcements' })).toBe(true);
-    expect(updateEvent).toHaveBeenCalledWith('copy', { event_type: 'large' });
-    expect(setMode).toHaveBeenCalledWith('copy', { mode: 'announcements' });
-  });
-  it('does nothing for a default-chat event without a preset', async () => {
-    const { carryOverToDuplicate } = await import('@/services/eventPresetSettings');
-    expect(await carryOverToDuplicate('copy', { eventType: null, chatMode: 'open' })).toBe(true);
-    expect(updateEvent).not.toHaveBeenCalled();
-    expect(setMode).not.toHaveBeenCalled();
-  });
-  it('reports a failed chat copy so the host can be told', async () => {
-    const { carryOverToDuplicate } = await import('@/services/eventPresetSettings');
-    setMode.mockRejectedValue(new Error('rpc missing'));
-    expect(await carryOverToDuplicate('copy', { chatMode: 'off' })).toBe(false);
-  });
-});

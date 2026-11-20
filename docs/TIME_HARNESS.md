@@ -66,13 +66,19 @@ value in a scratch copy) fails loudly with the actual value in the message.
 - `suiteLifecycle.mjs` — one 2-hour event with fixed dates; **only the clock
   moves**: joinable two days early (L1), the minute-precise "Starts in 40 min"
   (L2), "Happening now" mid-event with the chat row still offered (L3), the
-  ended page with join and chat gone and the review offered (L4), and the end
-  passing **under an open page** (L5): stale until a reload — EJ-12's open
-  gap, pinned as documentation, not as desired behaviour; flip that check when
-  an in-page clock lands.
+  ended page with join gone, the review offered and the chat row reading
+  "Chat open until <day>" (L4 — D1's 7-day posting window, 20261118150000),
+  the end passing **under an open page** (L5): stale until a reload — EJ-12's
+  open gap, pinned as documentation, not as desired behaviour; flip that check
+  when an in-page clock lands — and 8 days after, past the window (L6): the
+  row reads closed, the chat screen keeps the history with a "closed on <day>"
+  notice and no composer. L6 sets the fixture flag `data.chatPostClosed`
+  because the fake's router runs on the real clock and cannot see the page's
+  virtual one. L7 (not time-driven, but the "after" stage) runs an ended
+  event again through duplicate_event v2 and pins the idempotency key.
 
 ```sh
-scripts/fake-backend-e2e/run.sh suiteLifecycle        # 21 checks
+scripts/fake-backend-e2e/run.sh suiteLifecycle        # 39 checks (L1–L7)
 ```
 
 The session token is minted a week long (`expOffsetS`) so the clock walk

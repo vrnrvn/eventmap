@@ -1,6 +1,19 @@
 # Prepared migrations — phase 4 (2026-11-18)
 
-**Status: PREPARED, NOT APPLIED.** Four files: Batch D's chat window, the
+> **Status 2026-11-20: all four files are APPLIED locally**
+> (`20261118120000` … `20261118150000` in `supabase/migrations/`). Of the
+> client follow-ups at the end of this file:
+> * **D1 (chat window): client half DONE 2026-11-20.** `CHAT_AFTER_END_DAYS`
+>   and `chatPostingWindow` are in `utils/eventChatAccess.ts`. The event page
+>   keeps the chat row after the end, and the chat screen shows "closed on
+>   <day>". `suiteLifecycle` L4 was flipped and L6 was added (26/26).
+> * **B4 is not done.** `useEffectiveNextDates` is still used by eight
+>   screens/utils.
+> * S1/S2/O-5 and EJ-24 needed nothing.
+>
+> Tracked in `docs/ROADMAP_2026-11-20.md`.
+
+*Original status:* **PREPARED, NOT APPLIED.** Four files: Batch D's chat window, the
 biggest open correctness item (E-R1), the recurrence edge fixes, and the
 Joined-lists gap. Nothing in the shipped app depends on any of them
 (ground rules: no probe-and-retry), so they wait for your apply-day with the

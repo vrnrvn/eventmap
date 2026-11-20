@@ -1,6 +1,12 @@
 # Prepared migration — the host dashboard in one request (2026-11-19)
 
-**Status: PREPARED, NOT APPLIED.** One file, independent of every other
+> **Status 2026-11-20: APPLIED locally** as
+> `supabase/migrations/20261119130000_get_host_dashboard.sql`, **and the
+> client cutover is done**: `hooks/useHostDashboard.ts` →
+> `hostToolsService.getHostDashboard`, falling back to the N-call path where
+> the function is missing. Nothing left here.
+
+*Original status:* **PREPARED, NOT APPLIED.** One file, independent of every other
 prepared folder. **Applying it changes nothing on its own** — it adds an RPC
 the client does not call yet. The dashboard keeps working exactly as it does
 today until the cutover below.

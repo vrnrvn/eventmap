@@ -1,9 +1,21 @@
 # Prepared migration — live events page RPC (2026-11-20)
 
-**Status: PREPARED, NOT APPLIED — anywhere.** One file, no schema change, two
-new functions nothing else references. The shared local database has NOT been
-touched (owner constraint, 2026-11-19: all database changes are applied by the
-owner, later, in one sitting).
+**Status: APPLIED locally (verified read-only 2026-11-20).**
+* The file now lives at
+  `supabase/migrations/20261120100000_get_live_events.sql`, moved in
+  `c34139c`. This folder keeps only this README.
+* The shared DB records 140 migrations through `20261120100000`.
+* Both function bodies match the file, and the types are regenerated.
+* The apply steps below are history; do not repeat them.
+* The `untypedRpc` clean-up in `services/liveEvents.ts` was done 2026-11-20
+  (typed call; `tests/liveEventsService.test.ts`). Still open: the real-DB
+  `/live` check in
+  `docs/STATUS_2026-11-20_LIVE_REVIEWS_DASHBOARD.md` §3.3.
+
+*Original status (2026-11-19):* PREPARED, NOT APPLIED — anywhere. One file, no
+schema change, two new functions nothing else references. The shared local
+database had NOT been touched (owner constraint, 2026-11-19: all database
+changes are applied by the owner, later, in one sitting).
 
 | File | Adds |
 | --- | --- |

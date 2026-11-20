@@ -2,13 +2,18 @@
  * Live events (roadmap phase 3): what is running right now nearby, then what
  * starts soon.
  *
- * Preferred path: `get_live_events` (PREPARED, supabase/prepared/
- * 2026-11-20_live_events — not applied anywhere yet). Until the owner applies
- * it, every backend takes the fallback: one get_ranked_events page plus the
- * recurring candidates' exceptions, classified on the device with the same
+ * Preferred path: `get_live_events` (20261120100000, APPLIED locally
+ * 2026-11-19 in c34139c; in the generated types). It ranks by proximity,
+ * popularity, premium, interests (a boost, never a filter) and a seeded
+ * sprinkle.
+ *
+ * Fallback, kept on purpose: where the function is missing (a backend behind
+ * the migration set), one get_ranked_events page plus the recurring
+ * candidates' exceptions, classified on the device with the same
  * occurrenceInProgress the event page uses (parity with the SQL is held by
- * tests/liveParity.test.ts). The fallback ranks by distance only; the RPC
- * adds popularity, premium, interests and the seeded sprinkle.
+ * tests/liveParity.test.ts). It only changes what is shown, never what is
+ * written, which is the kind of degradation the client/schema policy allows
+ * (docs/ISSUES.md ground rules). It ranks by distance only.
  */
 import { supabase } from './supabase';
 import { eventsService } from './events';
@@ -28,13 +33,6 @@ export { SOON_WINDOW_MINUTES };
 /** How the list was produced; 'fallback' lacks the interest/sprinkle ranking. */
 export type LiveEventsResult = { items: LiveEvent[]; source: 'rpc' | 'fallback' };
 
-const untypedRpc = (fn: string, args: Record<string, unknown>) =>
-  (
-    supabase as unknown as {
-      rpc: (f: string, a: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string } | null }>;
-    }
-  ).rpc(fn, args);
-
 export const liveEventsService = {
   async getLiveEvents(
     lat: number,
@@ -45,15 +43,19 @@ export const liveEventsService = {
     const limit = opts.limit ?? 30;
 
     if (!isRpcKnownMissing('get_live_events')) {
-      const { data, error } = await untypedRpc('get_live_events', {
+      // Omitted keys take the SQL defaults (both NULL: no interest boost, an
+      // unseeded sprinkle), which is what sending null used to mean.
+      const { data, error } = await supabase.rpc('get_live_events', {
         user_lat: lat,
         user_lng: lng,
         radius_km: radiusKm,
         p_limit: limit,
         p_soon_minutes: SOON_WINDOW_MINUTES,
-        p_preferred_category_ids: opts.preferredCategories?.length ? opts.preferredCategories : null,
-        p_seed: opts.seed ?? null,
+        p_preferred_category_ids: opts.preferredCategories?.length ? opts.preferredCategories : undefined,
+        p_seed: opts.seed,
       });
+      // The generated row types live_status as plain text; the SQL only ever
+      // returns 'live' | 'soon' (20261120100000), which LiveEvent narrows to.
       if (!error) return { items: (data ?? []) as LiveEvent[], source: 'rpc' };
       if (!isMissingDbFunction(error)) throw error;
       markRpcMissing('get_live_events');

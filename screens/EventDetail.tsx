@@ -26,7 +26,7 @@ import { Image as ExpoImage } from 'expo-image';
 import { eventsService } from '@/services/events';
 import { getEventDataVersion } from '@/utils/eventDataVersion';
 import { eventChatService } from '@/services/eventChat';
-import { eventChatAccess, type ChatAccessSettings } from '@/utils/eventChatAccess';
+import { chatPostingWindow, eventChatAccess, type ChatAccessSettings } from '@/utils/eventChatAccess';
 import { calendarNeedsUpdate } from '@/utils/calendarStale';
 import { goBackOr } from '@/utils/navigation';
 import { socialService } from '@/services/social';
@@ -126,6 +126,11 @@ import {
 import { occurrenceErrorMessage, occurrencesService } from '@/services/occurrences';
 import { useOccurrenceExceptions } from '@/hooks/useOccurrenceExceptions';
 import { hasEventEnded, startsSoonLabel } from '@/utils/eventStatus';
+import { formatEventDayLabel } from '@/utils/formatEventWhen';
+import { NO_PLAN_B, planBMoments, type PlanBMoments } from '@/utils/planBMoments';
+import { usePlanB } from '@/hooks/usePlanB';
+import { PlanBSection } from '@/components/PlanBSection';
+import { CantMakeItSheet } from '@/components/CantMakeItSheet';
 import { describeEventTime, formatInZone, getDeviceTimeZone, isValidTimeZone, zoneAbbreviation } from '@/utils/timezone';
 import {
   buildRecurrenceRule,
@@ -367,6 +372,13 @@ export default function EventDetail() {
   // date-only RSVPs, which this client can't see). Previewing ignores it: the
   // host can always read their own chat, the simulated guest may not.
   const chatIsOpen = chatAccess.state === 'open' || (!rehearsing && chatCanRead && chatAccess.state !== 'off');
+  // D1 (EJ-7): after the event (ended or cancelled) the chat stays available
+  // to its readers for CHAT_AFTER_END_DAYS, then turns read-only. The row
+  // only shows post-event for people who can actually read it — there is
+  // nothing to join any more.
+  const chatWindow = shownDetails
+    ? chatPostingWindow(shownDetails.event, rehearsalNow ?? new Date())
+    : { open: true, closesOn: null };
 
   const allPhotoUrls = useMemo(() => {
     if (!details) return [];
@@ -1228,6 +1240,50 @@ export default function EventDetail() {
     return `${formatClock(start, tz)} – ${multiDay ? formatDateTime(shiftedEnd.toISOString(), tz) : formatClock(shiftedEnd, tz)}`;
   };
 
+  // ── Plan B (docs/PLAN_B_PLAN.md, P1) ──────────────────────────────────────
+  // Which moments apply, from what the page already holds (no request): the
+  // event cancelled or full (T1/T3), a series date the viewer was going to
+  // cancelled (T2), or "Can't make it?" for a session on now / about to start
+  // (T5). Never for the host, the rehearsal preview, or a list-row preview.
+  // Hooks: above the early returns.
+  const planB = useMemo(
+    () =>
+      shownDetails
+        ? planBMoments({
+            details: shownDetails,
+            userId: user?.id ?? null,
+            userBusinessId: userBusiness?.id ?? null,
+            exceptions: occurrenceExceptions,
+            dateOverrides: viewerDateOverrides,
+            now: new Date(),
+            enabled: !rehearsing && !isPreview,
+          })
+        : NO_PLAN_B,
+    [shownDetails, user?.id, userBusiness?.id, occurrenceExceptions, viewerDateOverrides, rehearsing, isPreview]
+  );
+  const pagePlanB = usePlanB(planB.page, !!planB.page);
+  const datePlanB = usePlanB(planB.date?.anchor ?? null, !!planB.date);
+  // The sheet keeps the anchor it opened with: once the spot is freed the
+  // viewer is no longer going, `planB.late` turns null, and the picks must
+  // stay on screen — that is the moment they are most useful.
+  const [cantMakeIt, setCantMakeIt] = useState<PlanBMoments['late']>(null);
+  const latePlanB = usePlanB(cantMakeIt?.anchor ?? null, !!cantMakeIt);
+  const [freeingSpot, setFreeingSpot] = useState(false);
+  // Freed = the sheet is open for a session the viewer no longer attends.
+  const spotFreed = !!cantMakeIt && !planB.late;
+  const freeMySpot = async () => {
+    if (!cantMakeIt || freeingSpot) return;
+    setFreeingSpot(true);
+    try {
+      // Same paths (and guards: preview, offline, attendance frozen, banned)
+      // as the page's own controls. A series gives up only that date (D2).
+      if (cantMakeIt.seriesDateKey) await toggleDateRsvp(cantMakeIt.seriesDateKey, 'going');
+      else await handleRemoveRsvp();
+    } finally {
+      setFreeingSpot(false);
+    }
+  };
+
   if (loading) {
     // Static skeleton mirroring the hero + content-card layout. The floating
     // back button stays live so users aren't stuck while details load.
@@ -1687,6 +1743,32 @@ export default function EventDetail() {
             ) : null}
           </View>
 
+          {/* Plan B, T1/T3: the event was cancelled, or it's full for this
+              viewer — alternatives around the same time, near the venue. */}
+          {planB.page && pagePlanB.data ? (
+            <PlanBSection
+              anchor={planB.page}
+              picks={pagePlanB.data.picks}
+              widened={pagePlanB.data.widened}
+              seeMoreHref={category?.slug ? `/category/${category.slug}` : '/'}
+            />
+          ) : null}
+
+          {/* Plan B, T5: going to a session that is on now or starts within
+              30 minutes. Quiet: a row, not a banner. */}
+          {planB.late ? (
+            <TouchableOpacity
+              style={styles.cantMakeItRow}
+              onPress={() => setCantMakeIt(planB.late)}
+              accessibilityRole="button"
+              accessibilityLabel="Can't make it? Free your spot and see what else is on nearby"
+            >
+              <Text style={styles.cantMakeItText}>Can&apos;t make it?</Text>
+              <Text style={styles.cantMakeItHint}>Free your spot · see what else is on</Text>
+              <ChevronRight size={18} color={Colors.text.tertiary} />
+            </TouchableOpacity>
+          ) : null}
+
           {!eventCancelled ? (
           <View style={styles.calendarRow}>
             <View style={styles.metaIconWrap}>
@@ -1794,8 +1876,11 @@ export default function EventDetail() {
 
           {/* Shown to every signed-in attendee, not just those already going:
               the chat is a reason to join, so it shouldn't be invisible until
-              after you RSVP. */}
-          {user && !isOwner && !eventCancelled && !eventEnded && (
+              after you RSVP. After the event (ended or cancelled) the row
+              stays for people with access: posting is open for
+              CHAT_AFTER_END_DAYS after the end (D1/EJ-7, 20261118150000),
+              and the history stays readable after that. */}
+          {user && !isOwner && (!(eventCancelled || eventEnded) || chatIsOpen) && (
             <TouchableOpacity
               style={[styles.chatPromptRow, !canOpenEventChat && styles.chatPromptRowDisabled]}
               onPress={() => {
@@ -1815,7 +1900,11 @@ export default function EventDetail() {
               accessibilityRole="button"
               accessibilityLabel={
                 canOpenEventChat
-                  ? 'Open event chat'
+                  ? !chatWindow.open
+                    ? 'Open event chat, closed for new messages, history readable'
+                    : (eventCancelled || eventEnded) && chatWindow.closesOn
+                      ? `Open event chat, open until ${formatEventDayLabel(chatWindow.closesOn)}`
+                      : 'Open event chat'
                   : chatAccess.state === 'off'
                     ? 'Event chat, turned off by the host'
                     : chatAccess.state === 'waiting'
@@ -1848,11 +1937,15 @@ export default function EventDetail() {
                   numberOfLines={canOpenEventChat ? 1 : 2}
                 >
                   {canOpenEventChat
-                    ? chatPreview
-                      ? `${chatPreview.sender?.name ?? 'Someone'}: ${chatPreview.body}`
-                      : chatSettings?.chat_mode === 'announcements'
-                        ? 'Announcements from the host'
-                        : 'Chat with everyone going'
+                    ? !chatWindow.open
+                      ? 'Chat closed — you can read the history'
+                      : (eventCancelled || eventEnded) && chatWindow.closesOn
+                        ? `Chat open until ${formatEventDayLabel(chatWindow.closesOn)}`
+                        : chatPreview
+                          ? `${chatPreview.sender?.name ?? 'Someone'}: ${chatPreview.body}`
+                          : chatSettings?.chat_mode === 'announcements'
+                            ? 'Announcements from the host'
+                            : 'Chat with everyone going'
                     : chatAccess.state === 'off'
                       ? 'The host turned the chat off'
                       : // 'waiting' means the viewer is going — by the series
@@ -2043,6 +2136,18 @@ export default function EventDetail() {
               })}
             </View>
           )}
+
+          {/* Plan B, T2: a date of this series the viewer was going to is
+              cancelled — what else is on that evening. */}
+          {planB.date && datePlanB.data ? (
+            <PlanBSection
+              anchor={planB.date.anchor}
+              picks={datePlanB.data.picks}
+              widened={datePlanB.data.widened}
+              dateLabel={formatDate(planB.date.start.toISOString())}
+              seeMoreHref={category?.slug ? `/category/${category.slug}` : '/'}
+            />
+          ) : null}
 
           <View style={styles.venueSection}>
             <View style={styles.venueHeader}>
@@ -2439,6 +2544,18 @@ export default function EventDetail() {
           <AttendeesBottomSheet ref={attendeesSheetRef} eventId={id} refreshToken={attendeesRefresh} previewSelf={previewSelf} />
         </>
       )}
+      <CantMakeItSheet
+        visible={!!cantMakeIt}
+        onClose={() => setCantMakeIt(null)}
+        onFreeSpot={() => void freeMySpot()}
+        busy={freeingSpot}
+        freed={spotFreed}
+        seriesDateLabel={cantMakeIt?.seriesDateKey ? formatDate(cantMakeIt.start.toISOString()) : null}
+        anchor={cantMakeIt?.anchor ?? null}
+        picks={latePlanB.data?.picks ?? []}
+        loading={latePlanB.isLoading}
+        failed={latePlanB.isError}
+      />
       <ReportReasonSheet
         visible={reportSheetOpen}
         title="Report this event"
@@ -2807,6 +2924,28 @@ const styles = StyleSheet.create({
     color: Colors.text.primary,
     fontFamily: Typography.fontFamilies.semibold,
     fontWeight: Typography.weights.semibold,
+  },
+  cantMakeItRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    minHeight: 44,
+    marginTop: Spacing.md,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.background.secondary,
+  },
+  cantMakeItText: {
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    color: Colors.text.primary,
+  },
+  cantMakeItHint: {
+    flex: 1,
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamily,
+    color: Colors.text.secondary,
   },
   chatPromptRow: {
     flexDirection: 'row',

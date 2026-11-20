@@ -1,6 +1,18 @@
 # Prepared migrations — D2, reviews per recurring series (2026-11-19)
 
-**Status: PREPARED, NOT APPLIED.** Two files that must be applied in order,
+> **Status 2026-11-20 (verified read-only):**
+> * **Step 1 is applied**: `submit_review(p_business_id, p_rating, p_text)`
+>   exists, as `supabase/migrations/20261119100000_submit_review_rpc.sql`.
+> * **Steps 2 and 4 are built and committed** (`8f18450`).
+> * **Step 3, this folder's `20261119110000_series_reviews.sql`, is NOT
+>   applied**: `reviews.event_id` is absent, and `reviews_user_id_business_id_key`
+>   is still in place.
+> * The precondition is still unmet: sibling worktrees are at `a5ba608`.
+> * Its version is older than the latest applied one, so it needs
+>   `migration up --local --include-all`.
+> * See `docs/STATUS_2026-11-20_LIVE_REVIEWS_DASHBOARD.md` §3.1–3.2.
+
+*Original status:* **PREPARED, NOT APPLIED.** Two files that must be applied in order,
 **with a client release in between**. This is the one piece of work in the
 whole roadmap where applying everything in one sitting is NOT safe — the gap
 is the point of the design.

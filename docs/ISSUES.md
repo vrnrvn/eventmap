@@ -30,10 +30,16 @@ archive.
   `POST /rpc/get_user_collections` through PostgREST returns a clean
   `401 / 42501` with no crash. **Not reachable over HTTP** — an earlier note
   here said it was; that was wrong.
-- **DB state (2026-11-15):** the local DB records **123** migrations,
-  including `20261115100000_get_events_compare.sql`. Verify with:
+- **DB state (re-verified 2026-11-20):** the local DB records **140**
+  migrations through `20261120100000_get_live_events.sql`, one-to-one with
+  `supabase/migrations/`. Verify with:
   `select count(*), max(version) from supabase_migrations.schema_migrations;`
-  → expected 123 / `20261115100000`. Any hosted/production project must be checked
+  → expected 140 / `20261120100000`. One prepared file is not applied:
+  `supabase/prepared/2026-11-19_series_reviews/20261119110000_series_reviews.sql`
+  (`docs/MIGRATIONS_PENDING.md`). This worktree is `supabase link`ed to a
+  hosted project, so **always pass `--local`** to `supabase migration`
+  commands, because `migration list` defaults to `--linked`. *(2026-11-15
+  value was 123 / `20261115100000`.)* Any hosted/production project must be checked
   separately — in particular the Oct 30 security set (`20261030100000` admin
   self-grant, `…101000` premium self-grant, `…102000` storage ownership,
   `…107000` search_path). No hosted project has ever been checked.
@@ -403,6 +409,17 @@ picker and permission prompts (flow 1); notification taps from a push
   clusterer — both unused in the default OpenStreetMap build.
 
 ### Medium
+- [ ] **"More <type> near you" rail is always empty against the real DB (found
+  2026-11-20, not fixed — outside Plan B's scope).** `components/MoreOfTypeRail.tsx:56,66`
+  keeps only rows with `e.status === 'active'`, but `get_ranked_events` returns
+  no `status` column (verified read-only on the local DB: 27 output columns,
+  no `status`, no `timezone`), so every real row is `undefined` and dropped.
+  The fake backend's ranked rows DO carry `status`, which is why `suiteCollections`
+  passes. Fix (client, one line each): treat a missing status as active —
+  the RPC only returns active, published, public events — as `utils/planB.ts`
+  already does; then drop `status`/`timezone` from the fake's ranked rows so
+  the suites stop masking it. `RankedEvent` (`types/database.ts`) also
+  inherits `timezone` from `Event`, which the RPC does not return.
 - [ ] **No component/e2e test layer** (logic-only vitest). Long-term.
 - [ ] **[DB] Server-side "next date" ignores per-date exceptions (E-R1, the
   server half).** `get_ranked_events`, the saved/going lists, `get_user_calendar`
@@ -549,7 +566,7 @@ phases and status in
 - [~] **EJ-15 "Running late" notice.** *Dialog audience copy fixed 2026-11-17 (A8); notice wording = Batch B9.* Extending only the end with people going
   sends "Event rescheduled — … now starts <unchanged time>" (reproduced). Edit's
   dialog also names savers (not notified) and omits the waitlist (notified).
-- [~] **EJ-17 Host day-of / post-event notices skip series** *Copy fixed 2026-11-17 (A8): Settings now says "one-off event … (not yet for series)"; per-occurrence notices later [DB].* (`is_recurring = false`,
+- [x] **EJ-17 Host day-of / post-event notices skip series — DONE 2026-11-20.** Per-occurrence notices applied (`20261119120000`); Settings copy restored to cover series ("…each event starts, including every date of a series" / "After each event or series date…"). *Earlier: copy fixed 2026-11-17 (A8): Settings said "one-off event … (not yet for series)"; per-occurrence notices later [DB].* (`is_recurring = false`,
   `20261113110000:47,80`) while Settings says "each event".
 - [ ] **EJ-19 [DB] Date-only attendees get no lifecycle notice and no chat.**
   Cancel, postpone, reschedule, per-date cancel/move/restore and announcements
@@ -974,7 +991,13 @@ PUBLIC` + explicit grants to `authenticated` for RPCs; require a session for
 
 ## Needs a product decision
 
-- [x] **[decision]** **EJ-7 Chat after an event ends — DECIDED 2026-11-17:** open
+- [x] **[decision]** **EJ-7 Chat after an event ends — DONE 2026-11-20.** Server
+  half `20261118150000` (applied; 7 days, owner-confirmed 2026-11-18); client half
+  built 2026-11-20: `chatPostingWindow` / `CHAT_AFTER_END_DAYS` in
+  `utils/eventChatAccess.ts`, the event page keeps the chat row after the end
+  ("Chat open until <day>" → "Chat closed — you can read the history"), the chat
+  screen says "This chat closed on <day>". Verified: unit tests, `suiteLifecycle`
+  L4/L6. The original entry follows. **DECIDED 2026-11-17:** open
   for a while after the end, not forever. Proposed: 7 days of posting, then
   read-only history (design D1 in `docs/EVENT_JOURNEY_REVIEW_PLAN_2026-11-17.md`
   §5a; window length to confirm). Original note: **EJ-7 Chat after an event ends.** Open on the server

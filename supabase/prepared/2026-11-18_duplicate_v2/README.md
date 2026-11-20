@@ -1,6 +1,22 @@
 # Prepared migration — "Run it again" / duplicate v2 (2026-11-18)
 
-**Status: PREPARED, NOT APPLIED.** One file. Apply it whenever you like — it
+> **Status 2026-11-20: APPLIED locally** as
+> `supabase/migrations/20261118110000_duplicate_event_v2.sql`.
+> * The DB has `duplicate_event(p_event_id, p_start, p_end, p_title,
+>   p_client_request_id)` and `events.duplicated_from`, and the types include
+>   them.
+> * **The client cutover below is DONE (2026-11-20).**
+>   * Steps 1–5: one `duplicate_event` call with `p_start`/`p_end`/`p_title`
+>     and a per-sheet-opening `p_client_request_id`, reused on retry.
+>   * The follow-up update, the `dated` flag and `carryOverToDuplicate` are
+>     removed entirely (local-only deployment, so no older backend).
+>   * `facts.ranAgain` is fed from `duplicated_from`
+>     (`hostToolsService.countCopies`).
+>   * Step 6, "Run it again" on Event Insights, is deferred.
+>   * Verified by `tests/duplicateEventV2.test.ts` and `suiteLifecycle` L7.
+>     See `docs/ROADMAP_2026-11-20.md` 1b.
+
+*Original status:* **PREPARED, NOT APPLIED.** One file. Apply it whenever you like — it
 is independent of every other prepared file, and **the app works correctly
 without it**. Nothing in the client calls the new parameters yet, by design
 (`docs/ISSUES.md` ground rules: no probe-and-retry, nothing depends on an

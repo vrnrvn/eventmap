@@ -1,10 +1,19 @@
 # EventMap roadmap
 
-**Current work (2026-11-18):** the "Finish what's paid for" roadmap — Batch C
-→ "Run it again" (duplicate) → a time-simulation test harness → Batch D and
-the older backlog. Status, and the two prepared migrations waiting to be
-applied, are in
+**Current work (2026-11-20):** [`docs/ROADMAP_2026-11-20.md`](docs/ROADMAP_2026-11-20.md).
+It covers finishing the client halves that the applied migrations unlocked,
+then Plan B ([`docs/PLAN_B_PLAN.md`](docs/PLAN_B_PLAN.md)). **Phases 1 and
+2 are done** (phase 2 is Plan B's client half). Next: phase 3 (optional
+polish, including a newly found `MoreOfTypeRail` bug) and phase 4 (Plan B's
+server halves: prepared migrations the owner applies). Database state:
+140 migrations applied locally; one prepared file is left (series reviews,
+`docs/MIGRATIONS_PENDING.md`).
+
+*Previous (2026-11-18):* the "Finish what's paid for" roadmap — Batch C →
+"Run it again" (duplicate) → a time-simulation test harness → Batch D and the
+older backlog. Record in
 [`docs/ROADMAP_PROGRESS_2026-11-18.md`](docs/ROADMAP_PROGRESS_2026-11-18.md).
+Its "prepared migrations waiting" are applied now.
 
 This is ongoing product work. Estimates exclude the local setup already implemented.
 
@@ -56,8 +65,9 @@ Status verified 2026-11-14. The remaining work for each is tracked in
   - **Built, client-only:** "happening now" for series, review eligibility,
     the chat access rule, the waitlist offered only when it's open, the
     same-day cue and more.
-  - **Prepared, not applied:** the server halves, 7 approved migrations in
-    `supabase/prepared/2026-11-17_event_journey/`.
+  - **Server halves applied 2026-11-17:** 7 approved migrations, staged in
+    `supabase/prepared/2026-11-17_event_journey/` and now in
+    `supabase/migrations/`.
   - **Designed:** Batch D, post-event chat window and series reviews, which
     need two answers.
 - **"Preview as attendee"** (`docs/EVENT_REHEARSAL_PLAN.md`, Phases 1–5).

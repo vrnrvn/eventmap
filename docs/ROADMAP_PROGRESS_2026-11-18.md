@@ -4,6 +4,16 @@ The roadmap being run is **"Finish what's paid for"**: Batch C → duplicate
 ("Run it again") → a time-simulation test harness → the rest. This file is the
 running status; it is the one to read first next session.
 
+> **Superseded 2026-11-20 by [`ROADMAP_2026-11-20.md`](ROADMAP_2026-11-20.md).**
+> * Every migration this file calls "prepared" or "waiting for the owner" is
+>   now applied, except series reviews step 3.
+> * C3 and EJ-17 are applied, and D2 step 2 is built.
+> * Of "Step 2 — the client halves" below:
+>   * The C6 and B4 client halves are **still open**. D1's and duplicate-v2's
+>     were done 2026-11-20 (the Insights "Run it again" action is deferred).
+>   * The EJ-17 Settings copy was done 2026-11-20.
+>   * The C3 cutover is done.
+
 **Final status, regression results and the apply-day runbook live in
 [`docs/STATUS_AND_APPLY_DAY_2026-11-19.md`](STATUS_AND_APPLY_DAY_2026-11-19.md).**
 This file remains the record of how the work was sequenced.

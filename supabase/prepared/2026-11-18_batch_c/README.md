@@ -1,6 +1,12 @@
 # Prepared migration — Batch C follow-up (2026-11-18)
 
-**Status: PREPARED, NOT APPLIED.** One file, needed only by C6, the optional
+> **Status 2026-11-20: APPLIED locally** as
+> `supabase/migrations/20261118100000_series_sessions_attended_self.sql`.
+> `get_event_sessions_attended` exists in the DB and is granted to
+> `authenticated`. **The C6 client half below is NOT built yet**: nothing in
+> the app calls the function. Tracked in `docs/ROADMAP_2026-11-20.md`.
+
+*Original status:* **PREPARED, NOT APPLIED.** One file, needed only by C6, the optional
 Batch C item. C2–C5 are built and need nothing from you.
 
 The Supabase CLI and `scripts/pg17-isolated.sh init` read only

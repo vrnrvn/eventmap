@@ -77,6 +77,7 @@ import {
   Clock,
 } from '@/components/icons.generated';
 import { a11yState } from '@/utils/accessibility';
+import type { NotificationPreferences } from '@/types/database';
 
 const Palette = {
   gradientStart: Colors.primary,
@@ -245,7 +246,8 @@ export default function SettingsScreen() {
         showAttendancePublicly: profile.show_attendance_publicly ?? true,
         showFutureEvents: profile.show_future_events ?? true,
       });
-      const prefs = (profile.notification_preferences as Record<string, boolean> | null) ?? {};
+      // Typed, so a misspelt key is a compile error instead of a silent default.
+      const prefs: NotificationPreferences = profile.notification_preferences ?? {};
       setNotificationForm({
         newFollower: prefs.new_follower ?? true,
         newEventFromFollowed: prefs.new_event_from_followed ?? true,
@@ -452,7 +454,7 @@ export default function SettingsScreen() {
     const next = { ...notificationForm, [field]: value };
     setNotificationForm(next);
     try {
-      const prefs = {
+      const prefs: NotificationPreferences = {
         new_follower: next.newFollower,
         new_event_from_followed: next.newEventFromFollowed,
         event_update: next.eventUpdate,
@@ -1102,7 +1104,7 @@ export default function SettingsScreen() {
                       <View style={styles.privacyContent}>
                         <Text style={styles.privacyTitle}>Remind me on the day</Text>
                         <Text style={styles.privacyDesc}>
-                          A few hours before each one-off event starts (not yet for series)
+                          A few hours before each event starts, including every date of a series
                         </Text>
                       </View>
                       <Switch
@@ -1124,7 +1126,7 @@ export default function SettingsScreen() {
                       <View style={styles.privacyContent}>
                         <Text style={styles.privacyTitle}>Summary after the event</Text>
                         <Text style={styles.privacyDesc}>
-                          After each one-off event: how it went, and what to do next
+                          After each event or series date: how it went, and what to do next
                         </Text>
                       </View>
                       <Switch

@@ -610,6 +610,9 @@ screen was **not** rendered — that needs a backend.
 - **Duplicate** (§11.5 Q1): `duplicate_event` already copies capacity,
   waitlist and RSVP mode; `carryOverToDuplicate` now also copies the chat
   mode and preset id (best-effort, host told if chat could not be copied).
+  *Superseded 2026-11-20:* `duplicate_event` v2 (`20261118110000`) copies
+  `event_type` and the chat set-up server-side; `carryOverToDuplicate` was
+  removed.
   Edit deliberately gets no preset chips — see §14.
 - **Hands-on pass, no database:** new `scripts/fake-backend-e2e/suiteHost.mjs`
   (H1–H4, 27 checks) drives the signed-in app in headless Chrome against

@@ -1,10 +1,46 @@
 # Migration work waiting for the owner
 
-**Latest (2026-11-20): read [`STATUS_2026-11-20_LIVE_REVIEWS_DASHBOARD.md`](STATUS_2026-11-20_LIVE_REVIEWS_DASHBOARD.md)
-first.** Two prepared files remain: `20261119110000_series_reviews.sql` (has a
-precondition about sibling worktrees — §3.1 there) and
-`20261120100000_get_live_events.sql` (inert, safe any time). Shared local DB:
-139 through `20261119130000`, untouched. No hosted project.
+**Current state (verified read-only 2026-11-20, at commit `c34139c`):**
+
+* **Shared local DB: 140 migrations through `20261120100000`.** The 140 files
+  in `supabase/migrations/` and the 140 recorded versions match one-to-one, so
+  there is no drift in either direction. The bodies of the two live-events
+  functions in the DB match the repo file (compared with whitespace
+  normalised).
+* **Exactly ONE prepared file remains:**
+  `supabase/prepared/2026-11-19_series_reviews/20261119110000_series_reviews.sql`.
+  It still carries its precondition: two sibling worktrees are at `a5ba608`,
+  whose committed `services/reviews.ts:52` uses the old
+  `onConflict: 'user_id,business_id'` upsert. Their uncommitted changes could
+  not be inspected from this worktree, so treat the precondition as **unmet**
+  until checked from inside them
+  ([`STATUS_2026-11-20_LIVE_REVIEWS_DASHBOARD.md`](STATUS_2026-11-20_LIVE_REVIEWS_DASHBOARD.md) §3.1).
+* **Every other file named anywhere below has been applied**:
+  `20261118100000` … `20261119130000` and `20261120100000`. The tables and
+  instructions further down describe the pre-apply state and are kept as
+  history. Do not repeat their `git mv` steps.
+* **No hosted project.**
+* **Testing:** SQL testing happens only in throwaway `scripts/pg17-isolated.sh`
+  containers with a unique `PG17_NAME`. `scripts/db-scratch.sh` / `SCRATCH_DB`
+  refuses to run without `ALLOW_SHARED_CLUSTER=1` (owner-only), so it is not
+  an option for agents.
+* **What to work on next:** [`ROADMAP_2026-11-20.md`](ROADMAP_2026-11-20.md).
+* **Plan B (2026-11-20):** the client half (P1/P1b) is built and needed **no
+  migration**. Its two server halves are **not written yet**:
+  * P2: `get_plan_b_events`;
+  * P3: the `cancel_event` notice `kind`, the "tap to see similar events"
+    copy, and the `notify_waitlist_not_promoted` cron job.
+
+  When written, they go in `supabase/prepared/2026-11-2x_plan_b_rpc/` and
+  `…_plan_b_notices/` with versions after `20261120100000`, so a plain
+  `migration up --local` applies them. They are validated only in throwaway
+  `pg17-isolated.sh` containers. Design: `docs/PLAN_B_PLAN.md` §4.2–4.3.
+  Plan: `ROADMAP_2026-11-20.md` §5.
+
+**Earlier note (2026-11-20, before the live-events apply):** two prepared
+files remained, series reviews and `20261120100000_get_live_events.sql`. The
+second was applied on the evening of 2026-11-19 (New York) in commit
+`c34139c`.
 
 **Handoff, 2026-11-18 (New York):** The nine Sitting A migrations are
 applied locally, with 139 recorded through `20261119130000`. Types are
@@ -23,6 +59,9 @@ Running status: [`docs/ROADMAP_PROGRESS_2026-11-18.md`](ROADMAP_PROGRESS_2026-11
 the apply-day runbook for all ten prepared migrations, including the ONE
 file that must wait for a client release (D2's `20261119110000`), the
 final regression results, and what is finished vs half-finished.
+
+> **Historical (2026-11-18/19). Everything in the table below except
+> `20261119110000_series_reviews.sql` is now applied** (verified 2026-11-20).
 
 **Two prepared migrations are waiting for you.** Both are validated on
 throwaway PG17 containers (14/14 suites each), both are idempotent, and
@@ -150,6 +189,20 @@ Also identified and unwritten:
 - **EJ-17:** host day-of and post-event notices for series dates (the
   Settings copy currently says one-off only).
 
+> **Status 2026-11-20:** Step 2 was answered and built.
+> * D1 is applied as `20261118150000`; its **client half was built and
+>   verified 2026-11-20** (`ROADMAP_2026-11-20.md` phase 1a).
+> * C6's wrapper is applied as `20261118100000`, and the **client half is
+>   still unbuilt**.
+> * EJ-24 and EJ-17 are applied (`20261118140000`, `20261119120000`). EJ-17's
+>   Settings copy was updated 2026-11-20.
+> * The duplicate v2 (`20261118110000`) client cutover was done 2026-11-20.
+> * D2: step 1 (`submit_review`) is applied, and step 3 is the one prepared
+>   file left.
+>
+> In Step 3 below, E-R1 and the 2b recurrence and dashboard items are
+> applied. Still open: §0, C4, and §3 (still unwritten, still unscoped).
+
 ### Step 3 — Older pending work (unchanged; details further down this file)
 
 - **§0** hosted-database inventory: do it before touching any hosted
@@ -272,6 +325,8 @@ Expected outcomes and what each means:
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-11-19 | **local** (shared dev DB, reference baseline) | 139 / `20261119130000` | none | 4/4 | none | Read-only session. `submit_review(3 args)` and `get_host_dashboard` present; `reviews.event_id` absent (D2 step 3 correctly not applied). No hosted project is linked from the repo (no `supabase/.temp/project-ref`, nothing in `eas.json`) |
 | 2026-11-19 | *hosted* | — | — | — | — | **None exists** (owner, 2026-11-19): the app runs on local builds against the local DB only. §0 is complete; re-run the script against any hosted project created later, before applying anything to it |
+| 2026-11-20 | **local** (shared dev DB) | 140 / `20261120100000` | none | 4/4 | none | Read-only session. `get_live_events` + `event_occurrence_in_progress` present and matching the repo file; `reviews.event_id` still absent; 140 repo files ↔ 140 recorded versions |
+| 2026-11-20 | *hosted?* | **not checked** | — | — | — | This worktree's git-ignored `supabase/.temp/` has `project-ref` + `linked-project.json` written by `supabase link` on 2026-11-19 14:32 local time, naming a project called "EventMap". **Owner answered 2026-11-20: the project was hosted on Supabase in the past; hosting was cut while the app is built locally. Local-only is the deployment target for now.** So the link is a leftover; nobody has queried it. Still worth `npx supabase unlink` here so `migration list`'s `--linked` default cannot reach it — and if hosting ever comes back, run §0 against it before applying anything |
 
 Until this table has a row per hosted project, items 2+ below are **local
 only**.
@@ -464,6 +519,20 @@ Everything below was found while building roadmaps A, B and C
 written**: no session has touched the shared database, and all SQL work is
 to be validated on `scripts/pg17-isolated.sh` first. Listed in the order to
 tackle them.
+
+> **Status 2026-11-20 (verified against the repo and the local DB).** That
+> "none is written" was true on 11-16. Since then:
+> * 2b-2 and 2b-3 are done.
+> * 2b-4/5/6 are applied (`20261118130000`), and 2b-7 is applied
+>   (`20261118120000`).
+> * 2b-9 is applied (`20261119130000`) and its client cutover is done
+>   (`hooks/useHostDashboard.ts`).
+> * Still open:
+>   * **2b-1:** see the "hosted?" row in §0.
+>   * **2b-8 (B4):** client-only, now unblocked.
+>   * **2b-10 (C4):** needs DC6 and a device.
+>
+> The work order is in [`ROADMAP_2026-11-20.md`](ROADMAP_2026-11-20.md).
 
 | # | Work | What it is | Notes |
 | --- | --- | --- | --- |
