@@ -13,9 +13,14 @@ type ReviewCardProps = {
   onRespond?: (reviewId: string, response: string) => Promise<void>;
   onReport?: (reviewId: string) => void;
   canReport?: boolean;
+  /**
+   * Shown under the reviewer's name, e.g. "About this series" — after D2 a
+   * venue's list also holds reviews of its recurring series.
+   */
+  scopeLabel?: string | null;
 };
 
-export function ReviewCard({ review, isOwner, onRespond, onReport, canReport }: ReviewCardProps) {
+export function ReviewCard({ review, isOwner, onRespond, onReport, canReport, scopeLabel }: ReviewCardProps) {
   const [editing, setEditing] = useState(false);
   const [responseText, setResponseText] = useState(review.business_response || '');
   const [saving, setSaving] = useState(false);
@@ -53,10 +58,15 @@ export function ReviewCard({ review, isOwner, onRespond, onReport, canReport }: 
         />
         <View style={styles.meta}>
           <Text style={styles.name}>{review.profile?.name || 'User'}</Text>
+          {scopeLabel ? <Text style={styles.scope}>{scopeLabel}</Text> : null}
           <View style={styles.ratingRow}>
             <View
               style={styles.starsRow}
               accessible
+              // A labelled View needs a role on the web: without one the label
+              // sits on a plain div, which ARIA forbids (axe
+              // aria-prohibited-attr). "image" is the usual role for a rating.
+              accessibilityRole="image"
               accessibilityLabel={`${review.rating} out of 5 stars`}
             >
               {Array.from({ length: 5 }).map((_, i) => (
@@ -149,6 +159,12 @@ export function ReviewCard({ review, isOwner, onRespond, onReport, canReport }: 
 }
 
 const styles = StyleSheet.create({
+  scope: {
+    fontSize: Typography.sizes.xs,
+    fontFamily: Typography.fontFamilies.medium,
+    fontWeight: Typography.weights.medium,
+    color: Colors.text.secondary,
+  },
   card: {
     backgroundColor: Colors.surface,
     borderRadius: 12,

@@ -2,7 +2,7 @@
 // fake backend — the only way to exercise these screens while the migration
 // stays unapplied.
 //   node scripts/fake-backend-e2e/suiteCollections.mjs "$PWD" <dist> [K1,K2,...]
-import { open, check, results, sleep } from './lib.mjs';
+import { open, check, results, sleep, noonLocal, isoFrom, pinClock, PINNED } from './lib.mjs';
 const [repo, dist, only] = process.argv.slice(2);
 const P = { repo, dist };
 const run = (k) => !only || only.split(',').includes(k);
@@ -342,8 +342,26 @@ if (run('K11')) { // Phase F: Saved rows' collection hint, For-you chip, date de
   await h.close();
 }
 
+/**
+ * K12 used to pass or fail by the hour: the pinned fixtures sit 2 h and 12 h
+ * after the real "now", and the calendar shows the device's day, so late in
+ * the evening they fell into tomorrow. Pin the page to local noon and put the
+ * pinned collection events (fixture rows 0, 2, 4) on that afternoon.
+ */
+function pinCalendarDay(h, T) {
+  [0, 2, 4].forEach((i, k) => {
+    const patch = { start_datetime: isoFrom(T, 1 + 2 * k), end_datetime: isoFrom(T, 2 + 2 * k), is_recurring: false, recurrence_pattern: null };
+    Object.assign(h.data.ev[i], patch);
+    const r = h.data.ranked.find((x) => x.id === h.data.ev[i].id);
+    if (r) Object.assign(r, patch, { next_start_datetime: patch.start_datetime, has_ended: false });
+  });
+}
+
 if (run('K12')) { // Post-F: the calendar's "Collections" source
-  const h = await open({ ...P, dataOpts: { events: 40 } });
+  const T = noonLocal();
+  const h = await open({ ...P, ...PINNED, dataOpts: { events: 40 } });
+  pinCalendarDay(h, T);
+  await pinClock(h, T);
   await h.go('/calendar', 9000);
   check('K12 Collections chip offered', (await h.click('Show collections events', true)) === 'ok'); await sleep(3500);
   const calls = rpcBodies(h, 'get_user_calendar');
@@ -354,8 +372,10 @@ if (run('K12')) { // Post-F: the calendar's "Collections" source
   check('K12 no runtime errors', h.errors().length === 0, h.errors().slice(0, 2).join(' || '));
   await h.close();
   // Older backend: the source is refused once, the client retries without it and hides the chip.
-  const h2 = await open({ ...P, dataOpts: { events: 40 }, overrides: { '/rest/v1/rpc/get_user_calendar': (r) => {
+  const h2 = await open({ ...P, ...PINNED, dataOpts: { events: 40 }, overrides: { '/rest/v1/rpc/get_user_calendar': (r) => {
     const b = JSON.parse(r.body || '{}'); if ((b.p_sources || []).includes('collections')) return { status: 400, json: { code: 'P0001', message: 'invalid_source' } }; } } });
+  pinCalendarDay(h2, T);
+  await pinClock(h2, T);
   await h2.go('/calendar', 9000);
   check('K12 old backend: chip shown before the probe', (await h2.click('Show collections events', true)) === 'ok'); await sleep(3500);
   const calls2 = rpcBodies(h2, 'get_user_calendar');

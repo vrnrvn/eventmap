@@ -565,6 +565,7 @@ export default function BusinessDetail() {
             <ReviewCard
               key={review.id}
               review={review}
+              scopeLabel={review.event_id ? 'About a recurring series' : null}
               isOwner={isOwner}
               onRespond={
                 isOwner

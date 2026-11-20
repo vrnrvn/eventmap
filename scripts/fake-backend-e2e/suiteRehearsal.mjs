@@ -37,7 +37,7 @@
 // V21 the same at 1.3× and 1.6× text
 // V22 the chat preview bar at 320 px
 import fs from 'node:fs';
-import { open, check, results, sleep, scaleText, layoutFacts } from './lib.mjs';
+import { open, check, results, sleep, scaleText, layoutFacts, noonUtc, isoFrom, pinClock, PINNED, clearSeededDates } from './lib.mjs';
 
 const [repo, dist, only = 'all', outDir = '/tmp/eventmap-rehearsal'] = process.argv.slice(2);
 const run = (k) => only === 'all' || only.split(',').includes(k);
@@ -252,11 +252,15 @@ if (run('V11')) {
 }
 
 if (run('V12')) {
-  // The running date is this week's (in 3 h) — after 21:00 UTC that is tomorrow's UTC date.
-  const today = new Date(Date.now() + 3 * 3600_000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  // Pinned to 12:00 UTC: against the real clock, "in 3 h" crossed the UTC
+  // date after 21:00 UTC and the date-row check failed by time of day.
+  const T = noonUtc();
+  const today = new Date(T + 3 * 3600_000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
   // Weekly, first date a week ago; this week's date is later today (starts in 3 h).
-  const { h, id } = await preview({ business: true }, { start_datetime: iso(-165), end_datetime: iso(-163), is_recurring: true,
-    recurrence_pattern: { frequency: 'weekly', interval: 1 }, timezone: 'UTC' });
+  const { h, id } = await preview({ business: true }, { start_datetime: isoFrom(T, -165), end_datetime: isoFrom(T, -163), is_recurring: true,
+    recurrence_pattern: { frequency: 'weekly', interval: 1 }, timezone: 'UTC' }, {}, PINNED);
+  clearSeededDates(h, id);
+  await pinClock(h, T);
   await h.go(`/event/${id}?rehearse=1`, 9000);
   await openScenario(h);
   const radios = await h.eval(`[...document.querySelectorAll('[role=radio]')].map((e) => e.getAttribute('aria-label')).join(',')`);

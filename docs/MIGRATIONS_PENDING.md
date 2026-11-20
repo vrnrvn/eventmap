@@ -1,5 +1,11 @@
 # Migration work waiting for the owner
 
+**Latest (2026-11-20): read [`STATUS_2026-11-20_LIVE_REVIEWS_DASHBOARD.md`](STATUS_2026-11-20_LIVE_REVIEWS_DASHBOARD.md)
+first.** Two prepared files remain: `20261119110000_series_reviews.sql` (has a
+precondition about sibling worktrees — §3.1 there) and
+`20261120100000_get_live_events.sql` (inert, safe any time). Shared local DB:
+139 through `20261119130000`, untouched. No hosted project.
+
 **Handoff, 2026-11-18 (New York):** The nine Sitting A migrations are
 applied locally, with 139 recorded through `20261119130000`. Types are
 refreshed and 17 isolated SQL suites passed. The staging locations and
@@ -35,6 +41,7 @@ one `npm run backend:types` afterwards covers both.
 
 | `supabase/prepared/2026-11-19_host_dashboard_rpc/` | `20261119130000_get_host_dashboard.sql` | **C3 / 2b-9** — the host dashboard in one request instead of up to 17. Adds an RPC nothing calls yet, so applying it is inert until the client cutover; needs `npm run backend:types` |
 | `supabase/prepared/2026-11-19_series_host_notices/` | `20261119120000_series_host_notices.sql` | **EJ-17** — a series host's day-of and post-event notices, per occurrence (they never fired at all before). Independent; apply in any order |
+| `supabase/prepared/2026-11-20_live_events/` | `20261120100000_get_live_events.sql` | **Phase 3 — the live events page's one-request path.** Inert: nothing calls it until applied (the shipped client probes and falls back to ranked+exceptions). Validated 18/18 suites + parity fixture; see that folder's README |
 | `supabase/prepared/2026-11-19_series_reviews/` | `20261119100000_submit_review_rpc.sql` then `20261119110000_series_reviews.sql` | **D2** — reviews per recurring series. **These two are the ONE case where order matters across a client release:** apply step 1, ship the client release that submits through `submit_review()`, then apply step 2. That folder's README is the contract |
 
 Each folder's README has the apply runbook, the full validation table, the
@@ -227,7 +234,10 @@ The comparison RPC below is the first new function a client feature would
 depend on, so this inventory is a prerequisite of applying it anywhere but
 locally — and it is owner work: it needs the hosted project's connection.
 
-Run against **each** hosted project (read-only; nothing here writes):
+Run against **each** hosted project (read-only; nothing here writes).
+**`node scripts/hosted-inventory.mjs` now generates all three queries with the
+VALUES list filled from `supabase/migrations/`** — paste its output instead of
+editing the template below by hand (added 2026-11-19):
 
 ```sql
 -- 1. What is recorded
@@ -255,6 +265,13 @@ Expected outcomes and what each means:
 | Files missing, security set present | Behind but safe | Apply the missing files in version order on a maintenance window |
 | **Security set missing** | Admin / premium self-grant and storage-ownership holes are open | Apply those four first, before any feature migration |
 | Recorded versions that are not files | Hand-applied drift | Diff the live objects against the repo before anything else |
+
+### Inventory results
+
+| Date | Project | Applied / latest | Missing files | Security set | Drift | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-11-19 | **local** (shared dev DB, reference baseline) | 139 / `20261119130000` | none | 4/4 | none | Read-only session. `submit_review(3 args)` and `get_host_dashboard` present; `reviews.event_id` absent (D2 step 3 correctly not applied). No hosted project is linked from the repo (no `supabase/.temp/project-ref`, nothing in `eas.json`) |
+| 2026-11-19 | *hosted* | — | — | — | — | **None exists** (owner, 2026-11-19): the app runs on local builds against the local DB only. §0 is complete; re-run the script against any hosted project created later, before applying anything to it |
 
 Until this table has a row per hosted project, items 2+ below are **local
 only**.

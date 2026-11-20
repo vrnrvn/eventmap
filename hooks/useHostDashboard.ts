@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/hooks/queryKeys';
 import { useRefetchOnFocus } from '@/hooks/useRefetchOnFocus';
 import { useScreenState } from '@/hooks/useScreenState';
@@ -10,8 +10,10 @@ import { occurrencesService } from '@/services/occurrences';
 import { PERSISTED_QUERY } from '@/utils/queryPersistence';
 import type { Event } from '@/types/database';
 import type { OccurrenceException } from '@/utils/occurrences';
+import { parseHostDashboardRpc } from '@/utils/hostDashboardRpc';
 import {
   AGENDA_EVENT_LIMIT,
+  agendaWindow,
   buildAgenda,
   buildAttentionQueue,
   overviewTargets,
@@ -38,10 +40,41 @@ export type HostDashboardData = {
   truncated: boolean;
   /** Going counts could not be loaded; the agenda shows no numbers. */
   countsUnavailable: boolean;
+  /**
+   * 'rpc' = one `get_host_dashboard` request (C3), whose attention facts
+   * live in the in-memory `attentionRpcKey` entry; absent = the N-call path.
+   * Optional so caches persisted before C3 still restore.
+   */
+  source?: 'rpc';
 };
 
 /**
- * C1 data plan (docs/HOST_DASHBOARD_PLAN.md §4): three batched requests,
+ * Where the RPC path keeps "Needs you". Deliberately NOT persisted (no
+ * PERSIST_META): a restored "4 requests waiting" could be days old.
+ */
+const attentionRpcKey = (businessId: string | undefined) =>
+  [...queryKeys.hostDashboard(businessId), 'attention', 'rpc'] as const;
+
+/**
+ * C3: the whole dashboard in one request where `get_host_dashboard` is
+ * deployed, else the N-call path below. The window is the agenda's own
+ * (local midnight onward), so sessions earlier today still get per-date
+ * counts — the RPC's default window starts at now().
+ */
+async function loadHostDashboard(businessId: string, queryClient: QueryClient): Promise<HostDashboardData> {
+  const raw = await hostToolsService.getHostDashboard(businessId, agendaWindow(new Date()));
+  // Not deployed (null), or a payload that is not the RPC's object: keep the
+  // N-call path rather than render an empty week from it.
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return loadHostDashboardByCalls(businessId);
+  const { data, attention } = parseHostDashboardRpc(raw);
+  queryClient.setQueryData<AttentionData>(attentionRpcKey(businessId), attention);
+  return data;
+}
+
+/**
+ * Fallback where `get_host_dashboard` is not deployed (hosted projects until
+ * the C3 migration ships there). C1 data plan (docs/HOST_DASHBOARD_PLAN.md
+ * §4): three batched requests,
  * plus one per-date count request per series that appears in the window
  * (at most MAX_SERIES_DATE_COUNTS).
  *
@@ -50,7 +83,7 @@ export type HostDashboardData = {
  * than showing the last good copy with a freshness note. Counts are
  * decoration and degrade to "unknown".
  */
-async function loadHostDashboard(businessId: string): Promise<HostDashboardData> {
+async function loadHostDashboardByCalls(businessId: string): Promise<HostDashboardData> {
   const events = await eventsService.getBusinessEvents(businessId, {
     scope: 'upcoming',
     limit: AGENDA_EVENT_LIMIT,
@@ -113,8 +146,14 @@ export type AttentionData = {
  *
  * Not persisted: a stale "4 requests waiting" would be worse than silence.
  */
-function useAttentionQuery(businessId: string | undefined, events: Event[] | undefined, now: Date) {
+function useAttentionQuery(
+  businessId: string | undefined,
+  events: Event[] | undefined,
+  now: Date,
+  source: HostDashboardData['source']
+) {
   const queryClient = useQueryClient();
+  const viaRpc = source === 'rpc';
   const targets = useMemo(() => (events ? overviewTargets(events, now) : []), [events, now]);
   const eligible = useMemo(
     () => (events ? overviewTargets(events, now, Number.MAX_SAFE_INTEGER).length : 0),
@@ -123,9 +162,30 @@ function useAttentionQuery(businessId: string | undefined, events: Event[] | und
   const key = targets.join(',');
 
   return useQuery({
-    queryKey: [...queryKeys.hostDashboard(businessId), 'attention', key],
+    queryKey: viaRpc ? attentionRpcKey(businessId) : [...queryKeys.hostDashboard(businessId), 'attention', key],
     enabled: !!businessId && !!events,
+    // RPC path: filled by every dashboard fetch via setQueryData, so it is
+    // never stale on its own.
+    ...(viaRpc ? { staleTime: Infinity } : {}),
     queryFn: async (): Promise<AttentionData> => {
+      if (viaRpc) {
+        // Only reached when the entry is missing, i.e. the dashboard came
+        // from the persisted cache. One dashboard fetch fills it (and is
+        // shared with a focus refetch already in flight).
+        await queryClient.fetchQuery({
+          queryKey: queryKeys.hostDashboard(businessId),
+          queryFn: () => loadHostDashboard(businessId!, queryClient),
+          staleTime: 0,
+        });
+        return (
+          queryClient.getQueryData<AttentionData>(attentionRpcKey(businessId)) ?? {
+            drafts: [],
+            overviews: {},
+            inspected: 0,
+            eligible: 0,
+          }
+        );
+      }
       const [drafts, rows] = await Promise.all([
         // Drafts come back newest-first, and the stale-draft rule wants the
         // OLDEST; 50 keeps them in range for all but very prolific hosts.
@@ -154,10 +214,11 @@ function useAttentionQuery(businessId: string | undefined, events: Event[] | und
 }
 
 function useDashboardQuery(businessId: string | undefined, enabled: boolean) {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: queryKeys.hostDashboard(businessId),
     ...PERSISTED_QUERY,
-    queryFn: () => loadHostDashboard(businessId!),
+    queryFn: () => loadHostDashboard(businessId!, queryClient),
     enabled: !!businessId && enabled,
   });
 }
@@ -218,7 +279,7 @@ export function useHostDashboard(businessId: string | undefined): HostDashboard 
   );
   const summary = useMemo(() => summarizeAgenda(days), [days]);
 
-  const attentionQuery = useAttentionQuery(businessId, data?.events, now);
+  const attentionQuery = useAttentionQuery(businessId, data?.events, now, data?.source);
   const attentionData = attentionQuery.data;
   const attention = useMemo(
     () =>
@@ -241,9 +302,11 @@ export function useHostDashboard(businessId: string | undefined): HostDashboard 
     isEmpty: days.length === 0 && attention.length === 0,
   });
 
+  // On the RPC path one dashboard fetch refreshes "Needs you" too.
+  const viaRpc = data?.source === 'rpc';
   const refresh = useCallback(async () => {
-    await Promise.all([query.refetch(), attentionQuery.refetch()]);
-  }, [query, attentionQuery]);
+    await Promise.all([query.refetch(), viaRpc ? null : attentionQuery.refetch()]);
+  }, [query, attentionQuery, viaRpc]);
 
   return {
     query,

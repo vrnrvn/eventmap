@@ -32,6 +32,47 @@ const clockScript = `(() => {
   };
 })();`;
 
+/* ─────────────── Pinned clock (time-of-day-independent scenarios) ──────────
+ * Scenarios whose fixtures sit a few hours from "now" used to pass or fail by
+ * the hour they ran (A6/A7 around the UTC date change, Rehearsal V12 after
+ * 21:00 UTC, Collections K12 late in the local evening). They now pin the
+ * page's clock to a fixed time of day and date their fixtures from that same
+ * instant, so a run at 03:00 and one at 23:00 see the same page.
+ *
+ *   const T = noonUtc();                 // or noonLocal() for local-day views
+ *   const h = await open({ ...P, ...PINNED });
+ *   const id = setEvent(h, 0, { start_datetime: isoFrom(T, -169), ... });
+ *   await pinClock(h, T);                // before the page under test loads
+ *   await h.go(`/event/${id}`, 9000);
+ */
+// PIN_DATE=YYYY-MM-DD moves the pinned day (month/year ends, DST changes) to
+// prove a scenario no longer depends on when it runs; default is today.
+const pinDay = () => process.env.PIN_DATE || new Date().toISOString().slice(0, 10);
+/** 12:00 UTC on the pinned day: UTC-dated logic (event zone 'UTC') is mid-day, far from either date change. */
+export const noonUtc = () => Date.parse(`${pinDay()}T12:00:00.000Z`);
+/** 12:00 device-local on the pinned day: for views grouped by the device's day (calendar). Node and Chrome share the zone. */
+export const noonLocal = () => { const [y, m, d] = pinDay().split('-').map(Number); return new Date(y, m - 1, d, 12, 0, 0, 0).getTime(); };
+/** ISO `hours` from the pinned instant `t`. */
+export const isoFrom = (t, hours) => new Date(t + hours * 3600_000).toISOString();
+/** open() options for a pinned run: the clock, and a session that outlives the shift (PIN_DATE can be weeks away). */
+export const PINNED = { clock: true, expOffsetS: 90 * 24 * 3600 };
+/**
+ * The fake's default data seeds ev[0] with a cancelled and a moved date and a
+ * per-date RSVP, all dated from the REAL clock (fakebackend.mjs makeData). A
+ * pinned scenario that re-dates an event must drop those, or they land on its
+ * pinned dates at some hours of the day and not others (A7 failed at 01:56
+ * UTC with a "cancelled" date on its 27 Nov session).
+ */
+export function clearSeededDates(h, eventId) {
+  h.data.exceptions = (h.data.exceptions || []).filter((x) => x.event_id !== eventId);
+  h.data.dateRsvps = (h.data.dateRsvps || []).filter((x) => x.event_id !== eventId);
+}
+/** Point the page's clock at `t` (ms); applies to the next document, so call before h.go(target). */
+export async function pinClock(h, t) {
+  await h.go('/', 3000); // a document, so __lcClock exists
+  await h.clock.set(new Date(t).toISOString());
+}
+
 export async function open({ repo, dist, dataOpts = {}, seedExtra = {}, expOffsetS = 3600, overrides = {}, viewport, offline = false, noSession = false, clock = false }) {
   const data = makeData(dataOpts); const unknown = [];
   const base = makeRouter(data, { unknown, overrides });

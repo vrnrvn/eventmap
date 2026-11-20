@@ -96,3 +96,33 @@ change; the reads stay as they are. This is the gate for everything else.
 - reads filter `reviews` by `event_id` (the SELECT policy is already "anyone
   can view", so no new read RPC is needed);
 - the rehearsal "Ended" scenario shows the series state.
+
+## Client progress (2026-11-19, not yet committed)
+
+- **Step 2 release — built.** `services/reviews.ts` submits through
+  `submit_review()` (falls back to the upsert only where the function is
+  missing). Venue reads/deletes no longer assume one row per (user, venue).
+- **Step 4 UI — built ahead of step 3, dormant until it is applied.**
+  `components/SeriesReviewsSection.tsx` + `hooks/useSeriesReviews.ts`, mounted
+  above the venue section on a recurring event's page. It probes
+  `get_event_review_summary`; where that is missing (today's local DB) it
+  renders nothing and no query names `event_id`. Venue lists label series
+  reviews ("About this series" / "About one of their series").
+- **Entry point answered:** a finished series' page DOES load for attendees —
+  `get_event_details` is SECURITY DEFINER and hides only drafts — so the
+  section lives on the event page; no separate entry point is needed.
+- Browser coverage: `suiteAttendee` A9 (hidden without step 3), A10 (finished
+  series: own list + average, review sent with `p_event_id`), A11 (ineligible
+  copy). Remaining after step 3 is applied: regenerate types (drop the
+  `untypedRpc` cast in `services/reviews.ts`) and one real-DB pass.
+
+## Status (2026-11-20)
+
+Step 1 applied locally; step 2 client built; step 4 UI built and dormant
+(UX-reviewed: no duplicate reviews on a series page, empty section hidden for
+viewers who cannot review yet, optimistic update after submit). **Only step 3
+(this folder's `20261119110000_series_reviews.sql`) remains**, with the
+sibling-worktree precondition — apply-day commands and the real-DB checklist
+are in `docs/STATUS_2026-11-20_LIVE_REVIEWS_DASHBOARD.md` §3. Validated again
+2026-11-20 in a throwaway container: applies with 0 errors, idempotent,
+18/18 suites before and after.

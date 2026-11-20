@@ -57,6 +57,8 @@ import { AddToCollectionSheet } from '@/components/AddToCollectionSheet';
 import { StarRatingDisplay } from '@/components/StarRatingDisplay';
 import { ReviewCard } from '@/components/ReviewCard';
 import { ReviewForm } from '@/components/ReviewForm';
+import { SeriesReviewsSection } from '@/components/SeriesReviewsSection';
+import { useSeriesReviews } from '@/hooks/useSeriesReviews';
 import {
   ArrowLeft,
   ArrowRight,
@@ -666,6 +668,15 @@ export default function EventDetail() {
     setUserReview(data.mine);
   }, [reviewsQuery.data, reviewsQuery.isError]);
 
+  // Same query (and cache entry) as SeriesReviewsSection: no extra request.
+  // When that section is showing this series' reviews, the venue list below
+  // leaves them out rather than repeating them. Called before the screen's
+  // early returns (rules of hooks).
+  const seriesEventId = details?.event.id;
+  const seriesReviews = useSeriesReviews(seriesEventId, !!details?.event.is_recurring, user?.id ?? null);
+  const seriesShown = seriesReviews.data?.supported === true;
+  const venueReviews = seriesShown ? reviews.filter((r) => r.event_id !== seriesEventId) : reviews;
+
   const handleReviewSubmit = async (rating: number, text: string) => {
     if (rehearsing) {
       notify.success(REHEARSAL_NOT_SAVED.review);
@@ -702,6 +713,33 @@ export default function EventDetail() {
     } catch {
       notify.success('Review saved. It will show here after the next refresh.');
     }
+  };
+
+  const handleReportReview = (reviewId: string) => {
+    if (rehearsing) {
+      notify.success(REHEARSAL_NOT_SAVED.report);
+      return;
+    }
+    notifyConfirm({
+      title: 'Report Review',
+      message: 'Report this review for inappropriate content?',
+      confirmLabel: 'Report',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await complaintsService.createComplaint('review', reviewId);
+          notify.success(
+            'Your report has been submitted. We typically review within about 48 hours.'
+          );
+        } catch (err: unknown) {
+          if ((err as { code?: string })?.code === '23505') {
+            notify.success("You've already reported this. It's in the queue.");
+          } else {
+            notify.error('Failed to submit report.');
+          }
+        }
+      },
+    });
   };
 
   const handleReviewRespond = async (reviewId: string, response: string) => {
@@ -2126,6 +2164,19 @@ export default function EventDetail() {
             </TouchableOpacity>
           ) : null}
 
+          {business.id ? (
+            <SeriesReviewsSection
+              eventId={event.id}
+              businessId={business.id}
+              isRecurring={!!event.is_recurring}
+              viewerId={user?.id ?? null}
+              isOwner={isOwner}
+              rehearsing={rehearsing}
+              rehearsalEligible={reviewEligible === true}
+              onReport={user ? handleReportReview : undefined}
+            />
+          ) : null}
+
           <View style={styles.reviewsSection}>
             {/* These are reviews of the hosting BUSINESS (venue), not of this
                 single event — label them as such. */}
@@ -2165,43 +2216,17 @@ export default function EventDetail() {
                 </TouchableOpacity>
               )
             )}
-            {reviews.map((review) => (
+            {venueReviews.map((review) => (
               <ReviewCard
                 key={review.id}
                 review={review}
+                scopeLabel={
+                  review.event_id ? (review.event_id === event.id ? 'About this series' : 'About another of their series') : null
+                }
                 isOwner={isOwner}
                 onRespond={isOwner ? handleReviewRespond : undefined}
                 canReport={!!user && review.user_id !== user.id}
-                onReport={
-                  user
-                    ? (reviewId) => {
-                        if (rehearsing) {
-                          notify.success(REHEARSAL_NOT_SAVED.report);
-                          return;
-                        }
-                        notifyConfirm({
-                          title: 'Report Review',
-                          message: 'Report this review for inappropriate content?',
-                          confirmLabel: 'Report',
-                          destructive: true,
-                          onConfirm: async () => {
-                            try {
-                              await complaintsService.createComplaint('review', reviewId);
-                              notify.success(
-                                'Your report has been submitted. We typically review within about 48 hours.'
-                              );
-                            } catch (err: unknown) {
-                              if ((err as { code?: string })?.code === '23505') {
-                                notify.success("You've already reported this. It's in the queue.");
-                              } else {
-                                notify.error('Failed to submit report.');
-                              }
-                            }
-                          },
-                        });
-                      }
-                    : undefined
-                }
+                onReport={user ? handleReportReview : undefined}
               />
             ))}
           </View>

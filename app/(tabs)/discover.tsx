@@ -55,6 +55,7 @@ import { connectionErrorMessage } from '@/utils/networkErrors';
 import { selectionHaptic } from '@/utils/haptics';
 import { useCompareSelection } from '@/hooks/useCompareSelection';
 import { filterEventsByDateRange } from '@/utils/recurrence';
+import { isEventInProgress } from '@/utils/eventStatus';
 import { useEffectiveNextDates, useOccurrenceExceptionsForEvents } from '@/hooks/useEffectiveNextDates';
 import { hasEffectiveDateInRange } from '@/utils/occurrences';
 import { centroidOf, isInBounds, radiusKmFromBounds, zoomForPoints } from '@/utils/geoBounds';
@@ -949,6 +950,13 @@ export default function DiscoverScreen() {
     isError: loadError,
     connectivity,
   });
+  // Entry to the live page, from rows already fetched — no extra request.
+  // The count is a cue, not a promise: the page itself applies the exact
+  // occurrence rules (skipped/moved dates) server- or client-side.
+  const liveNowCount = useMemo(
+    () => events.reduce((n, e) => (isEventInProgress(e) ? n + 1 : n), 0),
+    [events]
+  );
   const listHeader = useMemo(
     () => (
     <View style={styles.sheetHeader}>
@@ -967,12 +975,28 @@ export default function DiscoverScreen() {
           <Text style={styles.seeAllText}>See all</Text>
         </TouchableOpacity>
       </View>
+      {liveNowCount > 0 ? (
+        <TouchableOpacity
+          onPress={() => router.push('/live' as never)}
+          activeOpacity={0.8}
+          style={styles.liveStrip}
+          accessibilityRole="button"
+          accessibilityLabel={`Happening now: ${liveNowCount} ${liveNowCount === 1 ? 'event' : 'events'} live nearby`}
+          testID="live-strip"
+        >
+          <View style={styles.liveDot} />
+          <Text style={styles.liveStripText}>
+            Happening now · {liveNowCount} live nearby
+          </Text>
+          <Text style={styles.liveStripChevron}>›</Text>
+        </TouchableOpacity>
+      ) : null}
       {banners.length > 0 ? <AppBannerCarousel banners={banners} /> : null}
       <Text style={styles.sheetSummary}>{eventCountLabel}</Text>
       <FreshnessNote text={freshnessText} />
     </View>
     ),
-    [banners, eventCountLabel, freshnessText]
+    [banners, eventCountLabel, freshnessText, liveNowCount]
   );
 
   return (
@@ -1987,6 +2011,35 @@ const styles = StyleSheet.create({
   },
   // 44 px tall target on every platform (hitSlop is native-only); the
   // negative vertical margin keeps the header row height.
+  liveStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 44,
+    gap: Spacing.sm,
+    backgroundColor: Colors.errorSoft,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.error,
+  },
+  liveStripText: {
+    flex: 1,
+    fontSize: Typography.sizes.sm,
+    fontFamily: Typography.fontFamilies.semibold,
+    fontWeight: Typography.weights.semibold,
+    color: Colors.error,
+  },
+  liveStripChevron: {
+    fontSize: Typography.sizes.lg,
+    color: Colors.error,
+    marginTop: -2,
+  },
   seeAllButton: {
     minHeight: 44,
     justifyContent: 'center',

@@ -16,8 +16,16 @@
 //    live nor offered any more.
 // A8 EJ-25: a full event whose host switched the waitlist off doesn't offer
 //    a waitlist the server would refuse.
+// A9  D2: without the series-reviews migration the series section is hidden
+//     and nothing names event_id
+// A10 D2: with it, a FINISHED series' page shows its own reviews and average,
+//     and an eligible attendee's review is sent with p_event_id
+// A11 D2: an ineligible viewer is told when series reviews open
+// A12 D2: a review of THIS series shows once — not again in the venue list
+// A13 D2: a series with no reviews, for a viewer who can't review yet, shows
+//     no empty series section (the venue section already explains)
 import fs from 'node:fs';
-import { open, check, results, sleep } from './lib.mjs';
+import { open, check, results, sleep, noonUtc, isoFrom, pinClock, PINNED, clearSeededDates } from './lib.mjs';
 
 const [repo, dist, only = 'all', outDir = '/tmp/eventmap-attendee'] = process.argv.slice(2);
 const run = (k) => only === 'all' || only.split(',').includes(k);
@@ -64,16 +72,21 @@ if (run('A5')) {
 }
 
 if (run('A6')) {
-  const h = await open({ ...P });
+  // Pinned to 12:00 UTC: against the real clock the running date's UTC day
+  // (and so the header check) changed around midnight UTC.
+  const T = noonUtc();
+  const h = await open({ ...P, ...PINNED });
   // First date a week ago, 1 h before now → this week's date runs from 1 h ago to 1 h from now.
-  const id = setEvent(h, 0, { start_datetime: iso(-169), end_datetime: iso(-167), is_recurring: true,
+  const id = setEvent(h, 0, { start_datetime: isoFrom(T, -169), end_datetime: isoFrom(T, -167), is_recurring: true,
     recurrence_pattern: { frequency: 'weekly', interval: 1 }, timezone: 'UTC' }, { has_ended: false, user_rsvp: 'going' });
+  clearSeededDates(h, id);
+  await pinClock(h, T);
   await h.go(`/event/${id}`, 9000);
   const t = await h.text();
   check('A6 a running series date reads "Happening now"', /Happening now/.test(t), t.match(/[^\n]*Happening now[^\n]*/)?.[0] ?? t.slice(0, 160));
   check('A6 and its row in the dates list says so', /· happening now/.test(t), t.match(/[^\n]*happening now[^\n]*/)?.[0] ?? '');
   // The header must show the date that is running, not next week's.
-  const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const today = new Date(T).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
   const header = t.match(/[^\n]*·\s+Happening now/)?.[0] ?? '';
   check('A6 the header shows the running date, not the next one', header.includes(today), `${header} (want ${today})`);
   check('A6 no runtime errors', h.errors().length === 0, h.errors().slice(0, 2).join(' | '));
@@ -82,10 +95,15 @@ if (run('A6')) {
 }
 
 if (run('A7')) {
-  const h = await open({ ...P });
+  // Pinned to 12:00 UTC: against the real clock the count of upcoming-date
+  // chips depended on the hour the suite ran.
+  const T = noonUtc();
+  const h = await open({ ...P, ...PINNED });
   // This week's date ran from 3 h ago to 1 h ago.
-  const id = setEvent(h, 0, { start_datetime: iso(-171), end_datetime: iso(-169), is_recurring: true,
+  const id = setEvent(h, 0, { start_datetime: isoFrom(T, -171), end_datetime: isoFrom(T, -169), is_recurring: true,
     recurrence_pattern: { frequency: 'weekly', interval: 1 }, timezone: 'UTC' }, { has_ended: false, user_rsvp: null });
+  clearSeededDates(h, id);
+  await pinClock(h, T);
   await h.go(`/event/${id}`, 9000);
   const t = await h.text();
   check('A7 a series whose date finished is not "Happening now"', !/Happening now|· happening now/i.test(t),
@@ -162,6 +180,108 @@ if (run('A4')) {
   check('A4 an approval event asks to request rather than join', /request/i.test(t), t.match(/[^\n]*request[^\n]*/i)?.[0] ?? t.slice(0, 200));
   check('A4 no runtime errors', h.errors().length === 0, h.errors().slice(0, 2).join(' | '));
   await h.shot(`${outDir}/A4-approval.png`);
+  await h.close();
+}
+
+// A finished weekly series (its endDate passed) the viewer went to.
+function finishedSeries(h) {
+  return setEvent(h, 0, { start_datetime: iso(-24 * 30), end_datetime: iso(-24 * 30 + 2), is_recurring: true,
+    recurrence_pattern: { frequency: 'weekly', interval: 1, endDate: iso(-24 * 3).slice(0, 10) }, timezone: 'UTC' },
+    { has_ended: true, user_rsvp: 'going' });
+}
+
+if (run('A9')) {
+  const h = await open({ ...P });
+  const id = finishedSeries(h);
+  await h.go(`/event/${id}`, 9000);
+  const t = await h.text();
+  check('A9 no series section without the D2 migration', !/Reviews of this series/.test(t));
+  check('A9 the venue reviews still render', /Write a review|Edit your review/.test(t));
+  check('A9 no query names event_id', h.count((r) => /event_id=/.test(r.query || '') && r.path === '/rest/v1/reviews') === 0);
+  check('A9 no runtime errors', h.errors().length === 0, h.errors().slice(0, 2).join(' | '));
+  await h.close();
+}
+
+const SERIES_REVIEW = { id: '00000000-0000-4000-8000-0000000000a1', user_id: '00000000-0000-4000-8000-0000000000b1',
+  business_id: null, event_id: null, rating: 5, text: 'Every week was great', business_response: null,
+  created_at: iso(-48), updated_at: iso(-48) };
+
+function seriesOverrides(eligible, sent, { empty = false, inVenueList = false } = {}) {
+  return {
+    '/rest/v1/rpc/get_event_review_summary': () => ({ json: [{ average: empty ? 0 : 5, review_count: empty ? 0 : 1 }] }),
+    '/rest/v1/rpc/user_can_review_event': () => ({ json: eligible }),
+    '/rest/v1/rpc/submit_review': (r) => { sent.push(JSON.parse(r.body || '{}')); return { json: 'rid' }; },
+    '/rest/v1/reviews': (r, data) => {
+      const m = /event_id=eq\.([0-9a-f-]+)/.exec(r.query || '');
+      // The venue list (business_id filter): after D2 it also holds this
+      // series' reviews, which the event page must not repeat.
+      if (!m && inVenueList && /business_id=eq/.test(r.query || '') && !/user_id=eq/.test(r.query || '')) {
+        return { json: [{ ...SERIES_REVIEW, event_id: data.ev[0].id, business_id: data.biz?.id ?? null }] };
+      }
+      if (!m) return undefined;
+      if (empty) return { json: /user_id=eq/.test(r.query) ? null : [], status: /user_id=eq/.test(r.query) ? 406 : 200 };
+      // The viewer's own series review (user_id filter): none yet.
+      if (/user_id=eq/.test(r.query)) return { json: null, status: 406 };
+      return { json: [{ ...SERIES_REVIEW, event_id: m[1], business_id: data.biz?.id ?? null }] };
+    },
+  };
+}
+
+if (run('A10')) {
+  const sent = [];
+  const h = await open({ ...P, overrides: seriesOverrides(true, sent) });
+  const id = finishedSeries(h);
+  await h.go(`/event/${id}`, 9000);
+  let t = await h.text();
+  check('A10 a finished series page shows its own reviews', /Reviews of this series/.test(t), t.slice(-300));
+  check('A10 with its own list', /Every week was great/.test(t));
+  check('A10 the venue section is still there below it', /Reviews of |Venue reviews/.test(t.split('Reviews of this series')[1] || ''));
+  const opened = await h.click('Review this series', true);
+  await sleep(800);
+  await h.click('Rate 4 of 5 stars', true);
+  await sleep(300);
+  const submitted = await h.click('Submit review', true);
+  await sleep(2000);
+  const body = sent[0] || {};
+  check('A10 the review is sent as a series review', opened === 'ok' && submitted === 'ok'
+    && body.p_event_id === id && body.p_rating === 4, JSON.stringify({ opened, submitted, body }));
+  check('A10 no runtime errors', h.errors().length === 0, h.errors().slice(0, 2).join(' | '));
+  await h.shot(`${outDir}/A10-series-reviews.png`);
+  await h.close();
+}
+
+if (run('A11')) {
+  const h = await open({ ...P, overrides: seriesOverrides(false, []) });
+  const id = finishedSeries(h);
+  await h.go(`/event/${id}`, 9000);
+  const t = await h.text();
+  check('A11 an ineligible viewer is told when series reviews open',
+    /Reviews of this series open once you've attended one of its sessions/.test(t));
+  check('A11 and is not offered the series form', !/Review this series(?! open)/.test(t.replace('Reviews of this series', '')));
+  check('A11 no runtime errors', h.errors().length === 0, h.errors().slice(0, 2).join(' | '));
+  await h.close();
+}
+
+if (run('A12')) {
+  const h = await open({ ...P, overrides: seriesOverrides(true, [], { inVenueList: true }) });
+  const id = finishedSeries(h);
+  await h.go(`/event/${id}`, 9000);
+  const t = await h.text();
+  const times = (t.match(/Every week was great/g) || []).length;
+  check('A12 a review of this series appears once', times === 1, `appears ${times}×`);
+  check('A12 and in the series section', /Every week was great/.test(t.split(/Reviews of (?!this series)/)[0] || ''));
+  check('A12 no runtime errors', h.errors().length === 0, h.errors().slice(0, 2).join(' | '));
+  await h.close();
+}
+
+if (run('A13')) {
+  const h = await open({ ...P, overrides: seriesOverrides(false, [], { empty: true }) });
+  const id = finishedSeries(h);
+  await h.go(`/event/${id}`, 9000);
+  const t = await h.text();
+  check('A13 no empty series section for a viewer who cannot review yet', !/Reviews of this series/.test(t));
+  check('A13 the venue section is still there', /Reviews of |Venue reviews/.test(t));
+  check('A13 no runtime errors', h.errors().length === 0, h.errors().slice(0, 2).join(' | '));
   await h.close();
 }
 

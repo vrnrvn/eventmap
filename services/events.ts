@@ -450,7 +450,12 @@ export const eventsService = {
       }
       query = query.eq('publish_state', 'published');
       if (scope === 'upcoming') {
+        // Published only: drafts have their own scope (and tab), and without
+        // this they also ate into the row limit while every consumer —
+        // the dashboard agenda, the venue "Upcoming" stat's count below,
+        // the calendar — treats 'upcoming' as published-and-upcoming.
         query = query
+          .eq('publish_state', 'published')
           .in('status', ['active', 'postponed'])
           .or(`end_datetime.gt.${nowIso},is_recurring.eq.true`)
           .order('start_datetime', { ascending: true });

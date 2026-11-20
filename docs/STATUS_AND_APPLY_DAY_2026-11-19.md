@@ -7,6 +7,34 @@ All 17 isolated SQL suites passed with the nine-file set. Hosted databases
 were not changed. Sitting A's move commands below are historical.
 Sitting B remains staged until the client using `submit_review()` is live.
 
+**Superseded for the work below by
+[`STATUS_2026-11-20_LIVE_REVIEWS_DASHBOARD.md`](STATUS_2026-11-20_LIVE_REVIEWS_DASHBOARD.md)**
+(final regression pass, apply-day commands for the two remaining prepared
+files, file inventory).
+
+**Addendum, 2026-11-19 (evening session).** The shared local database was not
+touched (read-only inventory only: 139/`20261119130000`, no drift, security
+set present — recorded in `MIGRATIONS_PENDING.md` §0; **no hosted project
+exists**, owner decision the same day). Built since this runbook was written,
+all client-side or prepared-only, all uncommitted on branch
+`hfi/ffea3d71-7239-4d64-9f7e-4241cceea0f1/oak`:
+
+1. **C3 client cutover** — the host dashboard calls `get_host_dashboard`
+   where present, N-call fallback otherwise (`hooks/useHostDashboard.ts`).
+2. **D2 step 2 client** — reviews submit through `submit_review()`;
+   venue reads/deletes are D2-proof (`services/reviews.ts`).
+3. **D2 step 4 UI, dormant** — the series-reviews section ships hidden and
+   turns on when `20261119110000` is applied (see the series-reviews README's
+   "Client progress"). **Apply-day caveat:** sibling worktrees at `a5ba608`
+   still submit via the old upsert — rebase/merge them past item 2 before
+   applying `20261119110000` to the shared DB, or their review saves break.
+4. **Phase 3, live events** — page + Discover strip shipped on a fallback;
+   `supabase/prepared/2026-11-20_live_events/` (validated, 18/18 suites,
+   parity fixture) upgrades it to one request when applied.
+5. **Clock-pinned browser scenarios** — A6/A7, V12, K12 no longer depend on
+   the hour the suite runs (`docs/TIME_HARNESS.md`, "Pinned clock").
+6. Drafts no longer leak into `getBusinessEvents(scope: 'upcoming')`.
+
 The single document to read before applying anything. It records what is
 finished, what is half-finished and why, what was never started, and exactly
 how to apply the ten prepared migrations.

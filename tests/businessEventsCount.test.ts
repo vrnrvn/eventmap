@@ -46,6 +46,12 @@ vi.mock('@/services/supabase', () => {
       record.filters.push(['limit', n]);
       return q;
     };
+    q.or = (expr: string) => {
+      record.filters.push(['or', expr]);
+      return q;
+    };
+    q.order = () => q;
+    q.range = () => q;
     // Head queries resolve to a count; row queries to the series rows.
     q.then = (resolve: (v: unknown) => unknown) =>
       Promise.resolve(
@@ -83,6 +89,17 @@ beforeEach(() => {
   state.countError = null;
   state.seriesRows = [];
   state.seriesError = null;
+});
+
+describe("getBusinessEvents scope 'upcoming'", () => {
+  it('lists published rows only, mirroring the count and the dashboard agenda', async () => {
+    state.seriesRows = [];
+    await eventsService.getBusinessEvents('biz-1', { scope: 'upcoming' });
+
+    const filters = state.queries[0].filters;
+    expect(filters).toContainEqual(['eq:publish_state', 'published']);
+    expect(filters).toContainEqual(['in:status', ['active', 'postponed']]);
+  });
 });
 
 describe("getBusinessEventsCount scope 'upcoming'", () => {

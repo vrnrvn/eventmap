@@ -21,6 +21,8 @@
 //     keyboard walk, Escape closing both overlays, focus moving into them
 // H14 C6 web: 1280 px wide and 640 px (200 % zoom of 1280) reflow
 // H15 C6 web: large text (every font size scaled 1.3× and 1.6×)
+// H16 C3: with get_host_dashboard deployed, the same screen from ONE request
+//     (agenda, per-date counts, "Needs you") and none of the N-call path
 //
 // Pass AXE=node_modules/axe-core/axe.min.js to enable the axe pass.
 //
@@ -624,6 +626,58 @@ if (run('H15')) { // Large text at 1.3× and 1.6× (lib.mjs scaleText — see it
     await shot(h, `H15-schedule-x${String(scale).replace('.', '_')}`);
     await h.close();
   }
+}
+
+if (run('H16')) { // C3: one request where get_host_dashboard is deployed
+  // Requests only surface for approval-mode events (as in H6).
+  const state = defaultState({
+    events: (data) => dashboardRows(data.biz.id).map((e) => (e.id === ONEOFF_ID ? { ...e, rsvp_mode: 'approval' } : e)),
+    overviews: { [ONEOFF_ID]: { requested: 4, open_reports: 0 } },
+  });
+  const rpcCalls = [];
+  const overrides = {
+    ...dashboardOverrides(state),
+    '/rest/v1/rpc/get_host_dashboard': (r, data) => {
+      rpcCalls.push(JSON.parse(r.body || '{}'));
+      const events = state.events(data);
+      return {
+        json: {
+          events, drafts: state.drafts || [],
+          counts: { [SERIES_ID]: { going: 40, waitlist: 0 }, [ONEOFF_ID]: { going: 112, waitlist: 4 } },
+          exceptions: state.exceptions,
+          overviews: Object.fromEntries(Object.entries(state.overviews).map(([id, o]) =>
+            [id, { requested: o.requested, waitlist: 0, chat: { open_reports: o.open_reports } }])),
+          date_going: { [SERIES_ID]: { [keyAt(utcMidnight + DAY)]: 28 } },
+          inspected: events.length, eligible: events.length, truncated: false,
+        },
+      };
+    },
+  };
+  const h = await open({ ...P, dataOpts: { business: true }, viewport: [390, 844], overrides });
+  await h.go('/hosting', 9000);
+  await sleep(1500);
+  const t = await h.text();
+  check('H16 agenda renders from the one request', /Spring market/.test(t) && /112 \/ 150 going · 4 waiting/.test(t));
+  check('H16 skipped and moved dates kept', /Skipped/.test(t) && /Studio closed/.test(t) && /Moved/.test(t));
+  check('H16 per-date count from the RPC', /28 going(?! to the series)/.test(t));
+  check('H16 "Needs you" from the RPC overviews', /4 requests waiting/.test(t), (t.match(/[^\n]*request[^\n]*/) || [''])[0]);
+  const requests = {
+    rpc: rpcCalls.length,
+    events: h.count((r) => r.method === 'GET' && r.path === '/rest/v1/events' && /business_id=eq/.test(r.query)),
+    counts: h.count('POST rpc/get_host_events_counts'),
+    exceptions: h.count((r) => r.path === '/rest/v1/event_occurrence_exceptions'),
+    perDate: h.count('POST rpc/get_occurrence_going_counts'),
+    overviews: state.overviewCalls.length,
+  };
+  check('H16 one get_host_dashboard request and nothing from the N-call path',
+    requests.rpc === 1 && requests.events === 0 && requests.counts === 0 && requests.exceptions === 0
+      && requests.perDate === 0 && requests.overviews === 0, JSON.stringify(requests));
+  const win = rpcCalls[0] || {};
+  const from = Date.parse(win.p_from), to = Date.parse(win.p_to);
+  check('H16 window starts at local midnight and spans the agenda week',
+    Number.isFinite(from) && from <= now && now - from < DAY && Math.round((to - from) / DAY) === 7, JSON.stringify(win));
+  check('H16 no runtime errors', h.errors().length === 0, h.errors().slice(0, 2).join(' || '));
+  await h.close();
 }
 
 const failed = results.filter((r) => !r.ok);

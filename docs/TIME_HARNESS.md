@@ -88,3 +88,28 @@ the fixtures' dates.
   called directly).
 - A server that genuinely lives through time — that is the LD_PRELOAD /
   container-clock spike, deliberately deferred.
+
+## Pinned clock for time-of-day-sensitive scenarios (2026-11-19)
+
+Scenarios whose fixtures sit a few hours from the real "now" used to pass or
+fail by the hour they ran: Attendee A6/A7 (UTC date change), Rehearsal V12
+(after 21:00 UTC) and Collections K12 (late local evening, calendar day). They
+now pin the page clock to a fixed time of day and date their fixtures from the
+same instant — `lib.mjs`: `noonUtc()` / `noonLocal()`, `isoFrom(t, h)`,
+`PINNED` (clock + a 90-day session), `pinClock(h, t)` before loading the page
+under test. Use this for any new scenario that places events within hours of
+now.
+
+`PIN_DATE=YYYY-MM-DD` moves the pinned day, to prove a scenario no longer
+depends on when it runs. Verified 2026-11-19: A6/A7/V12/K12 pass on today,
+2026-11-30, 2026-12-31, 2026-11-01 and 2027-03-14 (US DST changes, month and
+year ends); full suites Attendee 39/39, Rehearsal 108/108, Collections 168/168.
+
+**Seeded dates (2026-11-20).** Pinning the page clock was not enough on its
+own: the fake's `makeData` gives `ev[0]` a cancelled date, a moved date and a
+per-date RSVP dated from the REAL clock. A pinned scenario that re-dates
+`ev[0]` as a series inherited them, so at some real hours the "cancelled"
+date landed on a pinned session (A7 failed at 01:56 UTC with 4 dates instead
+of 5). `clearSeededDates(h, eventId)` in `lib.mjs` drops them; A6, A7, V12 and
+the accessibility scenario N call it. Use it in any pinned scenario that
+re-dates an event as a series.

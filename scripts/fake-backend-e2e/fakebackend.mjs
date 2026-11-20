@@ -186,6 +186,17 @@ export function makeRouter(data, { unknown = [], overrides = {} } = {}) {
       case 'rpc/get_user_upcoming_events': case 'rpc/get_user_past_events': return { json: data.ranked.slice(0, 5) };
       case 'follows': return r.method === 'HEAD' ? counted([], 42, r) : { json: data.follows };
       case 'reviews': return { json: [] };
+      // D2 step 2: the app submits reviews through this RPC (services/reviews.ts).
+      case 'rpc/submit_review': data.reviewsSubmitted = (data.reviewsSubmitted || []).concat(body(r));
+        return { json: '00000000-0000-4000-8000-000000000001' };
+      // Live page RPC (prepared, 2026-11-20_live_events) not applied by
+      // default, like the local DB: the client's ranked+exceptions fallback
+      // is the path suites exercise unless they override this.
+      case 'rpc/get_live_events': return { status: 404, json: { code: 'PGRST202', message: 'not found' } };
+      // D2 step 3 not applied by default (matches the local DB): the series
+      // reviews section must stay hidden. Suites override these to enable it.
+      case 'rpc/get_event_review_summary': case 'rpc/user_can_review_event':
+        return { status: 404, json: { code: 'PGRST202', message: 'not found' } };
       case 'saves': case 'rsvps': return r.method === 'GET' ? one(null, r) : { json: [] };
       case 'rpc/get_event_chat_post_status': return { json: [{ can_read: true, can_post: true, is_banned: false, is_blocked: false,
         is_host: false, is_admin: false, muted: false, locked: false, slow_mode_seconds: data.slowMode ?? 0, block_expires_at: null,
@@ -231,6 +242,9 @@ export function makeRouter(data, { unknown = [], overrides = {} } = {}) {
           is_private: p.is_private, status: b.p_status || 'going', joined_at: iso(-i), reason: null, chat_blocked: false }));
         return { json: { total: data.people.length, items, has_more: off + lim < data.people.length } }; }
       case 'rpc/get_event_host_overview': return { status: 404, json: { code: 'PGRST202', message: 'not found' } };
+      // C3 not deployed by default, so suites keep exercising the N-call path;
+      // suiteHostDashboard overrides this to test the one-request path.
+      case 'rpc/get_host_dashboard': return { status: 404, json: { code: 'PGRST202', message: 'not found' } };
       case 'rpc/get_user_calendar': { const b = body(r); const srcs = b.p_sources || [];
         if (srcs.some((x) => !['going', 'requested', 'interested', 'saved', 'hosting', 'collections'].includes(x))) return { status: 400, json: { code: 'P0001', message: 'invalid_source' } };
         const rows = new Map();

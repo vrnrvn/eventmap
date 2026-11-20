@@ -16,6 +16,8 @@ import { eventsService } from './events';
 import type { EventDetails, RsvpMode, RsvpStatus, WaitlistMode } from '@/types/database';
 import {
   isMissingDbFunction,
+  isRpcKnownMissing,
+  markRpcMissing,
 } from '@/utils/rpcErrors';
 
 // Re-exported from the pure module so existing importers keep working;
@@ -270,6 +272,27 @@ export const hostToolsService = {
    * call (My Events rows). Falls back to the public `event_rsvp_counts`
    * table (going + interested only) while the RPC is missing.
    */
+  /**
+   * The whole host dashboard in one request (C3, `get_host_dashboard`).
+   * Resolves `null` where the function is not deployed, so the caller keeps
+   * the N-call path; the miss is remembered for the session. Other errors
+   * throw, exactly like the N-call path's required requests.
+   */
+  async getHostDashboard(businessId: string, window: { from: Date; to: Date }): Promise<unknown | null> {
+    if (isRpcKnownMissing('get_host_dashboard')) return null;
+    const { data, error } = await supabase.rpc('get_host_dashboard', {
+      p_business_id: businessId,
+      p_from: window.from.toISOString(),
+      p_to: window.to.toISOString(),
+    });
+    if (!error) return data;
+    if (isMissingDbFunction(error)) {
+      markRpcMissing('get_host_dashboard');
+      return null;
+    }
+    throw error;
+  },
+
   async getEventsCounts(eventIds: string[]): Promise<Map<string, HostEventCounts>> {
     const out = new Map<string, HostEventCounts>();
     if (eventIds.length === 0) return out;

@@ -13,7 +13,7 @@
 // covered here — see docs/ISSUES.md "Next step — testing passes".
 import fs from 'node:fs';
 import path from 'node:path';
-import { open, check, results, scaleText, layoutFacts, sleep } from './lib.mjs';
+import { open, check, results, scaleText, layoutFacts, sleep, noonUtc, isoFrom, pinClock, PINNED, clearSeededDates } from './lib.mjs';
 
 const [repo, dist, only, axePath, outDir = '/tmp/eventmap-a11y'] = process.argv.slice(2);
 const P = { repo, dist };
@@ -280,6 +280,63 @@ if (run('T')) {
     check(`T@${factor} no uncaught exceptions`, h.errors().length === 0, h.errors().slice(0, 2).join(' | '));
     await h.close();
   }
+}
+
+// --- N: surfaces added 2026-11-19 (live page, series reviews) -------------
+// Pinned clock (lib.mjs) so the live page has live AND soon rows whatever
+// hour this runs; series reviews switched on through RPC overrides (the
+// prepared D2 file is not applied on the fake, matching the local DB).
+if (run('N')) {
+  const T = noonUtc();
+  const redate = (h, i, startH, endH, extra = {}) => {
+    const patch = { start_datetime: isoFrom(T, startH), end_datetime: isoFrom(T, endH), is_recurring: false, recurrence_pattern: null, timezone: 'UTC', ...extra };
+    Object.assign(h.data.ev[i], patch);
+    const r = h.data.ranked.find((x) => x.id === h.data.ev[i].id);
+    if (r) Object.assign(r, patch, { has_ended: false });
+    clearSeededDates(h, h.data.ev[i].id);
+  };
+  // Live page, populated.
+  const h = await open({ ...P, ...PINNED, viewport: [390, 844] });
+  redate(h, 0, -1, 1, { title: 'Street food market' });
+  redate(h, 1, -1, 2, { title: 'Morning yoga' });
+  redate(h, 2, 0.5, 2.5, { title: 'Pub quiz' });
+  await pinClock(h, T);
+  await screenPass(h, 'live', '/live', 9000);
+  await h.close();
+
+  // Live page, empty state.
+  const he = await open({ ...P, ...PINNED, viewport: [390, 844] });
+  [0, 1, 2, 3].forEach((i) => redate(he, i, 100, 102));
+  await pinClock(he, T);
+  await screenPass(he, 'live-empty', '/live', 9000);
+  await he.close();
+
+  // Finished series with series reviews on: section, button, list, venue list.
+  const review = { id: '00000000-0000-4000-8000-0000000000a1', user_id: '00000000-0000-4000-8000-0000000000b1',
+    rating: 5, text: 'Every week was great', business_response: null, created_at: isoFrom(T, -48), updated_at: isoFrom(T, -48) };
+  const hs = await open({ ...P, viewport: [390, 844], overrides: {
+    '/rest/v1/rpc/get_event_review_summary': () => ({ json: [{ average: 5, review_count: 1 }] }),
+    '/rest/v1/rpc/user_can_review_event': () => ({ json: true }),
+    '/rest/v1/reviews': (r, data) => {
+      const m = /event_id=eq\.([0-9a-f-]+)/.exec(r.query || '');
+      if (!m) return undefined;
+      if (/user_id=eq/.test(r.query)) return { json: null, status: 406 };
+      return { json: [{ ...review, event_id: m[1], business_id: data.biz?.id ?? null }] };
+    },
+  } });
+  Object.assign(hs.data.ev[0], { start_datetime: new Date(Date.now() - 30 * 864e5).toISOString(),
+    end_datetime: new Date(Date.now() - 30 * 864e5 + 2 * 36e5).toISOString(), is_recurring: true,
+    recurrence_pattern: { frequency: 'weekly', interval: 1, endDate: new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10) }, timezone: 'UTC' });
+  Object.assign(hs.data.ranked.find((x) => x.id === hs.data.ev[0].id), hs.data.ev[0], { has_ended: true, user_rsvp: 'going' });
+  clearSeededDates(hs, hs.data.ev[0].id);
+  await screenPass(hs, 'series-reviews', `/event/${EV(hs)}`, 9000);
+  const txt = await hs.text();
+  check('N series-reviews the section rendered for this pass', /Reviews of this series/.test(txt));
+  // INSPECT lists only headings inside the viewport; the section is below
+  // the fold, so ask the DOM directly.
+  const heading = await hs.eval(`[...document.querySelectorAll('[role=heading]')].some((e) => /Reviews of this series/.test(e.innerText))`);
+  check('N series-reviews section title is a heading', heading === true);
+  await hs.close();
 }
 
 fs.writeFileSync(path.join(outDir, 'a11y-report.json'), JSON.stringify({ results, ...report }, null, 2));
